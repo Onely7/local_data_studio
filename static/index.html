@@ -1,0 +1,283 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Data Viewer</title>
+    <link rel="stylesheet" href="styles.css" />
+  </head>
+  <body>
+    <div class="app">
+      <header class="topbar">
+        <div class="brand">
+          <div class="logo">DS</div>
+          <div>
+            <div class="title">Data Studio</div>
+            <div class="subtitle">
+              Fast Exploration for JSONL, Parquet, CSV, TSV
+            </div>
+          </div>
+        </div>
+        <div class="top-actions">
+          <div class="file-pill" id="current-file">No file selected</div>
+          <button class="ghost" id="refresh-files">Refresh</button>
+        </div>
+      </header>
+
+      <div class="layout">
+        <aside class="sidebar">
+          <div class="panel-title">Datasets</div>
+          <div class="dataset-search">
+            <input
+              id="dataset-search"
+              type="text"
+              placeholder="Search datasets"
+            />
+          </div>
+          <div class="empty dataset-empty" id="dataset-empty">
+            No datasets match.
+          </div>
+          <div class="files" id="file-list"></div>
+          <div class="drop-hint" id="drop-hint">Drop files here to upload.</div>
+          <div class="empty" id="file-empty">
+            Drop files into <code>./data</code> and refresh.
+          </div>
+        </aside>
+
+        <main class="main">
+          <div class="toolbar">
+            <div class="toolbar-group">
+              <input
+                id="search-input"
+                type="text"
+                placeholder="Search dataset"
+              />
+              <button id="search-btn">Search</button>
+              <button class="ghost" id="clear-search">Reset</button>
+            </div>
+            <div class="toolbar-group">
+              <label for="page-size">Rows</label>
+              <select id="page-size">
+                <option value="50">50</option>
+                <option value="100" selected>100</option>
+                <option value="200">200</option>
+                <option value="500">500</option>
+              </select>
+              <div class="pagination">
+                <button class="ghost" id="prev-page">Prev</button>
+                <span id="page-info">-</span>
+                <button class="ghost" id="next-page">Next</button>
+              </div>
+            </div>
+          </div>
+
+          <div class="table-card">
+            <div class="table-header">
+              <div id="view-label">Preview</div>
+              <div class="meta" id="dataset-meta"></div>
+            </div>
+            <div class="table-wrap">
+              <table id="data-table">
+                <thead></thead>
+                <tbody></tbody>
+              </table>
+            </div>
+          </div>
+        </main>
+
+        <aside class="inspector">
+          <section class="panel">
+            <h3>SQL Console</h3>
+            <div class="nl-query">
+              <textarea
+                id="nl-input"
+                placeholder="Ask AI to help write your query..."
+                rows="2"
+              ></textarea>
+              <button
+                class="nl-send"
+                id="nl-generate"
+                aria-label="Generate SQL"
+              >
+                ↑
+              </button>
+            </div>
+            <div class="muted" id="nl-status"></div>
+            <textarea id="sql-input" spellcheck="false">
+SELECT * FROM data LIMIT 100</textarea
+            >
+            <div class="hint">
+              DuckDB SQL. Use table name <code>data</code>.
+            </div>
+            <div class="panel-actions">
+              <button id="run-query">Run Query</button>
+              <button class="ghost" id="reset-view">Back to Data</button>
+            </div>
+          </section>
+
+          <section class="panel">
+            <h3>Exploratory Data Analysis</h3>
+            <div class="eda-actions">
+              <button class="ghost" id="count-rows">Count Rows</button>
+              <button id="run-eda">Run EDA</button>
+            </div>
+            <div class="muted" id="row-count"></div>
+            <div class="eda-settings">
+              <label for="eda-sample">EDA rows</label>
+              <input
+                id="eda-sample"
+                type="number"
+                min="100"
+                max="10000000"
+                step="100"
+                value="100000"
+              />
+            </div>
+            <div class="hint">
+              EDA Report is cached under <code>./cache</code>.
+            </div>
+            <div class="muted" id="eda-status"></div>
+            <a
+              id="eda-link"
+              class="eda-link"
+              target="_blank"
+              rel="noreferrer"
+            ></a>
+          </section>
+
+          <section class="panel">
+            <h3>Row Inspector</h3>
+            <div class="row-inspector-wrap">
+              <div class="row-inspector-actions">
+                <button class="copy-btn" id="copy-row" type="button">
+                  Copy
+                </button>
+                <button class="delete-btn" id="delete-row" type="button">
+                  Delete
+                </button>
+              </div>
+              <pre id="row-inspector" class="row-inspector">
+Select a row to inspect</pre
+              >
+            </div>
+          </section>
+        </aside>
+      </div>
+    </div>
+
+    <div class="bg-shape one"></div>
+    <div class="bg-shape two"></div>
+    <div class="bg-shape three"></div>
+
+    <div class="image-overlay" id="image-overlay">
+      <div class="overlay-card">
+        <button
+          class="overlay-close"
+          id="overlay-close"
+          aria-label="Close image"
+        >
+          &times;
+        </button>
+        <div class="overlay-content">
+          <div class="overlay-image">
+            <img id="overlay-image" alt="Expanded preview" />
+          </div>
+          <div class="overlay-meta">
+            <div class="overlay-title" id="overlay-title">Row</div>
+            <div class="overlay-fields" id="overlay-fields"></div>
+          </div>
+        </div>
+        <div class="overlay-nav" id="overlay-nav">
+          <button
+            class="overlay-nav-btn"
+            id="overlay-prev"
+            aria-label="Previous image"
+          >
+            ←
+          </button>
+          <div class="overlay-index" id="overlay-index"></div>
+          <button
+            class="overlay-nav-btn"
+            id="overlay-next"
+            aria-label="Next image"
+          >
+            →
+          </button>
+        </div>
+      </div>
+    </div>
+
+    <div class="json-overlay" id="json-overlay">
+      <div class="json-card">
+        <div class="json-header">
+          <div class="json-title" id="json-title">JSON View</div>
+          <button class="json-close" id="json-close" aria-label="Close JSON">
+            &times;
+          </button>
+        </div>
+        <div class="json-body-wrap">
+          <button class="copy-btn copy-btn--light" id="copy-json" type="button">
+            Copy
+          </button>
+          <pre class="json-body" id="json-body"></pre>
+        </div>
+      </div>
+    </div>
+
+    <div class="confirm-overlay" id="delete-overlay">
+      <div class="confirm-card">
+        <div class="confirm-title">Delete row?</div>
+        <div class="confirm-message" id="delete-message"></div>
+        <div class="confirm-actions">
+          <button class="confirm-btn" id="delete-cancel" type="button">
+            Cancel
+          </button>
+          <button class="confirm-btn" id="delete-soft" type="button">
+            Hide only
+          </button>
+          <button
+            class="confirm-btn confirm-btn--danger"
+            id="delete-hard"
+            type="button"
+          >
+            Delete from file
+          </button>
+        </div>
+      </div>
+    </div>
+
+    <div class="confirm-overlay" id="column-delete-overlay">
+      <div class="confirm-card">
+        <div class="confirm-title">Delete column?</div>
+        <div class="confirm-message" id="column-delete-message"></div>
+        <div class="confirm-actions">
+          <button class="confirm-btn" id="column-delete-cancel" type="button">
+            Cancel
+          </button>
+          <button class="confirm-btn" id="column-delete-soft" type="button">
+            Hide only
+          </button>
+          <button
+            class="confirm-btn confirm-btn--danger"
+            id="column-delete-hard"
+            type="button"
+          >
+            Delete from file
+          </button>
+        </div>
+      </div>
+    </div>
+
+    <div class="confirm-overlay" id="error-overlay">
+      <div class="confirm-card">
+        <div class="confirm-title">Error</div>
+        <div class="confirm-message" id="error-message"></div>
+        <div class="confirm-actions">
+          <button class="confirm-btn" id="error-ok" type="button">OK</button>
+        </div>
+      </div>
+    </div>
+
+    <script src="app.js"></script>
+  </body>
+</html>

@@ -1,0 +1,80 @@
+[project]
+name = "data-viewer"
+version = "0.0.1"
+description = "Local web viewer for jsonl/json/csv/tsv/parquet files"
+requires-python = ">=3.11,<3.12"
+dependencies = [
+  "fastapi>=0.115.0",
+  "uvicorn>=0.30.6",
+  "pydantic<2.0",
+  "duckdb==1.0.0",
+  "zarque-profiling",
+  "pandas",
+  "python-dotenv",
+  "python-multipart",
+  "scipy>=1.7.0",
+  "pyarrow>=22.0.0",
+  "matplotlib<3.8",
+]
+
+[tool.uv]
+package = false
+
+[dependency-groups]
+dev = [
+  "pre-commit",
+  "ruff",
+  "pyrefly",
+]
+
+[tool.ruff]
+exclude = [".git", ".ruff_cache", ".venv", "third_party"]
+line-length = 160
+target-version = "py311"
+
+[tool.ruff.lint]
+fixable = ["ALL"]
+unfixable = []
+select = [
+    "A",   # flake8-builtin
+    "B",   # flake8-bugbear
+    "E",   # pycodestyle error
+    "F",   # Pyflakes
+    "I",   # isort
+    "N",   # pep8-naming
+    "W",   # pycodestyle warning
+    "PL",  # Pylint
+    "UP",  # pyupgrade
+]
+ignore = [
+    "B905",     # Zip-without-explicit-strict
+    "E501",     # Line too long, handled by black
+    "F401",     # module imported but unused
+    "F403",     # Unable to detect undefined names
+    "N812",     # Lowercase imported as non-lowercase
+    "N999",     # Invalid module name
+    "UP035",    # Checks for uses of deprecated imports based on the minimum supported Python version.
+    "PLR0912",  # Too many branches
+    "PLR0913",  # Too many arguments in function definition
+    "PLR0915",  # Too many statements in function
+    "PLR2004",  # Magic value used in comparison
+]
+
+[tool.ruff.lint.pyupgrade]
+keep-runtime-typing = true  # Settings for Python 3.8 compatibility
+
+[tool.ruff.format]
+quote-style = "double"
+line-ending = "auto"
+
+# Pyrefly header
+[tool.pyrefly]
+#### configuring what to type check and where to import from
+project-includes = ["app.py", "server"]
+# project-excludes = [""]
+search-path = ["."]
+site-package-path = [".venv/lib/python3.11/site-packages"]
+#### configuring your python environment
+python-platform = "linux"
+python-version = "3.11"
+# python-interpreter-path = ".venv/bin/python3"
