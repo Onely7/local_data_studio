@@ -86,6 +86,7 @@ const elements = {
   imageOverlay: document.getElementById("image-overlay"),
   overlayClose: document.getElementById("overlay-close"),
   overlayImage: document.getElementById("overlay-image"),
+  overlayImageLabel: document.getElementById("overlay-image-label"),
   overlayTitle: document.getElementById("overlay-title"),
   overlayFields: document.getElementById("overlay-fields"),
   overlayNav: document.getElementById("overlay-nav"),
@@ -472,16 +473,24 @@ function imageCandidateMatchesUrl(candidate, url) {
   return candidate.src === url || candidate.fallbackSrc === url;
 }
 
+function columnNameAt(index) {
+  return state.columns[index] || "";
+}
+
 function collectRowImageCandidates(row) {
   const candidates = [];
-  row.forEach((value) => {
+  row.forEach((value, columnIndex) => {
     const images = extractImageCandidates(value);
     images.forEach((candidate) => {
       if (
         candidates.length < MAX_IMAGE_CANDIDATES &&
         !candidates.some((item) => sameImageCandidate(item, candidate))
       ) {
-        candidates.push(candidate);
+        candidates.push({
+          ...candidate,
+          columnIndex,
+          columnName: columnNameAt(columnIndex),
+        });
       }
     });
   });
@@ -1198,6 +1207,15 @@ function updateOverlayImage() {
   state.overlayImageIndex = currentIndex;
   const candidate = total ? state.overlayImages[currentIndex] : null;
   const url = candidate ? candidate.src : "";
+  const columnName =
+    candidate?.columnName ||
+    (Number.isFinite(state.overlayColumnIndex)
+      ? columnNameAt(state.overlayColumnIndex)
+      : "");
+  if (elements.overlayImageLabel) {
+    elements.overlayImageLabel.textContent = columnName || "";
+    elements.overlayImageLabel.hidden = !columnName;
+  }
   elements.overlayImage.dataset.fallbackUsed = "0";
   elements.overlayImage.onerror = () => {
     if (
@@ -1253,7 +1271,13 @@ function openImageOverlay(rowIndex, imageUrl, imageColumnIndex) {
   state.overlayImages = imageList.length
     ? imageList
     : normalizedImage
-      ? [imageCandidate(normalizedImage, normalizedImage)]
+      ? [
+          {
+            ...imageCandidate(normalizedImage, normalizedImage),
+            columnIndex: hasImageColumn ? imageColumnIndex : null,
+            columnName: hasImageColumn ? columnNameAt(imageColumnIndex) : "",
+          },
+        ]
       : [];
   state.overlayImageIndex = imageIndex;
   state.overlayImageUrl = normalizedImage;
@@ -1276,6 +1300,10 @@ function closeImageOverlay() {
   delete elements.overlayImage.dataset.fallbackUsed;
   elements.overlayImage.removeAttribute("src");
   elements.overlayFields.innerHTML = "";
+  if (elements.overlayImageLabel) {
+    elements.overlayImageLabel.textContent = "";
+    elements.overlayImageLabel.hidden = true;
+  }
   if (elements.overlayNav) {
     elements.overlayNav.classList.remove("active");
   }
