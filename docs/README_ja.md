@@ -16,11 +16,12 @@ Local Data Studio は、Huggingface Datasets の [Data Studio](https://huggingfa
 
 ## 主な特徴
 
-- 大規模データに対応した高速プレビューとページング
-- DuckDB SQL コンソール（読み取り専用）
-- EDA レポート生成（`./cache` にキャッシュ）
+- 大規模データに対応した bounded preview とカーソル形式ページング
+- タイムアウト・メモリ制限・大規模スキャン警告を備えた DuckDB SQL コンソール（読み取り専用）
+- データセット全体または SQL クエリ結果を対象にした EDA レポート生成（`./cache` にキャッシュ）
 - Row Inspector（コピー、削除、ハイライト）
-- 画像拡大・複数画像のナビゲーション
+- URL、ローカルパス、`{bytes, path}` 形式の画像辞書からの画像レンダリング
+- 画像拡大・行内の複数画像ナビゲーション
 - ドラッグ&ドロップでアップロード可能
 - セッション内の非表示/削除
 
@@ -116,15 +117,15 @@ INFO:     Application startup complete.
 
 3. **SQL コンソール**  
    DuckDB SQL で `data` テーブルに対してクエリを実行できます。  
-   また、LLM を用いた自然言語による指示から SQL の変換をサポートしています。
+   また、LLM を用いた自然言語による指示から SQL の変換をサポートしています。SQL は単一の `SELECT`/CTE に制限され、タイムアウト、メモリ制限、大規模データセット向けのスキャンリスク検知が適用されます。
 
 4. **EDA レポート**  
-   Run EDA を実行するとレポートが生成され、キャッシュされます。  
-   レポートは {ファイル名, サンプル数, `EDA_PROFILE_MODE`} に基づいて `./cache` にキャッシュされます。  
+   Run EDA を実行するとデータセットのサンプルを対象にしたレポートが生成され、キャッシュされます。**Run EDA on Query Results** を使うと、SQL Console の現在のクエリ結果を対象にした EDA レポートを生成できます。  
+   データセット全体のレポートは {ファイル fingerprint, サンプル数, `EDA_PROFILE_MODE`} に基づいてキャッシュされます。クエリ結果のレポートは {ファイル fingerprint, SQL, サンプル数, `EDA_PROFILE_MODE`} に基づいて別キャッシュされます。  
    `EDA_ROW_LIMIT` と UI 側の設定でサンプル数を調整できます。
 
 5. **Row Inspector / 画像拡大**  
-   行をクリックすると詳細パネルで展開されます。画像列はクリックで拡大表示できます。  
+   行をクリックすると詳細パネルで展開されます。長い値はデフォルトで省略表示され、Raw で完全表示に切り替えられます。画像列はクリックで拡大表示できます。画像候補は画像 URL、相対/絶対画像パス、`{ "bytes": ..., "path": ... }` のような辞書から検出され、bytes を優先して表示し、失敗した場合は path を fallback として使用します。  
    <img src="../images/local_data_studio_02.png" alt="local data studio 01" width=60%>
 
 ## 注意点
@@ -132,10 +133,18 @@ INFO:     Application startup complete.
 - サポートしているデータフォーマット: `.jsonl`, `.json`, `.csv`, `.tsv`, `.parquet`.
 - 大規模データでは検索・EDA の実行に時間がかかることがあります。
 - 非常に大きなデータセットでは、対応形式のプレビューに大きな `OFFSET` ではなくカーソル形式の `page_token` を使用します。行数カウント、全体検索、サンプル統計、EDA は進捗確認とキャンセルが可能なバックグラウンドジョブとして実行されます。
-- キャッシュは `./cache/metadata`, `./cache/index`, `./cache/stats` に分離され、ファイルパス・サイズ・更新時刻に基づいて無効化されます。
+- キャッシュは `./cache/metadata`, `./cache/index`, `./cache/stats`, `./cache/count`, `./cache/search` および EDA レポートファイルに分離され、該当するものはファイルパス・サイズ・更新時刻に基づいて無効化されます。
+- `Run EDA on Query Results` では、`rn` や `__rowid` のような補助カラムはレポートから除外されます。
 - TB 級の `.json` 配列は推奨しません。高速な閲覧には JSONL または Parquet を推奨します。
 - `Delete from file` は実ファイルを書き換えるため、必要に応じてバックアップを推奨します。
 - `ALLOW_DELETE_DATA=false` の場合は、セッション内の非表示のみ可能です。（実ファイルは書き換わらない）
+
+## 実装メモ
+
+- 形式別 reader は `server/readers.py` にあります。JSONL/CSV/TSV のプレビューは byte/page token ベースの bounded read と sparse line index を使い、Parquet は row group 全体を読み込まずに必要な batch だけを読みます。
+- SQL 実行は `server/sql.py` に集約され、読み取り専用 SQL の検証、DuckDB リソース制限、バックグラウンドジョブの協調キャンセルを扱います。
+- EDA レポートの orchestration は `server/eda_reports.py`、profiling 設定と DataFrame sanitization は `server/eda.py` に分離されています。
+- バックグラウンドジョブは `server/jobs.py` で管理され、`/api/jobs/*` 経由で進捗、キャンセル、結果、エラー状態を確認できます。
 
 ## Contribution
 

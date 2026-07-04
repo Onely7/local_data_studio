@@ -79,7 +79,7 @@ class ApiJobTests(TestCase):
             report_columns.extend(df.columns)
             return FakeReport()
 
-        with patch("app.build_eda_report", side_effect=fake_build_report):
+        with patch("server.eda_reports.build_eda_report", side_effect=fake_build_report):
             started = asyncio.run(
                 start_eda_query_job(
                     EdaQueryRequest(

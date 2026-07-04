@@ -16,11 +16,12 @@ It provides fast preview, DuckDB SQL execution (with optional LLM-assisted SQL g
 
 ## Key Features
 
-- Fast preview and paging for large-scale datasets
-- DuckDB SQL console (read-only)
-- EDA report generation (cached under `./cache`)
+- Fast bounded preview and cursor-style paging for large-scale datasets
+- DuckDB SQL console (read-only) with timeout, memory, and large-scan guards
+- EDA report generation for the whole dataset or SQL query results (cached under `./cache`)
 - Row Inspector (copy, delete, highlight)
-- Image zoom and multi-image navigation
+- Image rendering from URLs, local paths, and `{bytes, path}` image dictionaries
+- Image zoom and row-level multi-image navigation
 - Drag & drop upload support
 - Hide/delete within the current session
 
@@ -117,15 +118,15 @@ Open [http://127.0.0.1:8000](http://127.0.0.1:8000) to view the Local Data Studi
 
 3. **SQL Console**
    Run DuckDB SQL queries against the `data` table.  
-   It also supports converting natural-language instructions into SQL using an LLM.
+   It also supports converting natural-language instructions into SQL using an LLM. SQL execution is limited to a single `SELECT`/CTE statement and runs with timeout, memory, and large-dataset scan-risk guards.
 
 4. **EDA Report**
-   Run EDA to generate and cache a report.  
-   Reports are cached under `./cache` based on {file name, number of samples, `EDA_PROFILE_MODE`}.  
+   Run EDA to generate and cache a report for the dataset sample. Use **Run EDA on Query Results** to profile the current SQL Console query results instead.  
+   Dataset reports are cached under `./cache` based on {file fingerprint, number of samples, `EDA_PROFILE_MODE`}. Query-result reports are cached separately based on {file fingerprint, SQL, number of samples, `EDA_PROFILE_MODE`}.  
    You can adjust the sample count with `EDA_ROW_LIMIT` and UI-side settings.
 
 5. **Row Inspector / Image Zoom**
-   Click a row to expand it in the details panel. For image columns, click to open a zoomed view.  
+   Click a row to expand it in the details panel. Long values are compacted by default and can be toggled with Raw. For image columns, click to open a zoomed view. Image candidates are detected from image URLs, relative/absolute image paths, and dictionaries such as `{ "bytes": ..., "path": ... }`; bytes are tried first and path is used as a fallback.  
    <img src="images/local_data_studio_02.png" alt="local data studio 01" width=60%>
 
 ## Notes
@@ -133,10 +134,18 @@ Open [http://127.0.0.1:8000](http://127.0.0.1:8000) to view the Local Data Studi
 - Supported dataset formats: `.jsonl`, `.json`, `.csv`, `.tsv`, `.parquet`.
 - On large datasets, searching and running EDA may take time.
 - For very large datasets, preview uses cursor-style page tokens instead of large `OFFSET` scans where supported. Row counts, global search, sampled statistics, and EDA run through background jobs with progress and cancellation APIs.
-- Cache files are separated under `./cache/metadata`, `./cache/index`, and `./cache/stats`, and are invalidated by file path, size, and modification time.
+- Cache files are separated under `./cache/metadata`, `./cache/index`, `./cache/stats`, `./cache/count`, `./cache/search`, and EDA report files, and are invalidated by file path, size, and modification time where applicable.
+- `Run EDA on Query Results` excludes helper columns such as `rn` and `__rowid` from the generated report.
 - TB-scale `.json` arrays are not recommended. Prefer JSONL or Parquet for responsive preview.
 - `Delete from file` modifies the actual file, so make backups as needed.
 - If `ALLOW_DELETE_DATA=false`, only session-level hiding is allowed (the actual file will not be modified).
+
+## Implementation Notes
+
+- Format-specific readers live in `server/readers.py`. JSONL/CSV/TSV previews use byte/page-token based reads with sparse line indexing, and Parquet previews avoid loading whole row groups.
+- SQL execution is centralized in `server/sql.py`, which validates read-only SQL, applies DuckDB resource limits, and supports cooperative cancellation for background jobs.
+- EDA report orchestration lives in `server/eda_reports.py`; low-level profiling setup and DataFrame sanitization live in `server/eda.py`.
+- Background jobs are managed by `server/jobs.py` and expose progress, cancellation, result, and error state through `/api/jobs/*`.
 
 ## Contribution
 

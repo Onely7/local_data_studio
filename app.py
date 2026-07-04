@@ -1,11 +1,6 @@
 import datetime
-import hashlib
 import json
 import mimetypes
-import re
-import time
-from concurrent.futures import ThreadPoolExecutor
-from concurrent.futures import TimeoutError as FutureTimeoutError
 from pathlib import Path
 from typing import Any
 
@@ -21,18 +16,11 @@ from server.config import (
     CACHE_DIR,
     DATA_ROOT,
     DATA_SERVE_ROOT,
-    DEFAULT_EDA_MODE,
-    DEFAULT_EDA_SAMPLE,
     DEFAULT_LIMIT,
     DEFAULT_SAMPLE,
-    DUCKDB_QUERY_MEMORY_LIMIT,
-    DUCKDB_QUERY_POLL_SECONDS,
-    DUCKDB_QUERY_TIMEOUT_SECONDS,
     FILE_SERVE_ROOTS,
     HARD_DELETE_MAX_BYTES,
-    MAX_EDA_SAMPLE,
     SINGLE_FILE,
-    SYNC_OPERATION_MAX_BYTES,
     UPLOAD_EXTENSIONS,
     VIS_EXCLUDE_DIRS,
     VIS_EXCLUDE_PATHS,
@@ -42,14 +30,11 @@ from server.db import (
     count_relation_rows,
     count_relation_rows_raw,
     describe_relation,
-    fetch_rows,
     fetch_rows_with_rowid,
     normalize_pagination,
     open_connection,
     quote_ident,
     relation_sql,
-    relation_sql_literal,
-    relation_with_rowid_literal,
     relation_with_rowid_sql,
 )
 from server.delete_ops import delete_column_from_file, delete_row_from_file
@@ -58,12 +43,7 @@ from server.deleted_rows import (
     clear_deleted_row_ids,
     deleted_row_ids_for,
 )
-from server.eda import (
-    build_eda_report,
-    eda_cache_path,
-    load_eda_dataframe_polars,
-    sanitize_eda_dataframe,
-)
+from server.eda_reports import generate_dataset_eda_report, generate_query_eda_report
 from server.files import (
     discover_dataset_files,
     resolve_data_file,
@@ -80,14 +60,11 @@ from server.readers import (
     search_dataset,
 )
 from server.serialization import serialize_value
+from server.sql import execute_query_guarded, is_large_dataset
 from server.stats import compute_column_stats
 
 app = FastAPI(title="Data Viewer")
 UPLOAD_FILES = File(...)
-FULL_SCAN_SQL_PATTERN = re.compile(
-    r"\b(order\s+by|group\s+by|join|distinct|union)\b|\b(count|sum|avg|min|max|over)\s*\(",
-    re.IGNORECASE,
-)
 
 
 class QueryRequest(BaseModel):
@@ -150,12 +127,8 @@ def _file_size(path: Path) -> int:
     return path.stat().st_size
 
 
-def _is_large_dataset(path: Path) -> bool:
-    return _file_size(path) > SYNC_OPERATION_MAX_BYTES
-
-
 def _reject_large_sync_operation(path: Path, operation: str) -> None:
-    if not _is_large_dataset(path):
+    if not is_large_dataset(path):
         return
     raise HTTPException(
         status_code=400,
@@ -172,20 +145,6 @@ def _reject_large_hard_delete(path: Path) -> None:
     )
 
 
-def _configure_duckdb_limits(con: Any) -> None:
-    con.execute(f"SET memory_limit='{DUCKDB_QUERY_MEMORY_LIMIT}'")
-
-
-def _reject_high_risk_sql_for_large_file(path: Path, sql: str) -> None:
-    if not _is_large_dataset(path):
-        return
-    if FULL_SCAN_SQL_PATTERN.search(sql):
-        raise HTTPException(
-            status_code=400,
-            detail="this SQL can require a full scan on large datasets; use a simpler preview query or a background workflow",
-        )
-
-
 def _load_cached_result(cache_path: Path) -> dict[str, Any] | None:
     if not cache_path.exists():
         return None
@@ -198,105 +157,6 @@ def _load_cached_result(cache_path: Path) -> dict[str, Any] | None:
 
 def _write_cached_result(cache_path: Path, result: dict[str, Any]) -> None:
     cache_path.write_text(json.dumps(result, ensure_ascii=False, indent=2), encoding="utf-8")
-
-
-def _append_warning(response: dict[str, Any], warning: str) -> dict[str, Any]:
-    existing = response.get("warning")
-    response["warning"] = f"{existing} {warning}" if isinstance(existing, str) and existing else warning
-    return response
-
-
-def _normalize_select_sql(sql: str) -> str:
-    normalized = sql.strip()
-    if not normalized:
-        raise HTTPException(status_code=400, detail="sql must not be empty")
-
-    if ";" in normalized:
-        normalized = normalized.rstrip(";")
-        if ";" in normalized:
-            raise HTTPException(status_code=400, detail="multi-statement sql is not allowed")
-
-    sql_lower = normalized.lower()
-    if not (sql_lower.startswith("select") or sql_lower.startswith("with")):
-        raise HTTPException(status_code=400, detail="only SELECT queries are allowed")
-    return normalized
-
-
-def _interrupt_duckdb_connection(connection: Any | None) -> None:
-    interrupt = getattr(connection, "interrupt", None)
-    if callable(interrupt):
-        interrupt()
-
-
-def _execute_query_worker(
-    *,
-    path: Path,
-    file_name: str,
-    sql: str,
-    limit_value: int,
-    offset_value: int,
-    deleted_ids: list[int],
-    connection_holder: dict[str, Any],
-) -> dict[str, Any]:
-    rel_sql_literal = relation_sql_literal(path)
-    with open_connection() as con:
-        connection_holder["connection"] = con
-        _configure_duckdb_limits(con)
-        if deleted_ids:
-            filtered = relation_with_rowid_literal(path, deleted_ids)
-            view_sql = f"SELECT * EXCLUDE(__rowid) FROM ({filtered})"
-        else:
-            view_sql = f"SELECT * FROM {rel_sql_literal}"
-        con.execute(f"CREATE OR REPLACE TEMP VIEW data AS {view_sql}")
-        query_sql = f"SELECT * FROM ({sql}) AS q LIMIT {limit_value} OFFSET {offset_value}"
-        columns, rows = fetch_rows(con, query_sql, [])
-    return build_table_response(file_name, columns, rows, limit_value, offset_value, [])
-
-
-def _execute_query_guarded(payload: QueryRequest, path: Path, context: JobContext | None = None) -> dict[str, Any]:
-    deleted_ids = deleted_row_ids_for(path)
-    sql = _normalize_select_sql(payload.sql)
-    limit_value, offset_value = normalize_pagination(payload.limit, payload.offset)
-    _reject_high_risk_sql_for_large_file(path, sql)
-
-    connection_holder: dict[str, Any] = {}
-    executor = ThreadPoolExecutor(max_workers=1, thread_name_prefix="local-data-studio-query")
-    started = time.monotonic()
-    future = executor.submit(
-        _execute_query_worker,
-        path=path,
-        file_name=payload.file,
-        sql=sql,
-        limit_value=limit_value,
-        offset_value=offset_value,
-        deleted_ids=deleted_ids,
-        connection_holder=connection_holder,
-    )
-    try:
-        while True:
-            try:
-                response = future.result(timeout=DUCKDB_QUERY_POLL_SECONDS)
-                if _is_large_dataset(path):
-                    _append_warning(
-                        response,
-                        "SQL Console used timeout, memory, and scan-risk guards for this large dataset.",
-                    )
-                return response
-            except FutureTimeoutError:
-                elapsed = time.monotonic() - started
-                if context is not None:
-                    context.check_cancelled()
-                    context.update(message=f"Running SQL query for {int(elapsed)}s")
-                if elapsed >= DUCKDB_QUERY_TIMEOUT_SECONDS:
-                    _interrupt_duckdb_connection(connection_holder.get("connection"))
-                    raise HTTPException(status_code=408, detail="SQL query timed out") from None
-    except Exception:
-        if not future.done():
-            _interrupt_duckdb_connection(connection_holder.get("connection"))
-            future.cancel()
-        raise
-    finally:
-        executor.shutdown(wait=False, cancel_futures=True)
 
 
 @app.get("/api/files")
@@ -413,221 +273,16 @@ def _compute_cached_column_stats(file_name: str, path: Path, sample: int | None,
     return {**result, "cached": False}
 
 
-def _generate_eda_report(file_name: str, path: Path, payload: EdaRequest, context: JobContext | None = None) -> dict[str, Any]:
-    requested = payload.sample or DEFAULT_EDA_SAMPLE
-    sample = max(100, min(MAX_EDA_SAMPLE, requested))
-    mode = (payload.mode or DEFAULT_EDA_MODE or "minimal").strip().lower()
-    minimal = mode != "maximal"
-    cache_path = eda_cache_path(path, sample, mode)
-
-    if cache_path.exists() and not payload.force:
-        return {
-            "file": file_name,
-            "url": f"/cache/{cache_path.name}",
-            "cached": True,
-            "sample": sample,
-            "mode": mode,
-        }
-
-    if context is not None:
-        context.update(progress=0.1, message="Loading sampled rows")
-    deleted_ids = deleted_row_ids_for(path)
-    df = load_eda_dataframe_polars(path, sample, deleted_ids)
-    if df is None:
-        raise HTTPException(status_code=400, detail="failed to load dataset")
-
-    if context is not None:
-        context.check_cancelled()
-        context.update(progress=0.45, message="Preparing sampled data")
-    df = sanitize_eda_dataframe(df)
-
-    try:
-        if df.is_empty():
-            raise HTTPException(status_code=400, detail="dataset is empty")
-    except AttributeError:
-        if getattr(df, "empty", False):
-            raise HTTPException(status_code=400, detail="dataset is empty") from None
-
-    try:
-        if context is not None:
-            context.check_cancelled()
-            context.update(progress=0.7, message="Building EDA report")
-        report = build_eda_report(df, title=f"EDA Report: {path.name}", minimal=minimal)
-        report.to_file(str(cache_path))
-    except ImportError as exc:
-        raise HTTPException(status_code=500, detail="zarque_profiling is not installed") from exc
-    except Exception as exc:
-        raise HTTPException(status_code=500, detail=f"EDA generation failed: {exc}") from exc
-
-    return {
-        "file": file_name,
-        "url": f"/cache/{cache_path.name}",
-        "cached": False,
-        "sample": sample,
-        "mode": mode,
-    }
-
-
-def _eda_query_cache_path(path: Path, sql: str, sample_rows: int, mode: str) -> Path:
-    stat = path.stat()
-    payload = f"{path.resolve()}|{stat.st_size}|{stat.st_mtime_ns}|query-v2|{sql}|{sample_rows}|{mode}"
-    key = hashlib.sha256(payload.encode("utf-8")).hexdigest()[:12]
-    stem = path.stem or "data"
-    safe_stem = "".join(ch if ch.isalnum() or ch in ("-", "_") else "_" for ch in stem)
-    return CACHE_DIR / f"{safe_stem}-query-{mode}-{key}.html"
-
-
-def _drop_eda_query_helper_columns(df: Any) -> Any:
-    helper_names = {"__rowid", "rn"}
-    columns = getattr(df, "columns", [])
-    drop_cols = [name for name in columns if str(name).lower() in helper_names]
-    if not drop_cols:
-        return df
-    drop = getattr(df, "drop", None)
-    if not callable(drop):
-        return df
-    return drop(drop_cols)
-
-
-def _load_eda_query_dataframe_worker(
-    *,
-    path: Path,
-    sql: str,
-    sample: int,
-    deleted_ids: list[int],
-    connection_holder: dict[str, Any],
-) -> Any:
-    rel_sql_literal = relation_sql_literal(path)
-    with open_connection() as con:
-        connection_holder["connection"] = con
-        _configure_duckdb_limits(con)
-        if deleted_ids:
-            filtered = relation_with_rowid_literal(path, deleted_ids)
-            view_sql = f"SELECT * EXCLUDE(__rowid) FROM ({filtered})"
-        else:
-            view_sql = f"SELECT * FROM {rel_sql_literal}"
-        con.execute(f"CREATE OR REPLACE TEMP VIEW data AS {view_sql}")
-        cursor = con.execute(f"SELECT * FROM ({sql}) AS q LIMIT {sample}")
-
-        if hasattr(cursor, "pl"):
-            try:
-                return cursor.pl()
-            except Exception:
-                pass
-
-        df_pd = cursor.df()
-
-    import polars as pl  # noqa: PLC0415
-
-    return pl.from_pandas(df_pd)
-
-
-def _load_eda_query_dataframe_guarded(
-    *,
-    path: Path,
-    sql: str,
-    sample: int,
-    context: JobContext | None,
-) -> Any:
-    deleted_ids = deleted_row_ids_for(path)
-    connection_holder: dict[str, Any] = {}
-    executor = ThreadPoolExecutor(max_workers=1, thread_name_prefix="local-data-studio-eda-query")
-    started = time.monotonic()
-    future = executor.submit(
-        _load_eda_query_dataframe_worker,
-        path=path,
-        sql=sql,
-        sample=sample,
-        deleted_ids=deleted_ids,
-        connection_holder=connection_holder,
-    )
-    try:
-        while True:
-            try:
-                return future.result(timeout=DUCKDB_QUERY_POLL_SECONDS)
-            except FutureTimeoutError:
-                elapsed = time.monotonic() - started
-                if context is not None:
-                    context.check_cancelled()
-                    context.update(progress=0.25, message=f"Running SQL query for {int(elapsed)}s")
-                if elapsed >= DUCKDB_QUERY_TIMEOUT_SECONDS:
-                    _interrupt_duckdb_connection(connection_holder.get("connection"))
-                    raise HTTPException(status_code=408, detail="SQL query timed out") from None
-    except Exception:
-        if not future.done():
-            _interrupt_duckdb_connection(connection_holder.get("connection"))
-            future.cancel()
-        raise
-    finally:
-        executor.shutdown(wait=False, cancel_futures=True)
-
-
-def _generate_eda_query_report(
-    file_name: str,
-    path: Path,
-    payload: EdaQueryRequest,
-    context: JobContext | None = None,
-) -> dict[str, Any]:
-    requested = payload.sample or DEFAULT_EDA_SAMPLE
-    sample = max(100, min(MAX_EDA_SAMPLE, requested))
-    mode = (payload.mode or DEFAULT_EDA_MODE or "minimal").strip().lower()
-    minimal = mode != "maximal"
-    sql = _normalize_select_sql(payload.sql)
-    _reject_high_risk_sql_for_large_file(path, sql)
-    cache_path = _eda_query_cache_path(path, sql, sample, mode)
-
-    if cache_path.exists() and not payload.force:
-        return {
-            "file": file_name,
-            "url": f"/cache/{cache_path.name}",
-            "cached": True,
-            "sample": sample,
-            "mode": mode,
-            "source": "query",
-        }
-
-    if context is not None:
-        context.update(progress=0.1, message="Running SQL query")
-    df = _load_eda_query_dataframe_guarded(path=path, sql=sql, sample=sample, context=context)
-
-    if context is not None:
-        context.check_cancelled()
-        context.update(progress=0.45, message="Preparing query results")
-    df = _drop_eda_query_helper_columns(df)
-    df = sanitize_eda_dataframe(df)
-
-    try:
-        if df.is_empty():
-            raise HTTPException(status_code=400, detail="query returned no rows")
-    except AttributeError:
-        if getattr(df, "empty", False):
-            raise HTTPException(status_code=400, detail="query returned no rows") from None
-
-    try:
-        if context is not None:
-            context.check_cancelled()
-            context.update(progress=0.7, message="Building EDA report")
-        report = build_eda_report(df, title=f"EDA Report: {path.name} query results", minimal=minimal)
-        report.to_file(str(cache_path))
-    except ImportError as exc:
-        raise HTTPException(status_code=500, detail="zarque_profiling is not installed") from exc
-    except Exception as exc:
-        raise HTTPException(status_code=500, detail=f"EDA generation failed: {exc}") from exc
-
-    return {
-        "file": file_name,
-        "url": f"/cache/{cache_path.name}",
-        "cached": False,
-        "sample": sample,
-        "mode": mode,
-        "source": "query",
-    }
-
-
 @app.post("/api/eda")
 async def run_eda(payload: EdaRequest) -> dict[str, Any]:
     path = resolve_data_file(payload.file)
-    return _generate_eda_report(payload.file, path, payload)
+    return generate_dataset_eda_report(
+        file_name=payload.file,
+        path=path,
+        sample=payload.sample,
+        mode=payload.mode,
+        force=payload.force,
+    )
 
 
 @app.post("/api/jobs/count")
@@ -687,7 +342,14 @@ async def start_query_job(payload: QueryRequest) -> dict[str, Any]:
     path = resolve_data_file(payload.file)
 
     def work(context: JobContext) -> dict[str, Any]:
-        return _execute_query_guarded(payload, path, context)
+        return execute_query_guarded(
+            file_name=payload.file,
+            path=path,
+            sql=payload.sql,
+            limit=payload.limit,
+            offset=payload.offset,
+            context=context,
+        )
 
     return JOB_STORE.submit("query", work).to_response()
 
@@ -710,7 +372,14 @@ async def start_eda_job(payload: EdaRequest) -> dict[str, Any]:
     path = resolve_data_file(payload.file)
 
     def work(context: JobContext) -> dict[str, Any]:
-        return _generate_eda_report(payload.file, path, payload, context)
+        return generate_dataset_eda_report(
+            file_name=payload.file,
+            path=path,
+            sample=payload.sample,
+            mode=payload.mode,
+            force=payload.force,
+            context=context,
+        )
 
     return JOB_STORE.submit("eda", work).to_response()
 
@@ -720,7 +389,15 @@ async def start_eda_query_job(payload: EdaQueryRequest) -> dict[str, Any]:
     path = resolve_data_file(payload.file)
 
     def work(context: JobContext) -> dict[str, Any]:
-        return _generate_eda_query_report(payload.file, path, payload, context)
+        return generate_query_eda_report(
+            file_name=payload.file,
+            path=path,
+            sql=payload.sql,
+            sample=payload.sample,
+            mode=payload.mode,
+            force=payload.force,
+            context=context,
+        )
 
     return JOB_STORE.submit("eda_query", work).to_response()
 
@@ -894,7 +571,13 @@ async def column_sample(
 @app.post("/api/query")
 async def run_query(payload: QueryRequest) -> dict[str, Any]:
     path = resolve_data_file(payload.file)
-    return _execute_query_guarded(payload, path)
+    return execute_query_guarded(
+        file_name=payload.file,
+        path=path,
+        sql=payload.sql,
+        limit=payload.limit,
+        offset=payload.offset,
+    )
 
 
 app.mount("/data", StaticFiles(directory=str(DATA_SERVE_ROOT), check_dir=False), name="data")
