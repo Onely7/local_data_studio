@@ -50,6 +50,8 @@ Local Data Studio は、Huggingface Datasets の [Data Studio](https://huggingfa
    # Data set specification (if both exist, DATA_FILE takes precedence)
    # DATA_FILE=
    DATA_DIR=/local/data/path  # FIXME: data directory path set here (required)
+   FILE_SERVE_ROOTS=""
+   VIS_EXCLUDE_DIRS=""
 
    # LLM SQL Generation Settings
    OPENAI_API_KEY=""  # FIXME: OpenAI API Key set here
@@ -71,6 +73,8 @@ Local Data Studio は、Huggingface Datasets の [Data Studio](https://huggingfa
    環境変数の説明:
    - `DATA_FILE`: 単一ファイルを直接指定します。指定した場合は `DATA_DIR` より優先されます。
    - `DATA_DIR`: データセットの探索対象ディレクトリです（DATA_FILE を使わない場合は必須）。
+   - `FILE_SERVE_ROOTS`: ローカル画像プレビューとして配信を許可するディレクトリをカンマ区切りで指定します。
+   - `VIS_EXCLUDE_DIRS`: `DATA_DIR` 配下でデータセット探索から除外するディレクトリをカンマ区切りで指定します。
    - `OPENAI_API_KEY`: LLM による SQL 生成を有効化するための API Key です。
    - `OPENAI_BASE_URL`: OpenAI 互換 API のエンドポイントです。
    - `OPENAI_MODEL`: 使用する OpenAI モデル名です。
@@ -127,6 +131,9 @@ INFO:     Application startup complete.
 
 - サポートしているデータフォーマット: `.jsonl`, `.json`, `.csv`, `.tsv`, `.parquet`.
 - 大規模データでは検索・EDA の実行に時間がかかることがあります。
+- 非常に大きなデータセットでは、対応形式のプレビューに大きな `OFFSET` ではなくカーソル形式の `page_token` を使用します。行数カウント、全体検索、サンプル統計、EDA は進捗確認とキャンセルが可能なバックグラウンドジョブとして実行されます。
+- キャッシュは `./cache/metadata`, `./cache/index`, `./cache/stats` に分離され、ファイルパス・サイズ・更新時刻に基づいて無効化されます。
+- TB 級の `.json` 配列は推奨しません。高速な閲覧には JSONL または Parquet を推奨します。
 - `Delete from file` は実ファイルを書き換えるため、必要に応じてバックアップを推奨します。
 - `ALLOW_DELETE_DATA=false` の場合は、セッション内の非表示のみ可能です。（実ファイルは書き換わらない）
 

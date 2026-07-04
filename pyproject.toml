@@ -23,6 +23,7 @@ package = false
 [dependency-groups]
 dev = [
   "pre-commit",
+  "pytest",
   "ruff",
   "pyrefly",
 ]
@@ -66,6 +67,10 @@ keep-runtime-typing = true  # Settings for Python 3.8 compatibility
 [tool.ruff.format]
 quote-style = "double"
 line-ending = "auto"
+
+[tool.pytest.ini_options]
+pythonpath = ["."]
+testpaths = ["tests"]
 
 # Pyrefly header
 [tool.pyrefly]

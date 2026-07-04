@@ -485,6 +485,15 @@ tr:hover {
   cursor: zoom-in;
 }
 
+.image-cell {
+  display: block;
+  min-width: 0;
+}
+
+.image-fallback {
+  max-width: 160px;
+}
+
 .image-count {
   width: 64px;
   height: 64px;
@@ -942,6 +951,13 @@ tr.expanded {
   text-transform: uppercase;
   letter-spacing: 0.04em;
   color: rgba(248, 250, 252, 0.6);
+}
+
+.overlay-field-actions {
+  display: flex;
+  align-items: center;
+  flex-shrink: 0;
+  gap: 6px;
 }
 
 .overlay-copy {

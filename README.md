@@ -50,6 +50,8 @@ It provides fast preview, DuckDB SQL execution (with optional LLM-assisted SQL g
     # Data set specification (if both exist, DATA_FILE takes precedence)
     # DATA_FILE=
     DATA_DIR=/local/data/path  # FIXME: data directory path set here (required)
+    FILE_SERVE_ROOTS=""
+    VIS_EXCLUDE_DIRS=""
 
     # LLM SQL Generation Settings
     OPENAI_API_KEY=""  # FIXME: OpenAI API Key set here
@@ -72,6 +74,8 @@ It provides fast preview, DuckDB SQL execution (with optional LLM-assisted SQL g
 
    - `DATA_FILE`: Directly specify a single file. If set, it takes precedence over `DATA_DIR`.
    - `DATA_DIR`: Directory to search for datasets (required if `DATA_FILE` is not used).
+   - `FILE_SERVE_ROOTS`: Comma-separated directories from which local image previews may be served.
+   - `VIS_EXCLUDE_DIRS`: Comma-separated directories to exclude from dataset discovery under `DATA_DIR`.
    - `OPENAI_API_KEY`: API key to enable LLM-based SQL generation.
    - `OPENAI_BASE_URL`: Endpoint for an OpenAI-compatible API.
    - `OPENAI_MODEL`: OpenAI model name to use.
@@ -128,6 +132,9 @@ Open [http://127.0.0.1:8000](http://127.0.0.1:8000) to view the Local Data Studi
 
 - Supported dataset formats: `.jsonl`, `.json`, `.csv`, `.tsv`, `.parquet`.
 - On large datasets, searching and running EDA may take time.
+- For very large datasets, preview uses cursor-style page tokens instead of large `OFFSET` scans where supported. Row counts, global search, sampled statistics, and EDA run through background jobs with progress and cancellation APIs.
+- Cache files are separated under `./cache/metadata`, `./cache/index`, and `./cache/stats`, and are invalidated by file path, size, and modification time.
+- TB-scale `.json` arrays are not recommended. Prefer JSONL or Parquet for responsive preview.
 - `Delete from file` modifies the actual file, so make backups as needed.
 - If `ALLOW_DELETE_DATA=false`, only session-level hiding is allowed (the actual file will not be modified).
 

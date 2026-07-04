@@ -6,7 +6,7 @@ import hashlib
 import importlib
 import json
 from pathlib import Path
-from typing import Any
+from typing import Any, cast
 
 from matplotlib import font_manager
 from zarque_profiling import ProfileReport
@@ -202,9 +202,11 @@ def build_eda_report(df: Any, title: str, minimal: bool) -> Any:
 def resolve_eda_font_family() -> str | None:
     """Resolve a font family name using the optional font path fallback."""
     if EDA_FONT_PATH:
+        font_path = Path(EDA_FONT_PATH)
         try:
-            font_manager.fontManager.addfont(EDA_FONT_PATH)
-            return font_manager.FontProperties(fname=EDA_FONT_PATH).get_name()
+            cast(Any, font_manager.fontManager).addfont(str(font_path))
+            font_properties = cast(Any, font_manager.FontProperties)(fname=str(font_path))
+            return str(font_properties.get_name())
         except Exception:
             if EDA_FONT_FAMILY:
                 return EDA_FONT_FAMILY

@@ -6,7 +6,7 @@ from typing import Any
 import duckdb
 from fastapi import HTTPException
 
-from .config import DEFAULT_LIMIT, MAX_LIMIT
+from .config import COLUMN_LIMIT_WARNING, DEFAULT_LIMIT, MAX_COLUMNS, MAX_LIMIT
 from .deleted_rows import deleted_row_ids_for
 from .serialization import serialize_rows
 
@@ -108,14 +108,26 @@ def build_table_response(
     row_ids: list[int] | None = None,
 ) -> dict[str, Any]:
     """Standard response payload for tabular endpoints."""
-    return {
+    total_columns = len(columns)
+    response_columns = columns[:MAX_COLUMNS]
+    response_rows = [row[:MAX_COLUMNS] for row in rows]
+    response = {
         "file": file,
-        "columns": columns,
-        "rows": rows,
+        "columns": response_columns,
+        "rows": response_rows,
         "row_ids": row_ids or [],
         "limit": limit_value,
         "offset": offset_value,
     }
+    if total_columns > MAX_COLUMNS:
+        response.update(
+            {
+                "columns_truncated": True,
+                "total_columns": total_columns,
+                "warning": COLUMN_LIMIT_WARNING,
+            }
+        )
+    return response
 
 
 def open_connection() -> duckdb.DuckDBPyConnection:

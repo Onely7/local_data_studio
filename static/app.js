@@ -10,25 +10,39 @@ const state = {
   searchQuery: "",
   querySql: "",
   rowCount: null,
+  pageTokens: [null],
+  pageIndex: 0,
+  nextPageToken: null,
+  hasNextPage: false,
   expandedRowIndex: null,
   overlayRowIndex: null,
   overlayColumnIndex: null,
   overlayImageUrl: "",
   overlayImages: [],
   overlayImageIndex: 0,
+  overlayRawFields: new Set(),
   columnStats: {},
   selectedRowIndex: null,
   selectedRowId: null,
+  rowInspectorRaw: false,
   pendingDeleteRowId: null,
   pendingDeleteColumn: null,
   allowDeleteData: true,
   datasetQuery: "",
+  datasetWarning: "",
   hiddenTableColumns: new Set(),
   rowIds: [],
   hiddenColumns: new Set(),
+  countJobId: null,
+  statsJobId: null,
+  searchJobId: null,
+  queryJobId: null,
+  edaJobId: null,
 };
 
 const UPLOAD_EXTENSIONS = new Set([".jsonl", ".parquet", ".csv", ".tsv"]);
+const MAX_IMAGE_CANDIDATES = 30;
+const ROW_INSPECTOR_VALUE_MAX = 320;
 
 const elements = {
   fileList: document.getElementById("file-list"),
@@ -59,6 +73,7 @@ const elements = {
   countRows: document.getElementById("count-rows"),
   rowCount: document.getElementById("row-count"),
   rowInspector: document.getElementById("row-inspector"),
+  rowInspectorRaw: document.getElementById("row-inspector-raw"),
   runEda: document.getElementById("run-eda"),
   edaStatus: document.getElementById("eda-status"),
   edaLink: document.getElementById("eda-link"),
@@ -108,10 +123,81 @@ function shorten(text, max = 240) {
   return text.slice(0, max) + "...";
 }
 
+function compactInspectorValue(value) {
+  if (typeof value === "string") {
+    if (value.length <= ROW_INSPECTOR_VALUE_MAX) return value;
+    return `${value.slice(0, ROW_INSPECTOR_VALUE_MAX)}... (truncated; use Raw)`;
+  }
+  if (value === null || typeof value === "number" || typeof value === "boolean") {
+    return value;
+  }
+  try {
+    const json = JSON.stringify(value);
+    if (!json || json.length <= ROW_INSPECTOR_VALUE_MAX) return value;
+    return `${json.slice(0, ROW_INSPECTOR_VALUE_MAX)}... (truncated; use Raw)`;
+  } catch (err) {
+    const text = String(value);
+    return text.length <= ROW_INSPECTOR_VALUE_MAX
+      ? text
+      : `${text.slice(0, ROW_INSPECTOR_VALUE_MAX)}... (truncated; use Raw)`;
+  }
+}
+
+function isInspectorValueTruncated(value) {
+  if (typeof value === "string") {
+    return value.length > ROW_INSPECTOR_VALUE_MAX;
+  }
+  if (value === null || typeof value === "number" || typeof value === "boolean") {
+    return false;
+  }
+  try {
+    const json = JSON.stringify(value);
+    return Boolean(json && json.length > ROW_INSPECTOR_VALUE_MAX);
+  } catch (err) {
+    return String(value).length > ROW_INSPECTOR_VALUE_MAX;
+  }
+}
+
 function isImageUrl(text) {
   if (!text) return false;
   if (text.startsWith("data:image")) return true;
   return /\.(png|jpg|jpeg|gif|webp|svg)(\?.*)?$/i.test(text);
+}
+
+function imageMimeFromPath(path) {
+  const text = String(path || "").toLowerCase().split("?")[0];
+  if (text.endsWith(".png")) return "image/png";
+  if (text.endsWith(".jpg") || text.endsWith(".jpeg")) return "image/jpeg";
+  if (text.endsWith(".gif")) return "image/gif";
+  if (text.endsWith(".webp")) return "image/webp";
+  if (text.endsWith(".svg")) return "image/svg+xml";
+  return "image/png";
+}
+
+function imageMimeFromBytes(bytes) {
+  const text = String(bytes || "").trim();
+  const compact = text.replace(/\s+/g, "");
+  const lowered = compact.toLowerCase();
+  if (text.startsWith("data:image")) {
+    const match = text.match(/^data:([^;,]+)/);
+    return match ? match[1] : "image/png";
+  }
+  if (lowered.startsWith("89504e47") || compact.startsWith("iVBORw0KGgo")) {
+    return "image/png";
+  }
+  if (lowered.startsWith("ffd8ff") || compact.startsWith("/9j/")) {
+    return "image/jpeg";
+  }
+  if (lowered.startsWith("47494638") || compact.startsWith("R0lGOD")) {
+    return "image/gif";
+  }
+  if (
+    (lowered.startsWith("52494646") && lowered.slice(16, 24) === "57454250") ||
+    compact.startsWith("UklGR")
+  ) {
+    return "image/webp";
+  }
+  return "";
 }
 
 function normalizeImageUrl(text) {
@@ -119,34 +205,118 @@ function normalizeImageUrl(text) {
   if (text.startsWith("data:image")) return text;
   if (/^https?:\/\//i.test(text)) return text;
   if (text.startsWith("/data/")) return text;
-  if (text.startsWith("/")) return text;
+  if (text.startsWith("/cache/")) return text;
+  if (text.startsWith("/api/")) return text;
+  if (text.startsWith("file://")) {
+    return `/api/raw?path=${encodeURIComponent(text)}`;
+  }
+  if (text.startsWith("/")) {
+    return `/api/raw?path=${encodeURIComponent(text)}`;
+  }
   const cleaned = text.replace(/^\.\//, "");
   return `/data/${cleaned}`;
 }
 
-function extractImageUrls(value) {
+function isBase64ImageBytes(text) {
+  const compact = text.replace(/\s+/g, "");
+  if (!compact || compact.length % 4 !== 0) return false;
+  return /^[A-Za-z0-9+/]+={0,2}$/.test(compact);
+}
+
+function isHexImageBytes(text) {
+  const compact = text.replace(/\s+/g, "");
+  return compact.length >= 16 && compact.length % 2 === 0 && /^[0-9a-f]+$/i.test(compact);
+}
+
+function hexToBase64(hex) {
+  const compact = hex.replace(/\s+/g, "");
+  let binary = "";
+  for (let index = 0; index < compact.length; index += 2) {
+    binary += String.fromCharCode(parseInt(compact.slice(index, index + 2), 16));
+  }
+  return btoa(binary);
+}
+
+function bytesToImageDataUrl(bytes, pathHint = "") {
+  if (typeof bytes !== "string" || !bytes.trim()) return "";
+  const text = bytes.trim();
+  if (text.startsWith("data:image")) return text;
+  const mime = imageMimeFromBytes(text) || imageMimeFromPath(pathHint);
+  if (isHexImageBytes(text)) {
+    return `data:${mime};base64,${hexToBase64(text)}`;
+  }
+  if (isBase64ImageBytes(text)) {
+    return `data:${mime};base64,${text.replace(/\s+/g, "")}`;
+  }
+  return "";
+}
+
+function imageCandidate(src, fallback, fallbackSrc = "") {
+  if (!src) return null;
+  return { src, fallback: fallback === undefined ? src : fallback, fallbackSrc };
+}
+
+function extractImageCandidates(value) {
   if (typeof value === "string" && isImageUrl(value)) {
-    return [normalizeImageUrl(value)];
+    return [imageCandidate(normalizeImageUrl(value), value)];
   }
   if (Array.isArray(value)) {
     return value
       .filter((item) => typeof item === "string" && isImageUrl(item))
-      .map((item) => normalizeImageUrl(item));
+      .slice(0, MAX_IMAGE_CANDIDATES)
+      .map((item) => imageCandidate(normalizeImageUrl(item), item))
+      .filter(Boolean);
+  }
+  if (value && typeof value === "object" && !Array.isArray(value)) {
+    const fallback = JSON.stringify(value);
+    const pathSrc =
+      typeof value.path === "string" && isImageUrl(value.path)
+        ? normalizeImageUrl(value.path)
+        : "";
+    if (typeof value.bytes === "string") {
+      const dataUrl = bytesToImageDataUrl(value.bytes, value.path);
+      if (dataUrl) {
+        return [imageCandidate(dataUrl, fallback, pathSrc)].filter(Boolean);
+      }
+    }
+    if (pathSrc) {
+      return [imageCandidate(pathSrc, fallback)].filter(Boolean);
+    }
+    return [];
   }
   return [];
 }
 
-function renderImageGrid(urls, options = {}) {
+function extractImageUrls(value) {
+  const urls = [];
+  extractImageCandidates(value).forEach((candidate) => {
+    [candidate.src, candidate.fallbackSrc].forEach((url) => {
+      if (url && !urls.includes(url)) {
+        urls.push(url);
+      }
+    });
+  });
+  return urls;
+}
+
+function renderImageGrid(candidates, options = {}) {
   const max = Number.isFinite(options.max) ? options.max : 4;
   const className = options.className || "image-grid";
-  const shown = urls.slice(0, max);
-  const extra = urls.length - shown.length;
+  const imageCandidates = candidates.map((item) =>
+    typeof item === "string" ? imageCandidate(item, item) : item,
+  );
+  const shown = imageCandidates.slice(0, max);
+  const extra = imageCandidates.length - shown.length;
   const items = shown
     .map(
-      (url, idx) =>
-        `<img src="${escapeHtml(url)}" alt="image ${
-          idx + 1
-        }" data-image-src="${escapeHtml(url)}" />`
+      (candidate, idx) => `
+        <span class="image-cell">
+          <img src="${escapeHtml(candidate.src)}" alt="image ${
+            idx + 1
+          }" data-image-src="${escapeHtml(candidate.src)}" data-fallback-src="${escapeHtml(candidate.fallbackSrc || "")}" onerror="if(this.dataset.fallbackSrc && this.dataset.fallbackUsed !== '1'){this.dataset.fallbackUsed='1';this.src=this.dataset.fallbackSrc;}else{this.style.display='none';this.nextElementSibling.style.display='inline';}" />
+          <span class="cell image-fallback" style="display:none">${escapeHtml(shorten(candidate.fallback))}</span>
+        </span>
+      `,
     )
     .join("");
   const badge = extra > 0 ? `<div class="image-count">+${extra}</div>` : "";
@@ -157,9 +327,9 @@ function formatCell(value) {
   if (value === null || value === undefined) {
     return '<span class="muted">null</span>';
   }
-  const imageUrls = extractImageUrls(value);
-  if (imageUrls.length) {
-    return renderImageGrid(imageUrls, { className: "image-grid", max: 4 });
+  const imageCandidates = extractImageCandidates(value);
+  if (imageCandidates.length) {
+    return renderImageGrid(imageCandidates, { className: "image-grid", max: 4 });
   }
   if (typeof value === "string") {
     return `<span class="cell">${escapeHtml(shorten(value))}</span>`;
@@ -187,9 +357,9 @@ function formatExpandedCell(value) {
   if (value === null || value === undefined) {
     return '<span class="muted">null</span>';
   }
-  const imageUrls = extractImageUrls(value);
-  if (imageUrls.length) {
-    return renderImageGrid(imageUrls, {
+  const imageCandidates = extractImageCandidates(value);
+  if (imageCandidates.length) {
+    return renderImageGrid(imageCandidates, {
       className: "image-grid expanded-image-grid",
       max: 8,
     });
@@ -234,6 +404,53 @@ function formatOverlayValue(value) {
   }
 }
 
+function renderOverlayFields() {
+  if (!elements.overlayFields || state.overlayRowIndex === null) return;
+  const row = state.rows[state.overlayRowIndex] || [];
+  const fields = state.columns
+    .map((col, idx) => {
+      const rawValue = row[idx];
+      const fieldKey = String(idx);
+      const truncated = isInspectorValueTruncated(rawValue);
+      const isRaw = state.overlayRawFields.has(fieldKey);
+      const displayValue =
+        truncated && !isRaw ? compactInspectorValue(rawValue) : rawValue;
+      const copyValue = encodeCopyValue(rawValue);
+      const rawButton = truncated
+        ? `<button class="overlay-copy overlay-raw-field" data-raw-field="${escapeHtml(
+            fieldKey,
+          )}" type="button">${isRaw ? "Compact" : "Raw"}</button>`
+        : "";
+      return `
+        <div class="overlay-field">
+          <div class="overlay-field-header">
+            <div class="overlay-field-label">${escapeHtml(col)}</div>
+            <div class="overlay-field-actions">
+              ${rawButton}
+              <button class="overlay-copy" data-copy="${copyValue}" type="button">Copy</button>
+            </div>
+          </div>
+          <div class="overlay-field-value">${formatOverlayValue(displayValue)}</div>
+        </div>
+      `;
+    })
+    .join("");
+
+  elements.overlayFields.innerHTML =
+    fields || '<div class="muted">No extra fields</div>';
+}
+
+function toggleOverlayFieldRaw(fieldKey) {
+  if (state.overlayRowIndex === null) return;
+  const key = String(fieldKey);
+  if (state.overlayRawFields.has(key)) {
+    state.overlayRawFields.delete(key);
+  } else {
+    state.overlayRawFields.add(key);
+  }
+  renderOverlayFields();
+}
+
 function encodeCopyValue(value) {
   let text;
   try {
@@ -249,7 +466,7 @@ function collectRowImageUrls(row) {
   row.forEach((value) => {
     const images = extractImageUrls(value);
     images.forEach((img) => {
-      if (!urls.includes(img)) {
+      if (urls.length < MAX_IMAGE_CANDIDATES && !urls.includes(img)) {
         urls.push(img);
       }
     });
@@ -278,6 +495,51 @@ async function fetchJSON(url, options = {}) {
     throw new Error(message || "Request failed");
   }
   return response.json();
+}
+
+function sleep(ms) {
+  return new Promise((resolve) => {
+    setTimeout(resolve, ms);
+  });
+}
+
+async function startJob(kind, payload) {
+  return fetchJSON(`/api/jobs/${kind}`, {
+    method: "POST",
+    body: JSON.stringify(payload),
+  });
+}
+
+async function cancelJob(jobId) {
+  if (!jobId) return null;
+  return fetchJSON(`/api/jobs/${jobId}/cancel`, { method: "POST" });
+}
+
+async function waitForJob(jobId, options = {}) {
+  const intervalMs = options.intervalMs || 600;
+  while (true) {
+    const job = await fetchJSON(`/api/jobs/${jobId}`);
+    if (options.onUpdate) {
+      options.onUpdate(job);
+    }
+    if (job.status === "succeeded") {
+      return job.result || {};
+    }
+    if (job.status === "failed") {
+      throw new Error(job.error || "Job failed");
+    }
+    if (job.status === "cancelled") {
+      throw new Error(job.message || "Job cancelled");
+    }
+    await sleep(intervalMs);
+  }
+}
+
+function formatJobProgress(job, fallback) {
+  if (Number.isFinite(job.progress)) {
+    return `${fallback} ${Math.round(job.progress * 100)}%`;
+  }
+  return job.message || fallback;
 }
 
 function extractErrorMessage(err) {
@@ -310,7 +572,9 @@ function renderFiles() {
     : state.files;
 
   if (elements.datasetEmpty) {
-    elements.datasetEmpty.style.display = visibleFiles.length ? "none" : "block";
+    elements.datasetEmpty.style.display = visibleFiles.length
+      ? "none"
+      : "block";
   }
 
   visibleFiles.forEach((file) => {
@@ -335,7 +599,7 @@ function renderTable() {
   }
 
   const visibleColumns = state.columns.filter(
-    (col) => !state.hiddenTableColumns.has(col)
+    (col) => !state.hiddenTableColumns.has(col),
   );
   if (!visibleColumns.length) {
     elements.tableHead.innerHTML = "<tr><th>No visible columns</th></tr>";
@@ -495,17 +759,36 @@ function renderTable() {
 }
 
 function renderPagination() {
-  const page = Math.floor(state.offset / state.limit) + 1;
-  elements.pageInfo.textContent = `Page ${page}`;
+  const page =
+    state.view === "query"
+      ? Math.floor(state.offset / state.limit) + 1
+      : state.pageIndex + 1;
+  elements.pageInfo.textContent =
+    state.view === "search" ? "Search results" : `Page ${page}`;
+  if (elements.prevPage) {
+    elements.prevPage.disabled =
+      state.view === "query" ? state.offset <= 0 : state.pageIndex <= 0;
+  }
+  if (elements.nextPage) {
+    elements.nextPage.disabled =
+      state.view === "query"
+        ? false
+        : state.view === "search" || !state.nextPageToken;
+  }
 }
 
 function renderMeta() {
   const columnCount = state.schema.length;
   const mode =
-    state.view === "query" ? "Query" : state.searchQuery ? "Search" : "Preview";
-  elements.viewLabel.textContent = mode;
+    state.view === "query" ? "Query" : state.view === "search" ? "Search" : "Preview";
+  elements.viewLabel.textContent = state.datasetWarning ? `${mode} | Warning` : mode;
   elements.datasetMeta.textContent = state.file
-    ? `${columnCount} columns | offset ${state.offset}`
+    ? state.datasetWarning ||
+      `${columnCount} columns | page ${
+        state.view === "query"
+          ? Math.floor(state.offset / state.limit) + 1
+          : state.pageIndex + 1
+      }`
     : "";
 }
 
@@ -520,8 +803,8 @@ function renderDatasetInfo() {
     .map(
       (col) =>
         `<div class="info-row"><span>${escapeHtml(
-          col.name
-        )}</span><span>${escapeHtml(col.type)}</span></div>`
+          col.name,
+        )}</span><span>${escapeHtml(col.type)}</span></div>`,
     )
     .join("");
   elements.datasetInfo.innerHTML = `<div class="info-grid">${rows}</div>`;
@@ -553,6 +836,10 @@ function renderRowInspector(rowIndex) {
     elements.rowInspector.textContent = "Select a row to inspect";
     state.selectedRowIndex = null;
     state.selectedRowId = null;
+    if (elements.rowInspectorRaw) {
+      elements.rowInspectorRaw.disabled = true;
+      elements.rowInspectorRaw.textContent = "Raw";
+    }
     updateRowActions();
     return;
   }
@@ -567,12 +854,24 @@ function renderRowInspector(rowIndex) {
     if (state.hiddenTableColumns.has(col)) {
       return;
     }
-    rowObj[col] = row[idx];
+    rowObj[col] = state.rowInspectorRaw ? row[idx] : compactInspectorValue(row[idx]);
   });
+  if (elements.rowInspectorRaw) {
+    elements.rowInspectorRaw.disabled = false;
+    elements.rowInspectorRaw.textContent = state.rowInspectorRaw ? "Compact" : "Raw";
+  }
   elements.rowInspector.textContent = Object.keys(rowObj).length
     ? JSON.stringify(rowObj, null, 2)
     : "No visible columns";
   updateRowActions();
+}
+
+function toggleRowInspectorRaw() {
+  if (state.selectedRowIndex === null || state.selectedRowIndex === undefined) {
+    return;
+  }
+  state.rowInspectorRaw = !state.rowInspectorRaw;
+  renderRowInspector(state.selectedRowIndex);
 }
 
 function updateRowActions() {
@@ -611,13 +910,32 @@ function closeError() {
   elements.errorOverlay.classList.remove("active");
 }
 
+function resetPreviewPaging() {
+  state.offset = 0;
+  state.pageIndex = 0;
+  state.pageTokens = [null];
+  state.nextPageToken = null;
+  state.hasNextPage = false;
+}
+
+function currentPageToken() {
+  return state.pageTokens[state.pageIndex] || null;
+}
+
 function applyTableData(data) {
   state.columns = data.columns || [];
   state.rows = data.rows || [];
   state.rowIds = data.row_ids || [];
+  state.datasetWarning = data.warning || "";
+  state.nextPageToken = data.next_page_token || null;
+  state.hasNextPage = Boolean(data.has_next);
+  if (Number.isFinite(data.offset)) {
+    state.offset = data.offset;
+  }
   state.expandedRowIndex = null;
   state.selectedRowIndex = null;
   state.selectedRowId = null;
+  state.rowInspectorRaw = false;
   closeImageOverlay();
   closeJsonOverlay();
   renderTable();
@@ -715,7 +1033,6 @@ async function performColumnDelete(persist) {
       });
       state.hiddenTableColumns.delete(columnName);
       await loadSchema();
-      loadColumnStats().catch((err) => console.error(err));
       await loadCurrentPage();
     } else {
       state.hiddenTableColumns.add(columnName);
@@ -836,7 +1153,7 @@ function updateOverlayImage() {
   const total = state.overlayImages.length;
   const currentIndex = Math.max(
     0,
-    Math.min(state.overlayImageIndex, total - 1)
+    Math.min(state.overlayImageIndex, total - 1),
   );
   state.overlayImageIndex = currentIndex;
   const url = total ? state.overlayImages[currentIndex] : "";
@@ -875,29 +1192,12 @@ function openImageOverlay(rowIndex, imageUrl, imageColumnIndex) {
   state.overlayImages = imageList.length
     ? imageList
     : normalizedImage
-    ? [normalizedImage]
-    : [];
+      ? [normalizedImage]
+      : [];
   state.overlayImageIndex = imageIndex;
   state.overlayImageUrl = normalizedImage;
-
-  const fields = state.columns
-    .map((col, idx) => {
-      const value = state.rows[rowIndex][idx];
-      const copyValue = encodeCopyValue(value);
-      return `
-        <div class="overlay-field">
-          <div class="overlay-field-header">
-            <div class="overlay-field-label">${escapeHtml(col)}</div>
-            <button class="overlay-copy" data-copy="${copyValue}" type="button">Copy</button>
-          </div>
-          <div class="overlay-field-value">${formatOverlayValue(value)}</div>
-        </div>
-      `;
-    })
-    .join("");
-
-  elements.overlayFields.innerHTML =
-    fields || '<div class="muted">No extra fields</div>';
+  state.overlayRawFields = new Set();
+  renderOverlayFields();
   updateOverlayImage();
   elements.imageOverlay.classList.add("active");
 }
@@ -909,6 +1209,7 @@ function closeImageOverlay() {
   state.overlayImageUrl = "";
   state.overlayImages = [];
   state.overlayImageIndex = 0;
+  state.overlayRawFields = new Set();
   elements.imageOverlay.classList.remove("active");
   elements.overlayImage.removeAttribute("src");
   elements.overlayFields.innerHTML = "";
@@ -963,7 +1264,7 @@ function highlightJson(text) {
     const start = match.index;
     result += escapeHtml(text.slice(lastIndex, start));
     let className = "json-number";
-    if (token.startsWith("\"")) {
+    if (token.startsWith('"')) {
       let index = start + token.length;
       while (index < text.length && /\s/.test(text[index])) {
         index += 1;
@@ -1004,26 +1305,33 @@ async function loadConfig() {
 async function selectFile(fileName) {
   state.file = fileName;
   renderFiles();
-  state.offset = 0;
+  resetPreviewPaging();
   state.view = "data";
   state.searchQuery = "";
   state.querySql = "";
   state.rowCount = null;
+  state.datasetWarning = "";
   state.expandedRowIndex = null;
   state.columnStats = {};
   state.selectedRowIndex = null;
   state.selectedRowId = null;
+  state.rowInspectorRaw = false;
   state.pendingDeleteColumn = null;
   state.rowIds = [];
   state.hiddenTableColumns = new Set();
   state.hiddenColumns = new Set();
+  state.countJobId = null;
+  state.statsJobId = null;
+  state.searchJobId = null;
+  state.queryJobId = null;
+  state.edaJobId = null;
   closeImageOverlay();
   closeJsonOverlay();
   closeDeleteOverlay();
   closeColumnDeleteOverlay();
   elements.searchInput.value = "";
   elements.currentFile.textContent = fileName;
-  elements.rowCount.textContent = "";
+  elements.rowCount.textContent = "All Data Num: Unknown";
   if (elements.edaStatus) {
     elements.edaStatus.textContent = "";
   }
@@ -1035,25 +1343,28 @@ async function selectFile(fileName) {
     elements.nlStatus.textContent = "";
   }
   await loadSchema();
-  loadColumnStats().catch((err) => console.error(err));
   await loadCurrentPage();
 }
 
 async function loadSchema() {
   if (!state.file) return;
   const data = await fetchJSON(
-    `/api/schema?file=${encodeURIComponent(state.file)}`
+    `/api/schema?file=${encodeURIComponent(state.file)}`,
   );
   state.schema = data.columns || [];
+  state.datasetWarning = data.warning || "";
   renderDatasetInfo();
   renderColumnFocus(null);
+  renderMeta();
 }
 
 async function loadColumnStats() {
   if (!state.file) return;
-  const data = await fetchJSON(
-    `/api/column_stats?file=${encodeURIComponent(state.file)}`
-  );
+  const fileAtStart = state.file;
+  const job = await startJob("stats", { file: state.file });
+  state.statsJobId = job.id;
+  const data = await waitForJob(job.id);
+  if (state.file !== fileAtStart || state.statsJobId !== job.id) return;
   const stats = data.columns || [];
   state.columnStats = stats.reduce((acc, item) => {
     acc[item.name] = item;
@@ -1064,38 +1375,67 @@ async function loadColumnStats() {
 
 async function loadPreview() {
   if (!state.file) return;
-  const data = await fetchJSON(
-    `/api/preview?file=${encodeURIComponent(state.file)}&limit=${
-      state.limit
-    }&offset=${state.offset}`
-  );
+  const token = currentPageToken();
+  const params = new URLSearchParams({
+    file: state.file,
+    limit: String(state.limit),
+  });
+  if (token) {
+    params.set("page_token", token);
+  }
+  const data = await fetchJSON(`/api/preview?${params.toString()}`);
   applyTableData(data);
 }
 
 async function loadSearch() {
   if (!state.file) return;
-  const data = await fetchJSON(
-    `/api/search?file=${encodeURIComponent(
-      state.file
-    )}&query=${encodeURIComponent(state.searchQuery)}&limit=${
-      state.limit
-    }&offset=${state.offset}`
-  );
+  const fileAtStart = state.file;
+  const job = await startJob("search", {
+    file: state.file,
+    query: state.searchQuery,
+    limit: state.limit,
+  });
+  state.searchJobId = job.id;
+  elements.viewLabel.textContent = "Searching";
+  const data = await waitForJob(job.id, {
+    onUpdate: (nextJob) => {
+      elements.datasetMeta.textContent = formatJobProgress(
+        nextJob,
+        "Searching",
+      );
+    },
+  });
+  if (state.file !== fileAtStart || state.searchJobId !== job.id) return;
   applyTableData(data);
 }
 
 async function loadQuery(sql) {
   if (!state.file) return;
-  const data = await fetchJSON("/api/query", {
-    method: "POST",
-    body: JSON.stringify({
-      file: state.file,
-      sql,
-      limit: state.limit,
-      offset: state.offset,
-    }),
+  const fileAtStart = state.file;
+  const job = await startJob("query", {
+    file: state.file,
+    sql,
+    limit: state.limit,
+    offset: state.offset,
   });
-  applyTableData(data);
+  state.queryJobId = job.id;
+  elements.viewLabel.textContent = "Running query";
+  try {
+    const data = await waitForJob(job.id, {
+      onUpdate: (nextJob) => {
+        elements.datasetMeta.textContent = formatJobProgress(
+          nextJob,
+          "Running query",
+        );
+      },
+    });
+    if (state.file !== fileAtStart || state.queryJobId !== job.id) return;
+    applyTableData(data);
+  } finally {
+    if (state.queryJobId === job.id) {
+      state.queryJobId = null;
+    }
+  }
 }
 
 async function loadCurrentPage() {
@@ -1114,8 +1454,8 @@ async function handleSearch() {
   const query = elements.searchInput.value.trim();
   if (!query) return;
   state.searchQuery = query;
-  state.offset = 0;
-  state.view = "data";
+  resetPreviewPaging();
+  state.view = "search";
   await loadSearch();
 }
 
@@ -1135,7 +1475,7 @@ function clearDatasetSearch() {
 
 async function clearSearch() {
   state.searchQuery = "";
-  state.offset = 0;
+  resetPreviewPaging();
   state.view = "data";
   await loadPreview();
 }
@@ -1146,45 +1486,89 @@ async function runQuery() {
   state.view = "query";
   state.querySql = sql;
   state.offset = 0;
+  state.pageIndex = 0;
   await loadQuery(sql);
 }
 
 function resetView() {
   state.view = "data";
   state.querySql = "";
-  state.offset = 0;
+  state.searchQuery = "";
+  resetPreviewPaging();
   loadCurrentPage();
 }
 
 async function countRows() {
   if (!state.file) return;
+  if (state.countJobId) {
+    await cancelJob(state.countJobId);
+    state.countJobId = null;
+    elements.countRows.textContent = "Count Rows";
+    elements.rowCount.textContent = "Count cancelled.";
+    return;
+  }
+  const fileAtStart = state.file;
   elements.rowCount.textContent = "Counting...";
-  const data = await fetchJSON(
-    `/api/count?file=${encodeURIComponent(state.file)}`
-  );
-  state.rowCount = data.count;
-  elements.rowCount.textContent = `All Data Num: ${data.count.toLocaleString()}`;
+  elements.countRows.textContent = "Cancel Count";
+  try {
+    const job = await startJob("count", { file: state.file });
+    state.countJobId = job.id;
+    const data = await waitForJob(job.id, {
+      onUpdate: (nextJob) => {
+        elements.rowCount.textContent = formatJobProgress(
+          nextJob,
+          "Counting",
+        );
+      },
+    });
+    if (state.file !== fileAtStart || state.countJobId !== job.id) return;
+    state.rowCount = data.count;
+    elements.rowCount.textContent = `All Data Num: ${data.count.toLocaleString()}`;
+  } catch (err) {
+    elements.rowCount.textContent = extractErrorMessage(err);
+  } finally {
+    state.countJobId = null;
+    elements.countRows.textContent = "Count Rows";
+  }
 }
 
 async function runEda() {
   if (!state.file || !elements.runEda) return;
+  if (state.edaJobId) {
+    await cancelJob(state.edaJobId);
+    state.edaJobId = null;
+    elements.runEda.textContent = "Run EDA";
+    if (elements.edaStatus) {
+      elements.edaStatus.textContent = "EDA cancelled.";
+    }
+    return;
+  }
   const sampleValue = elements.edaSample
     ? Number(elements.edaSample.value)
     : null;
   const sample =
     Number.isFinite(sampleValue) && sampleValue > 0 ? sampleValue : undefined;
-  elements.runEda.disabled = true;
+  elements.runEda.textContent = "Cancel EDA";
   if (elements.edaStatus) {
-    elements.edaStatus.textContent = "Generating EDA report...";
+    elements.edaStatus.textContent = "Starting EDA job...";
   }
   if (elements.edaLink) {
     elements.edaLink.style.display = "none";
     elements.edaLink.textContent = "";
   }
   try {
-    const data = await fetchJSON("/api/eda", {
-      method: "POST",
-      body: JSON.stringify({ file: state.file, sample }),
+    const job = await startJob("eda", { file: state.file, sample });
+    state.edaJobId = job.id;
+    const data = await waitForJob(job.id, {
+      intervalMs: 1000,
+      onUpdate: (nextJob) => {
+        if (elements.edaStatus) {
+          elements.edaStatus.textContent = formatJobProgress(
+            nextJob,
+            "Generating EDA report",
+          );
+        }
+      },
     });
     if (elements.edaStatus) {
       const sampleNote = data.sample
@@ -1205,7 +1589,8 @@ async function runEda() {
     }
     console.error(err);
   } finally {
-    elements.runEda.disabled = false;
+    state.edaJobId = null;
+    elements.runEda.textContent = "Run EDA";
   }
 }
 
@@ -1274,8 +1659,8 @@ async function loadColumnSample(columnName) {
   try {
     const data = await fetchJSON(
       `/api/column_sample?file=${encodeURIComponent(
-        state.file
-      )}&column=${encodeURIComponent(columnName)}`
+        state.file,
+      )}&column=${encodeURIComponent(columnName)}`,
     );
     renderColumnFocus(columnName, data.values || []);
   } catch (err) {
@@ -1309,17 +1694,30 @@ function attachEvents() {
 
   elements.pageSize.addEventListener("change", (event) => {
     state.limit = Number(event.target.value);
-    state.offset = 0;
+    resetPreviewPaging();
     loadCurrentPage();
   });
 
   elements.prevPage.addEventListener("click", () => {
-    state.offset = Math.max(0, state.offset - state.limit);
+    if (state.view === "query") {
+      state.offset = Math.max(0, state.offset - state.limit);
+      loadCurrentPage();
+      return;
+    }
+    if (state.view === "search" || state.pageIndex <= 0) return;
+    state.pageIndex -= 1;
     loadCurrentPage();
   });
 
   elements.nextPage.addEventListener("click", () => {
-    state.offset += state.limit;
+    if (state.view === "query") {
+      state.offset += state.limit;
+      loadCurrentPage();
+      return;
+    }
+    if (state.view === "search" || !state.nextPageToken) return;
+    state.pageTokens[state.pageIndex + 1] = state.nextPageToken;
+    state.pageIndex += 1;
     loadCurrentPage();
   });
 
@@ -1372,21 +1770,24 @@ function attachEvents() {
   if (elements.columnDeleteCancel) {
     elements.columnDeleteCancel.addEventListener(
       "click",
-      closeColumnDeleteOverlay
+      closeColumnDeleteOverlay,
     );
   }
   if (elements.columnDeleteSoft) {
     elements.columnDeleteSoft.addEventListener("click", () =>
-      performColumnDelete(false)
+      performColumnDelete(false),
     );
   }
   if (elements.columnDeleteHard) {
     elements.columnDeleteHard.addEventListener("click", () =>
-      performColumnDelete(true)
+      performColumnDelete(true),
     );
   }
   if (elements.copyJson) {
     elements.copyJson.addEventListener("click", copyJsonOverlay);
+  }
+  if (elements.rowInspectorRaw) {
+    elements.rowInspectorRaw.addEventListener("click", toggleRowInspectorRaw);
   }
   if (elements.nlGenerate) {
     elements.nlGenerate.addEventListener("click", runNlQuery);
@@ -1478,6 +1879,7 @@ function attachEvents() {
           ? state.rows[rowIndex][cellIndex]
           : null;
       const imageUrl =
+        image.getAttribute("src") ||
         image.getAttribute("data-image-src") ||
         (typeof value === "string"
           ? normalizeImageUrl(value)
@@ -1516,6 +1918,11 @@ function attachEvents() {
     elements.overlayNext.addEventListener("click", () => navigateOverlay(1));
     if (elements.overlayFields) {
       elements.overlayFields.addEventListener("click", async (event) => {
+        const rawBtn = event.target.closest(".overlay-raw-field");
+        if (rawBtn) {
+          toggleOverlayFieldRaw(rawBtn.dataset.rawField);
+          return;
+        }
         const btn = event.target.closest(".overlay-copy");
         if (!btn) return;
         const encoded = btn.dataset.copy || "";
