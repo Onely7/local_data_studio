@@ -4,7 +4,7 @@
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <title>Data Viewer</title>
-    <link rel="stylesheet" href="styles.css" />
+    <link rel="stylesheet" href="styles.css?v=20260704-query-eda" />
   </head>
   <body>
     <div class="app">
@@ -120,6 +120,9 @@ SELECT * FROM data LIMIT 100</textarea
             <div class="eda-actions">
               <button class="ghost" id="count-rows">Count Rows</button>
               <button id="run-eda">Run EDA</button>
+              <button id="run-eda-query">
+                Run EDA on Query Results
+              </button>
             </div>
             <div class="muted" id="row-count"></div>
             <div class="eda-settings">
@@ -281,6 +284,6 @@ Select a row to inspect</pre
       </div>
     </div>
 
-    <script src="app.js"></script>
+    <script src="app.js?v=20260704-query-eda"></script>
   </body>
 </html>

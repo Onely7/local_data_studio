@@ -330,6 +330,26 @@ th {
   z-index: 2;
 }
 
+#data-table .row-index-header,
+#data-table .row-index-cell {
+  width: 48px;
+  min-width: 48px;
+  max-width: 48px;
+  color: rgba(100, 116, 139, 0.42) !important;
+  font-weight: 400;
+  opacity: 0.72;
+  text-align: right;
+  user-select: none;
+}
+
+#data-table .row-index-header {
+  cursor: default;
+}
+
+#data-table .row-index-cell {
+  font-variant-numeric: tabular-nums;
+}
+
 .col-hidden .col-name {
   text-decoration: line-through;
   opacity: 0.6;
@@ -687,6 +707,10 @@ tr.expanded {
   gap: 8px;
   align-items: center;
   margin-bottom: 8px;
+}
+
+#run-eda-query {
+  background: #509483;
 }
 
 .eda-settings {
@@ -1148,8 +1172,9 @@ tr.expanded {
   overflow: auto;
   font-size: 13px;
   line-height: 1.5;
-  font-family: "SFMono-Regular", "Menlo", "Monaco", "Consolas",
-    "Liberation Mono", "Courier New", monospace;
+  font-family:
+    "SFMono-Regular", "Menlo", "Monaco", "Consolas", "Liberation Mono",
+    "Courier New", monospace;
   white-space: pre-wrap;
   max-height: 460px;
 }
@@ -1179,8 +1204,9 @@ tr.expanded {
   margin: 0;
   white-space: pre-wrap;
   word-break: break-word;
-  font-family: "SFMono-Regular", "Menlo", "Monaco", "Consolas",
-    "Liberation Mono", "Courier New", monospace;
+  font-family:
+    "SFMono-Regular", "Menlo", "Monaco", "Consolas", "Liberation Mono",
+    "Courier New", monospace;
 }
 
 .json-body-wrap {

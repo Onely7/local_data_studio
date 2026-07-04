@@ -38,6 +38,7 @@ const state = {
   searchJobId: null,
   queryJobId: null,
   edaJobId: null,
+  edaJobKind: "",
 };
 
 const UPLOAD_EXTENSIONS = new Set([".jsonl", ".parquet", ".csv", ".tsv"]);
@@ -75,6 +76,7 @@ const elements = {
   rowInspector: document.getElementById("row-inspector"),
   rowInspectorRaw: document.getElementById("row-inspector-raw"),
   runEda: document.getElementById("run-eda"),
+  runEdaQuery: document.getElementById("run-eda-query"),
   edaStatus: document.getElementById("eda-status"),
   edaLink: document.getElementById("eda-link"),
   edaSample: document.getElementById("eda-sample"),
@@ -262,10 +264,8 @@ function extractImageCandidates(value) {
   }
   if (Array.isArray(value)) {
     return value
-      .filter((item) => typeof item === "string" && isImageUrl(item))
-      .slice(0, MAX_IMAGE_CANDIDATES)
-      .map((item) => imageCandidate(normalizeImageUrl(item), item))
-      .filter(Boolean);
+      .flatMap((item) => extractImageCandidates(item))
+      .slice(0, MAX_IMAGE_CANDIDATES);
   }
   if (value && typeof value === "object" && !Array.isArray(value)) {
     const fallback = JSON.stringify(value);
@@ -290,11 +290,9 @@ function extractImageCandidates(value) {
 function extractImageUrls(value) {
   const urls = [];
   extractImageCandidates(value).forEach((candidate) => {
-    [candidate.src, candidate.fallbackSrc].forEach((url) => {
-      if (url && !urls.includes(url)) {
-        urls.push(url);
-      }
-    });
+    if (candidate.src && !urls.includes(candidate.src)) {
+      urls.push(candidate.src);
+    }
   });
   return urls;
 }
@@ -304,7 +302,7 @@ function renderImageGrid(candidates, options = {}) {
   const className = options.className || "image-grid";
   const imageCandidates = candidates.map((item) =>
     typeof item === "string" ? imageCandidate(item, item) : item,
-  );
+  ).filter(Boolean);
   const shown = imageCandidates.slice(0, max);
   const extra = imageCandidates.length - shown.length;
   const items = shown
@@ -461,17 +459,33 @@ function encodeCopyValue(value) {
   return encodeURIComponent(text);
 }
 
-function collectRowImageUrls(row) {
-  const urls = [];
+function sameImageCandidate(left, right) {
+  if (!left || !right) return false;
+  return (
+    left.src === right.src &&
+    (left.fallbackSrc || "") === (right.fallbackSrc || "")
+  );
+}
+
+function imageCandidateMatchesUrl(candidate, url) {
+  if (!candidate || !url) return false;
+  return candidate.src === url || candidate.fallbackSrc === url;
+}
+
+function collectRowImageCandidates(row) {
+  const candidates = [];
   row.forEach((value) => {
-    const images = extractImageUrls(value);
-    images.forEach((img) => {
-      if (urls.length < MAX_IMAGE_CANDIDATES && !urls.includes(img)) {
-        urls.push(img);
+    const images = extractImageCandidates(value);
+    images.forEach((candidate) => {
+      if (
+        candidates.length < MAX_IMAGE_CANDIDATES &&
+        !candidates.some((item) => sameImageCandidate(item, candidate))
+      ) {
+        candidates.push(candidate);
       }
     });
   });
-  return urls;
+  return candidates;
 }
 
 function isJsonDetailValue(value) {
@@ -589,6 +603,14 @@ function renderFiles() {
   });
 }
 
+function applyRowIndexStyle(cell) {
+  cell.style.color = "rgba(100, 116, 139, 0.42)";
+  cell.style.fontWeight = "400";
+  cell.style.opacity = "0.72";
+  cell.style.textAlign = "right";
+  cell.style.userSelect = "none";
+}
+
 function renderTable() {
   elements.tableHead.innerHTML = "";
   elements.tableBody.innerHTML = "";
@@ -607,6 +629,12 @@ function renderTable() {
   }
 
   const headRow = document.createElement("tr");
+  const indexHead = document.createElement("th");
+  indexHead.className = "row-index-header";
+  indexHead.setAttribute("aria-label", "Row index");
+  applyRowIndexStyle(indexHead);
+  headRow.appendChild(indexHead);
+
   visibleColumns.forEach((col) => {
     const th = document.createElement("th");
     th.classList.add("col-header-cell");
@@ -705,6 +733,12 @@ function renderTable() {
     if (state.expandedRowIndex === rowIndex) {
       tr.classList.add("expanded");
     }
+    const indexCell = document.createElement("td");
+    indexCell.className = "row-index-cell";
+    indexCell.textContent = String(previewRowNumber(rowIndex));
+    applyRowIndexStyle(indexCell);
+    tr.appendChild(indexCell);
+
     state.columns.forEach((col, idx) => {
       if (state.hiddenTableColumns.has(col)) {
         return;
@@ -722,7 +756,7 @@ function renderTable() {
       details.className = "expanded-row";
       details.dataset.index = rowIndex;
       const td = document.createElement("td");
-      td.colSpan = visibleColumns.length;
+      td.colSpan = visibleColumns.length + 1;
       let visibleCount = 0;
       const content = state.columns
         .map((col, idx) => {
@@ -775,6 +809,12 @@ function renderPagination() {
         ? false
         : state.view === "search" || !state.nextPageToken;
   }
+}
+
+function previewRowNumber(rowIndex) {
+  const base =
+    state.view === "query" ? state.offset : state.pageIndex * state.limit;
+  return base + rowIndex + 1;
 }
 
 function renderMeta() {
@@ -1149,19 +1189,37 @@ async function copyJsonOverlay() {
 }
 
 function updateOverlayImage() {
-  if (!elements.imageOverlay) return;
+  if (!elements.overlayImage) return;
   const total = state.overlayImages.length;
   const currentIndex = Math.max(
     0,
     Math.min(state.overlayImageIndex, total - 1),
   );
   state.overlayImageIndex = currentIndex;
-  const url = total ? state.overlayImages[currentIndex] : "";
-  elements.overlayImage.src = url;
+  const candidate = total ? state.overlayImages[currentIndex] : null;
+  const url = candidate ? candidate.src : "";
+  elements.overlayImage.dataset.fallbackUsed = "0";
+  elements.overlayImage.onerror = () => {
+    if (
+      candidate &&
+      candidate.fallbackSrc &&
+      elements.overlayImage.dataset.fallbackUsed !== "1"
+    ) {
+      elements.overlayImage.dataset.fallbackUsed = "1";
+      elements.overlayImage.src = candidate.fallbackSrc;
+      return;
+    }
+    elements.overlayImage.removeAttribute("src");
+  };
+  if (url) {
+    elements.overlayImage.src = url;
+  } else {
+    elements.overlayImage.removeAttribute("src");
+  }
 
   const rowLabel =
     state.overlayRowIndex !== null
-      ? state.offset + state.overlayRowIndex + 1
+      ? previewRowNumber(state.overlayRowIndex)
       : "-";
   const indexLabel = total > 1 ? ` | ${currentIndex + 1}/${total}` : "";
   elements.overlayTitle.textContent = `Row ${rowLabel}${indexLabel}`;
@@ -1179,20 +1237,23 @@ function openImageOverlay(rowIndex, imageUrl, imageColumnIndex) {
   if (!elements.imageOverlay) return;
   closeJsonOverlay();
   const row = state.rows[rowIndex] || [];
-  const cellValue = imageColumnIndex !== null ? row[imageColumnIndex] : null;
-  const cellImages = extractImageUrls(cellValue);
-  const rowImages = collectRowImageUrls(row);
-  const imageList = cellImages.length ? cellImages : rowImages;
+  const hasImageColumn = Number.isFinite(imageColumnIndex);
+  const cellValue = hasImageColumn ? row[imageColumnIndex] : null;
   const normalizedImage = imageUrl ? normalizeImageUrl(imageUrl) : "";
-  let imageIndex = imageList.findIndex((item) => item === normalizedImage);
+  const rowImages = collectRowImageCandidates(row);
+  const cellImages = extractImageCandidates(cellValue);
+  const imageList = rowImages.length ? rowImages : cellImages;
+  let imageIndex = imageList.findIndex((item) =>
+    imageCandidateMatchesUrl(item, normalizedImage),
+  );
   if (imageIndex < 0) imageIndex = 0;
 
   state.overlayRowIndex = rowIndex;
-  state.overlayColumnIndex = imageColumnIndex;
+  state.overlayColumnIndex = hasImageColumn ? imageColumnIndex : null;
   state.overlayImages = imageList.length
     ? imageList
     : normalizedImage
-      ? [normalizedImage]
+      ? [imageCandidate(normalizedImage, normalizedImage)]
       : [];
   state.overlayImageIndex = imageIndex;
   state.overlayImageUrl = normalizedImage;
@@ -1211,6 +1272,8 @@ function closeImageOverlay() {
   state.overlayImageIndex = 0;
   state.overlayRawFields = new Set();
   elements.imageOverlay.classList.remove("active");
+  elements.overlayImage.onerror = null;
+  delete elements.overlayImage.dataset.fallbackUsed;
   elements.overlayImage.removeAttribute("src");
   elements.overlayFields.innerHTML = "";
   if (elements.overlayNav) {
@@ -1325,6 +1388,7 @@ async function selectFile(fileName) {
   state.searchJobId = null;
   state.queryJobId = null;
   state.edaJobId = null;
+  state.edaJobKind = "";
   closeImageOverlay();
   closeJsonOverlay();
   closeDeleteOverlay();
@@ -1532,32 +1596,68 @@ async function countRows() {
   }
 }
 
-async function runEda() {
+function setEdaButtonsRunning(kind) {
+  if (elements.runEda) {
+    elements.runEda.disabled = Boolean(kind && kind !== "all");
+    elements.runEda.textContent = kind === "all" ? "Cancel EDA" : "Run EDA";
+  }
+  if (elements.runEdaQuery) {
+    elements.runEdaQuery.disabled = Boolean(kind && kind !== "query");
+    elements.runEdaQuery.textContent =
+      kind === "query" ? "Cancel Query EDA" : "Run EDA on Query Results";
+  }
+}
+
+function edaSampleRequest() {
+  const sampleValue = elements.edaSample
+    ? Number(elements.edaSample.value)
+    : null;
+  return Number.isFinite(sampleValue) && sampleValue > 0 ? sampleValue : undefined;
+}
+
+async function runEdaJob(kind) {
   if (!state.file || !elements.runEda) return;
   if (state.edaJobId) {
     await cancelJob(state.edaJobId);
     state.edaJobId = null;
-    elements.runEda.textContent = "Run EDA";
+    state.edaJobKind = "";
+    setEdaButtonsRunning("");
     if (elements.edaStatus) {
       elements.edaStatus.textContent = "EDA cancelled.";
     }
     return;
   }
-  const sampleValue = elements.edaSample
-    ? Number(elements.edaSample.value)
-    : null;
-  const sample =
-    Number.isFinite(sampleValue) && sampleValue > 0 ? sampleValue : undefined;
-  elements.runEda.textContent = "Cancel EDA";
+
+  const sample = edaSampleRequest();
+  const payload = { file: state.file, sample };
+  let jobKind = "eda";
+  let sourceLabel = "EDA report";
+  if (kind === "query") {
+    const sql = elements.sqlInput.value.trim();
+    if (!sql) {
+      if (elements.edaStatus) {
+        elements.edaStatus.textContent = "Enter a SQL query first.";
+      }
+      return;
+    }
+    payload.sql = sql;
+    jobKind = "eda_query";
+    sourceLabel = "query EDA report";
+  }
+
+  state.edaJobKind = kind;
+  setEdaButtonsRunning(kind);
   if (elements.edaStatus) {
-    elements.edaStatus.textContent = "Starting EDA job...";
+    elements.edaStatus.textContent =
+      kind === "query" ? "Starting query EDA job..." : "Starting EDA job...";
   }
   if (elements.edaLink) {
     elements.edaLink.style.display = "none";
     elements.edaLink.textContent = "";
   }
   try {
-    const job = await startJob("eda", { file: state.file, sample });
+    const fileAtStart = state.file;
+    const job = await startJob(jobKind, payload);
     state.edaJobId = job.id;
     const data = await waitForJob(job.id, {
       intervalMs: 1000,
@@ -1565,18 +1665,19 @@ async function runEda() {
         if (elements.edaStatus) {
           elements.edaStatus.textContent = formatJobProgress(
             nextJob,
-            "Generating EDA report",
+            kind === "query" ? "Generating query EDA report" : "Generating EDA report",
           );
         }
       },
     });
+    if (state.file !== fileAtStart || state.edaJobId !== job.id) return;
     if (elements.edaStatus) {
       const sampleNote = data.sample
         ? ` EDA target data maximum number of records: ${data.sample}.`
         : "";
       elements.edaStatus.textContent = data.cached
-        ? `Cached report ready.${sampleNote}`
-        : `Report generated.${sampleNote}`;
+        ? `Cached ${sourceLabel} ready.${sampleNote}`
+        : `${sourceLabel} generated.${sampleNote}`;
     }
     if (elements.edaLink && data.url) {
       elements.edaLink.href = data.url;
@@ -1590,8 +1691,17 @@ async function runEda() {
     console.error(err);
   } finally {
     state.edaJobId = null;
-    elements.runEda.textContent = "Run EDA";
+    state.edaJobKind = "";
+    setEdaButtonsRunning("");
   }
+}
+
+async function runEda() {
+  await runEdaJob("all");
+}
+
+async function runEdaOnQueryResults() {
+  await runEdaJob("query");
 }
 
 async function runNlQuery() {
@@ -1727,6 +1837,9 @@ function attachEvents() {
   elements.countRows.addEventListener("click", countRows);
   if (elements.runEda) {
     elements.runEda.addEventListener("click", runEda);
+  }
+  if (elements.runEdaQuery) {
+    elements.runEdaQuery.addEventListener("click", runEdaOnQueryResults);
   }
   if (elements.copyRow) {
     elements.copyRow.addEventListener("click", copyRowInspector);

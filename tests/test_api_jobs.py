@@ -1,9 +1,11 @@
 import asyncio
 from time import sleep
 from unittest import TestCase
+from unittest.mock import patch
 
 from app import (
     CountJobRequest,
+    EdaQueryRequest,
     IndexJobRequest,
     QueryRequest,
     SearchJobRequest,
@@ -11,6 +13,7 @@ from app import (
     get_job,
     preview,
     start_count_job,
+    start_eda_query_job,
     start_index_job,
     start_query_job,
     start_search_job,
@@ -63,6 +66,37 @@ class ApiJobTests(TestCase):
 
         self.assertEqual("succeeded", payload["status"])
         self.assertIn("columns", payload["result"])
+
+    def test_eda_query_job_completes_for_filtered_results(self) -> None:
+        report_columns: list[str] = []
+
+        class FakeReport:
+            def to_file(self, path: str) -> None:
+                with open(path, "w", encoding="utf-8") as handle:
+                    handle.write("<html>query eda</html>")
+
+        def fake_build_report(df, title: str, minimal: bool):  # noqa: ANN001, ARG001
+            report_columns.extend(df.columns)
+            return FakeReport()
+
+        with patch("app.build_eda_report", side_effect=fake_build_report):
+            started = asyncio.run(
+                start_eda_query_job(
+                    EdaQueryRequest(
+                        file="example.jsonl",
+                        sql=("SELECT row_number() OVER () AS rn, object, final_rating FROM data WHERE object = 'horse'"),
+                        sample=100,
+                        force=True,
+                    )
+                )
+            )
+            payload = self._wait_for_job(started["id"])
+
+        self.assertEqual("succeeded", payload["status"])
+        self.assertEqual("query", payload["result"]["source"])
+        self.assertIn("/cache/", payload["result"]["url"])
+        self.assertNotIn("rn", report_columns)
+        self.assertIn("object", report_columns)
 
     def _wait_for_job(self, job_id: str) -> dict:
         payload = {}
