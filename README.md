@@ -127,7 +127,7 @@ Open [http://127.0.0.1:8000](http://127.0.0.1:8000) to view the Local Data Studi
 
 5. **Row Inspector / Image Zoom**
    Click a row to expand it in the details panel. Long values are compacted by default and can be toggled with Raw. For image columns, click to open a zoomed view. Image candidates are detected from image URLs, relative/absolute image paths, and dictionaries such as `{ "bytes": ..., "path": ... }`; bytes are tried first and path is used as a fallback.  
-   <img src="images/local_data_studio_02.png" alt="local data studio 01" width=60%>
+   <img src="images/local_data_studio_02.png" alt="local data studio 02" width=45%> <img src="images/local_data_studio_03.png" alt="local data studio 03" width=45%>
 
 ## Notes
 

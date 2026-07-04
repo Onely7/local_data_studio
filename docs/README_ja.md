@@ -126,7 +126,7 @@ INFO:     Application startup complete.
 
 5. **Row Inspector / 画像拡大**  
    行をクリックすると詳細パネルで展開されます。長い値はデフォルトで省略表示され、Raw で完全表示に切り替えられます。画像列はクリックで拡大表示できます。画像候補は画像 URL、相対/絶対画像パス、`{ "bytes": ..., "path": ... }` のような辞書から検出され、bytes を優先して表示し、失敗した場合は path を fallback として使用します。  
-   <img src="../images/local_data_studio_02.png" alt="local data studio 01" width=60%>
+   <img src="../images/local_data_studio_02.png" alt="local data studio 02" width=45%> <img src="../images/local_data_studio_03.png" alt="local data studio 03" width=45%>
 
 ## 注意点
 
