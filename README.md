@@ -8,7 +8,7 @@ English | [日本語](docs/README_ja.md)
 </div>
 
 Local Data Studio is a Web Viewer for browsing and analyzing JSONL/JSON/CSV/TSV/Parquet files locally, inspired by Hugging Face Datasets' [Data Studio](https://huggingface.co/docs/hub/data-studio#data-studio).  
-It provides fast preview, DuckDB SQL execution (with optional LLM-assisted SQL generation), basic statistics, and EDA report generation.
+It provides fast preview, DuckDB SQL execution (with optional LLM-assisted SQL generation), basic statistics, EDA report generation, and Embedding Atlas visualization.
 
 <div align="center">
 <img src="images/local_data_studio_01.png" alt="local data studio 01" width=90%>
@@ -19,6 +19,7 @@ It provides fast preview, DuckDB SQL execution (with optional LLM-assisted SQL g
 - Fast bounded preview and cursor-style paging for large-scale datasets
 - DuckDB SQL console (read-only) with timeout, memory, and large-scan guards
 - EDA report generation for the whole dataset or SQL query results (cached under `./cache`)
+- Embedding Atlas visualization for selected text/image columns, including SQL query results
 - Row Inspector (copy, delete, highlight)
 - Image rendering from URLs, local paths, and `{bytes, path}` image dictionaries
 - Image zoom and row-level multi-image navigation
@@ -67,6 +68,20 @@ It provides fast preview, DuckDB SQL execution (with optional LLM-assisted SQL g
     EDA_CELL_MAX_CHARS=5000
     EDA_NESTED_POLICY=stringify
 
+    # Embedding Atlas Settings
+    ATLAS_HOST=127.0.0.1
+    ATLAS_PORT=5055
+    # ATLAS_SAMPLE=5000
+    # ATLAS_BATCH_SIZE=16
+    ATLAS_CACHE_MAX_BYTES=10737418240
+    ATLAS_TEXT_MAX_CHARS=4096
+    ATLAS_EMBEDDING_DTYPE=float32
+    ATLAS_PROJECTION_MODE=full
+    ATLAS_ANCHOR_SAMPLE=10000
+    # ATLAS_TEXT_EMBEDDER=sentence-transformers
+    # ATLAS_IMAGE_EMBEDDER=transformers
+    ATLAS_TRUST_REMOTE_CODE=false
+
     # Delete Permission
     ALLOW_DELETE_DATA=false
     ```
@@ -86,6 +101,16 @@ It provides fast preview, DuckDB SQL execution (with optional LLM-assisted SQL g
    - `EDA_PROFILE_MODE`: Either `minimal` or `maximal`. `minimal` generates a lightweight report, while `maximal` includes more detailed statistics but takes longer.
    - `EDA_CELL_MAX_CHARS`: Maximum number of characters to display for long strings in EDA. Excess text is truncated as `... (truncated)`.
    - `EDA_NESTED_POLICY`: How to handle nested types (list/struct/object/binary, etc.). `stringify` keeps them as strings, and `drop` removes the corresponding columns.
+   - `ATLAS_HOST` / `ATLAS_PORT`: Host and starting port for local Embedding Atlas pages. `embedding-atlas` may choose another port if the port is already in use.
+   - `ATLAS_SAMPLE`: Optional random sample size passed to Embedding Atlas. Leave unset or `0` to use all rows.
+   - `ATLAS_BATCH_SIZE`: Optional embedding batch size. Leave unset or `0` to use Embedding Atlas defaults.
+   - `ATLAS_CACHE_MAX_BYTES`: Maximum size for Local Data Studio's Embedding Atlas cache under `./cache/atlas`. Old cache files are pruned first.
+   - `ATLAS_TEXT_MAX_CHARS`: Maximum characters kept per text cell for Atlas embedding inputs and cached Atlas parquet output. Set `0` to disable truncation.
+   - `ATLAS_EMBEDDING_DTYPE`: Embedding array precision before projection: `float32` or `float16`.
+   - `ATLAS_PROJECTION_MODE`: Projection strategy: `full` computes UMAP on all embeddings, while `anchor_transform` fits UMAP on a representative sample and transforms the remaining rows into the same space.
+   - `ATLAS_ANCHOR_SAMPLE`: Number of rows used to fit UMAP when `ATLAS_PROJECTION_MODE=anchor_transform`.
+   - `ATLAS_TEXT_EMBEDDER` / `ATLAS_IMAGE_EMBEDDER`: Optional Embedding Atlas embedder backend names.
+   - `ATLAS_TRUST_REMOTE_CODE`: Passes `--trust-remote-code` to Embedding Atlas when `true`.
    - `ALLOW_DELETE_DATA`: If `false`, physical file deletion is disabled (session-level hiding is still allowed).
 
 ## Run
@@ -111,7 +136,7 @@ Open [http://127.0.0.1:8000](http://127.0.0.1:8000) to view the Local Data Studi
 ## Usage
 
 1. **Select a file from DATASETS**
-   Choose a dataset from the DATASETS list on the left. You can also filter by using the search box.
+   Choose a dataset from the DATASETS list on the left. You can also filter by using the search box. Long file names are ellipsized in the list, and file sizes are shown with up to three significant digits using `Bytes`, `kB`, `MB`, `GB`, or `TB`.
 
 2. **Preview / Search / Paging**
    Use Search at the top to search the data, Rows to change the number of displayed rows, and Prev/Next to move between pages.
@@ -125,7 +150,12 @@ Open [http://127.0.0.1:8000](http://127.0.0.1:8000) to view the Local Data Studi
    Dataset reports are cached under `./cache` based on {file fingerprint, number of samples, `EDA_PROFILE_MODE`}. Query-result reports are cached separately based on {file fingerprint, SQL, number of samples, `EDA_PROFILE_MODE`}.  
    You can adjust the sample count with `EDA_ROW_LIMIT` and UI-side settings.
 
-5. **Row Inspector / Image Zoom**
+5. **Visualize Embedding**
+   Put local HuggingFace encoder model directories under `models/embedder` (for example, `models/embedder/google/siglip2-base-patch16-224` or `models/embedder/Qwen/Qwen3-Embedding-0.6B`). Directories containing model marker files such as `config.json`, `modules.json`, `tokenizer_config.json`, or `preprocessor_config.json` appear in the Model dropdown.
+   Select a text or image column and a model in **Visualize Embedding**, then run **Run Atlas** to launch a local Embedding Atlas page. Use **Run Atlas on Query Results** to visualize the current SQL Console query results instead.  
+   The job runs in the background with progress updates, and an **Open Atlas** link appears when the local Atlas page is ready.
+
+6. **Row Inspector / Image Zoom**
    Click a row to expand it in the details panel. Long values are compacted by default and can be toggled with Raw. For image columns, click to open a zoomed view. Image candidates are detected from image URLs, relative/absolute image paths, and dictionaries such as `{ "bytes": ..., "path": ... }`; bytes are tried first and path is used as a fallback.  
    <img src="images/local_data_studio_02.png" alt="local data studio 02" width=45%> <img src="images/local_data_studio_03.png" alt="local data studio 03" width=45%>
 
@@ -134,6 +164,8 @@ Open [http://127.0.0.1:8000](http://127.0.0.1:8000) to view the Local Data Studi
 - Supported dataset formats: `.jsonl`, `.json`, `.csv`, `.tsv`, `.parquet`.
 - On large datasets, searching and running EDA may take time.
 - For very large datasets, preview uses cursor-style page tokens instead of large `OFFSET` scans where supported. Row counts, global search, sampled statistics, and EDA run through background jobs with progress and cancellation APIs.
+- Embedding Atlas jobs use the selected local encoder model and compute embeddings/projections locally. Projected parquet inputs are cached under `./cache/atlas/datasets`; repeated runs with the same selected data/query/model/settings reuse the projected parquet and skip embedding/UMAP recomputation. Use `ATLAS_SAMPLE` for faster exploratory runs on large datasets, `ATLAS_TEXT_MAX_CHARS` to bound very long text cells, `ATLAS_EMBEDDING_DTYPE=float16` to reduce embedding memory, `ATLAS_PROJECTION_MODE=anchor_transform` to fit UMAP on anchors and transform the remainder, and `ATLAS_CACHE_MAX_BYTES` to cap the combined Atlas cache size.
+- Local encoder model files under `models/embedder` are intentionally ignored by Git. Only the directory placeholder files are tracked; download or place model files locally on each machine.
 - Cache files are separated under `./cache/metadata`, `./cache/index`, `./cache/stats`, `./cache/count`, `./cache/search`, and EDA report files, and are invalidated by file path, size, and modification time where applicable.
 - `Run EDA on Query Results` excludes helper columns such as `rn` and `__rowid` from the generated report.
 - TB-scale `.json` arrays are not recommended. Prefer JSONL or Parquet for responsive preview.
@@ -145,6 +177,7 @@ Open [http://127.0.0.1:8000](http://127.0.0.1:8000) to view the Local Data Studi
 - Format-specific readers live in `server/readers.py`. JSONL/CSV/TSV previews use byte/page-token based reads with sparse line indexing, and Parquet previews avoid loading whole row groups.
 - SQL execution is centralized in `server/sql.py`, which validates read-only SQL, applies DuckDB resource limits, and supports cooperative cancellation for background jobs.
 - EDA report orchestration lives in `server/eda_reports.py`; low-level profiling setup and DataFrame sanitization live in `server/eda.py`.
+- Embedding Atlas launch orchestration lives in `server/atlas.py`; it discovers local models under `models/embedder`, infers text/image modality from selected column samples, materializes/reuses projected parquet cache entries, starts the `embedding-atlas` CLI, tracks progress, returns the local URL, and routes Atlas cache pruning through `server/atlas_cache.py`. Cache pruning removes old files first while preserving the parquet artifact needed by the current Atlas launch.
 - Background jobs are managed by `server/jobs.py` and expose progress, cancellation, result, and error state through `/api/jobs/*`.
 
 ## Contribution
@@ -161,6 +194,7 @@ Open [http://127.0.0.1:8000](http://127.0.0.1:8000) to view the Local Data Studi
 
 - [Dataset viewer (Huggingface)](https://github.com/huggingface/dataset-viewer): Used as a reference for UI/feature design.
 - [Zarque-profiling](https://github.com/crescendo-medix/zarque-profiling): Used for EDA report generation.
+- [Embedding Atlas](https://github.com/apple/embedding-atlas): Used for interactive embedding visualization.
 
 ## License
 
