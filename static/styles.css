@@ -201,6 +201,22 @@ body {
   background: rgba(255, 255, 255, 0.6);
   cursor: pointer;
   transition: all 0.2s ease;
+  max-width: 100%;
+  min-width: 0;
+  overflow: hidden;
+}
+
+.file-name {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.file-item .meta {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .file-item:hover {
@@ -724,6 +740,63 @@ tr.expanded {
 
 .eda-settings input {
   width: 120px;
+}
+
+.atlas-controls {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 8px;
+  font-size: 12px;
+  color: var(--muted);
+}
+
+.atlas-controls select {
+  min-width: 0;
+  flex: 1;
+}
+
+.atlas-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  align-items: center;
+  margin-bottom: 8px;
+}
+
+#run-atlas-query {
+  background: #509483;
+}
+
+.atlas-actions #run-atlas.atlas-button-disabled,
+.atlas-actions #run-atlas:disabled {
+  background: #efb4a5;
+  color: rgba(255, 255, 255, 0.72);
+  cursor: not-allowed;
+  transform: none;
+}
+
+.atlas-actions #run-atlas-query.atlas-button-disabled,
+.atlas-actions #run-atlas-query:disabled {
+  background: #b6d3ca;
+  color: rgba(255, 255, 255, 0.72);
+  cursor: not-allowed;
+  transform: none;
+}
+
+.atlas-actions #run-atlas.atlas-button-ready {
+  background: var(--accent);
+  color: #fff;
+}
+
+.atlas-actions #run-atlas-query.atlas-button-ready {
+  background: #509483;
+  color: #fff;
+}
+
+.atlas-actions .atlas-button-disabled:hover,
+.atlas-actions button:disabled:hover {
+  transform: none;
 }
 
 .eda-link {

@@ -4,7 +4,7 @@
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <title>Data Viewer</title>
-    <link rel="stylesheet" href="styles.css?v=20260704-query-eda" />
+    <link rel="stylesheet" href="styles.css?v=20260705-atlas-button-state" />
   </head>
   <body>
     <div class="app">
@@ -149,6 +149,43 @@ SELECT * FROM data LIMIT 100</textarea
           </section>
 
           <section class="panel">
+            <h3>Visualize Embedding</h3>
+            <div class="atlas-controls">
+              <label for="atlas-column">Column</label>
+              <select id="atlas-column">
+                <option value="">Select column</option>
+              </select>
+            </div>
+            <div class="atlas-controls">
+              <label for="atlas-model">Model</label>
+              <select id="atlas-model">
+                <option value="">Select model</option>
+              </select>
+            </div>
+            <div class="atlas-actions">
+              <button id="run-atlas" class="atlas-button-disabled" disabled>
+                Run Atlas
+              </button>
+              <button
+                id="run-atlas-query"
+                class="atlas-button-disabled"
+                disabled
+              >
+                Run Atlas on Query Results
+              </button>
+            </div>
+            <div class="hint">
+              Embedding Atlas opens in a separate local page after embeddings
+              and projection are ready.
+            </div>
+            <div class="muted" id="atlas-status"></div>
+            <a
+              id="atlas-link"
+              class="eda-link"
+            ></a>
+          </section>
+
+          <section class="panel">
             <h3>Row Inspector</h3>
             <div class="row-inspector-wrap">
               <div class="row-inspector-actions">
@@ -287,6 +324,6 @@ Select a row to inspect</pre
       </div>
     </div>
 
-    <script src="app.js?v=20260704-query-eda"></script>
+    <script src="app.js?v=20260705-atlas-button-state"></script>
   </body>
 </html>

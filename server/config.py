@@ -2,7 +2,8 @@
 
 from pathlib import Path
 
-from pydantic import BaseSettings, Field, validator
+from pydantic import Field, field_validator
+from pydantic_settings import BaseSettings, SettingsConfigDict
 
 BASE_DIR: Path = Path(__file__).resolve().parents[1]
 
@@ -10,49 +11,86 @@ BASE_DIR: Path = Path(__file__).resolve().parents[1]
 class Settings(BaseSettings):
     """Typed application settings loaded from environment variables."""
 
-    data_file: str | None = Field(default=None, env="DATA_FILE")
-    data_dir: str = Field(default=str(BASE_DIR / "data"), env="DATA_DIR")
-    cache_dir: str = Field(default=str(BASE_DIR / "cache"), env="CACHE_DIR")
-    openai_api_key: str | None = Field(default=None, env="OPENAI_API_KEY")
-    openai_base_url: str = Field(default="https://api.openai.com/v1", env="OPENAI_BASE_URL")
-    openai_model: str = Field(default="gpt-5.2", env="OPENAI_MODEL")
-    eda_font_family: str | None = Field(default=None, env="EDA_FONT_FAMILY")
-    eda_font_path: str | None = Field(default=None, env="EDA_FONT_PATH")
-    default_eda_sample: int = Field(default=5000, env="EDA_ROW_LIMIT")
-    allow_delete_data: bool = Field(default=True, env="ALLOW_DELETE_DATA")
-    default_eda_mode: str = Field(default="minimal", env="EDA_PROFILE_MODE")
-    eda_cell_max_chars: int = Field(default=5000, env="EDA_CELL_MAX_CHARS")
-    eda_nested_policy: str = Field(default="stringify", env="EDA_NESTED_POLICY")
+    model_config = SettingsConfigDict(env_file=str(BASE_DIR / ".env"), case_sensitive=False, extra="ignore")
+
+    data_file: str | None = Field(default=None, validation_alias="DATA_FILE")
+    data_dir: str = Field(default=str(BASE_DIR / "data"), validation_alias="DATA_DIR")
+    cache_dir: str = Field(default=str(BASE_DIR / "cache"), validation_alias="CACHE_DIR")
+    openai_api_key: str | None = Field(default=None, validation_alias="OPENAI_API_KEY")
+    openai_base_url: str = Field(default="https://api.openai.com/v1", validation_alias="OPENAI_BASE_URL")
+    openai_model: str = Field(default="gpt-5.2", validation_alias="OPENAI_MODEL")
+    eda_font_family: str | None = Field(default=None, validation_alias="EDA_FONT_FAMILY")
+    eda_font_path: str | None = Field(default=None, validation_alias="EDA_FONT_PATH")
+    default_eda_sample: int = Field(default=5000, validation_alias="EDA_ROW_LIMIT")
+    allow_delete_data: bool = Field(default=True, validation_alias="ALLOW_DELETE_DATA")
+    default_eda_mode: str = Field(default="minimal", validation_alias="EDA_PROFILE_MODE")
+    eda_cell_max_chars: int = Field(default=5000, validation_alias="EDA_CELL_MAX_CHARS")
+    eda_nested_policy: str = Field(default="stringify", validation_alias="EDA_NESTED_POLICY")
+    atlas_host: str = Field(default="127.0.0.1", validation_alias="ATLAS_HOST")
+    atlas_port: int = Field(default=5055, validation_alias="ATLAS_PORT")
+    atlas_sample: int = Field(default=0, validation_alias="ATLAS_SAMPLE")
+    atlas_batch_size: int = Field(default=0, validation_alias="ATLAS_BATCH_SIZE")
+    atlas_cache_max_bytes: int = Field(default=10 * 1024 * 1024 * 1024, validation_alias="ATLAS_CACHE_MAX_BYTES")
+    atlas_text_max_chars: int = Field(default=4096, validation_alias="ATLAS_TEXT_MAX_CHARS")
+    atlas_embedding_dtype: str = Field(default="float32", validation_alias="ATLAS_EMBEDDING_DTYPE")
+    atlas_projection_mode: str = Field(default="full", validation_alias="ATLAS_PROJECTION_MODE")
+    atlas_anchor_sample: int = Field(default=10000, validation_alias="ATLAS_ANCHOR_SAMPLE")
+    atlas_text_embedder: str | None = Field(default=None, validation_alias="ATLAS_TEXT_EMBEDDER")
+    atlas_image_embedder: str | None = Field(default=None, validation_alias="ATLAS_IMAGE_EMBEDDER")
+    atlas_trust_remote_code: bool = Field(default=False, validation_alias="ATLAS_TRUST_REMOTE_CODE")
     file_serve_roots: str | None = Field(
         default=None,
-        env="FILE_SERVE_ROOTS",
+        validation_alias="FILE_SERVE_ROOTS",
         description="Comma-separated list of absolute directories from which /api/raw may serve files.",
     )
     vis_exclude_dirs: str | None = Field(
         default=None,
-        env="VIS_EXCLUDE_DIRS",
+        validation_alias="VIS_EXCLUDE_DIRS",
         description="Comma-separated list of directories to exclude from dataset discovery under DATA_DIR.",
     )
 
-    @validator("data_file", pre=True)
-    def normalize_data_file(cls, value: str | None) -> str | None:  # noqa: N805
+    @field_validator("data_file", mode="before")
+    @classmethod
+    def normalize_data_file(cls, value: str | None) -> str | None:
         if value is None:
             return None
         if isinstance(value, str) and not value.strip():
             return None
         return value
 
-    @validator("default_eda_mode", pre=True)
-    def normalize_eda_mode(cls, value: str | None) -> str:  # noqa: N805
+    @field_validator("default_eda_mode", mode="before")
+    @classmethod
+    def normalize_eda_mode(cls, value: str | None) -> str:
         return (value or "minimal").strip().lower()
 
-    @validator("eda_nested_policy", pre=True)
-    def normalize_nested_policy(cls, value: str | None) -> str:  # noqa: N805
+    @field_validator("eda_nested_policy", mode="before")
+    @classmethod
+    def normalize_nested_policy(cls, value: str | None) -> str:
         return (value or "stringify").strip().lower()
 
-    class Config(BaseSettings.Config):
-        env_file = str(BASE_DIR / ".env")
-        case_sensitive = False
+    @field_validator("atlas_text_embedder", "atlas_image_embedder", mode="before")
+    @classmethod
+    def normalize_optional_atlas_setting(cls, value: str | None) -> str | None:
+        if value is None:
+            return None
+        normalized = value.strip()
+        return normalized or None
+
+    @field_validator("atlas_embedding_dtype", mode="before")
+    @classmethod
+    def normalize_atlas_embedding_dtype(cls, value: str | None) -> str:
+        normalized = (value or "float32").strip().lower()
+        if normalized not in {"float32", "float16"}:
+            raise ValueError("ATLAS_EMBEDDING_DTYPE must be float32 or float16")
+        return normalized
+
+    @field_validator("atlas_projection_mode", mode="before")
+    @classmethod
+    def normalize_atlas_projection_mode(cls, value: str | None) -> str:
+        normalized = (value or "full").strip().lower().replace("-", "_")
+        if normalized not in {"full", "anchor_transform"}:
+            raise ValueError("ATLAS_PROJECTION_MODE must be full or anchor_transform")
+        return normalized
 
 
 SETTINGS = Settings()
@@ -62,6 +100,8 @@ DATA_DIR_ENV: str = SETTINGS.data_dir
 SINGLE_FILE: Path | None = Path(DATA_FILE_ENV).resolve() if DATA_FILE_ENV else None
 DATA_ROOT: Path = SINGLE_FILE.parent if SINGLE_FILE else Path(DATA_DIR_ENV).resolve()
 DATA_SERVE_ROOT: Path = DATA_ROOT
+EMBEDDER_MODELS_DIR: Path = BASE_DIR / "models" / "embedder"
+EMBEDDER_MODELS_DIR.mkdir(parents=True, exist_ok=True)
 
 
 def _split_comma_separated_setting(value: str | None) -> list[str]:
@@ -151,3 +191,22 @@ ALLOW_DELETE_DATA: bool = SETTINGS.allow_delete_data
 DEFAULT_EDA_MODE: str = SETTINGS.default_eda_mode
 EDA_CELL_MAX_CHARS: int = SETTINGS.eda_cell_max_chars
 EDA_NESTED_POLICY: str = SETTINGS.eda_nested_policy
+
+ATLAS_HOST: str = SETTINGS.atlas_host
+ATLAS_PORT: int = SETTINGS.atlas_port
+ATLAS_SAMPLE: int = SETTINGS.atlas_sample
+ATLAS_BATCH_SIZE: int = SETTINGS.atlas_batch_size
+ATLAS_CACHE_ROOT: Path = CACHE_DIR / "atlas"
+ATLAS_DATA_CACHE_DIR: Path = ATLAS_CACHE_ROOT / "datasets"
+ATLAS_CACHE_DIR: Path = ATLAS_CACHE_ROOT / "projection"
+ATLAS_CACHE_ROOT.mkdir(parents=True, exist_ok=True)
+ATLAS_DATA_CACHE_DIR.mkdir(parents=True, exist_ok=True)
+ATLAS_CACHE_DIR.mkdir(parents=True, exist_ok=True)
+ATLAS_CACHE_MAX_BYTES: int = max(0, SETTINGS.atlas_cache_max_bytes)
+ATLAS_TEXT_MAX_CHARS: int = max(0, SETTINGS.atlas_text_max_chars)
+ATLAS_EMBEDDING_DTYPE: str = SETTINGS.atlas_embedding_dtype
+ATLAS_PROJECTION_MODE: str = SETTINGS.atlas_projection_mode
+ATLAS_ANCHOR_SAMPLE: int = max(0, SETTINGS.atlas_anchor_sample)
+ATLAS_TEXT_EMBEDDER: str | None = SETTINGS.atlas_text_embedder
+ATLAS_IMAGE_EMBEDDER: str | None = SETTINGS.atlas_image_embedder
+ATLAS_TRUST_REMOTE_CODE: bool = SETTINGS.atlas_trust_remote_code

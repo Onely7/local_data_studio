@@ -9,6 +9,7 @@ from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 
+from server.atlas import discover_embedder_models, run_atlas_visualization
 from server.cache import count_cache_path, search_cache_path, stats_cache_path
 from server.config import (
     ALLOW_DELETE_DATA,
@@ -67,6 +68,13 @@ app = FastAPI(title="Data Viewer")
 UPLOAD_FILES = File(...)
 
 
+class NoCacheStaticFiles(StaticFiles):
+    def file_response(self, full_path, stat_result, scope, status_code=200):
+        response = super().file_response(full_path, stat_result, scope, status_code)
+        response.headers["Cache-Control"] = "no-store, max-age=0"
+        return response
+
+
 class QueryRequest(BaseModel):
     file: str
     sql: str
@@ -82,6 +90,17 @@ class EdaRequest(BaseModel):
 
 
 class EdaQueryRequest(EdaRequest):
+    sql: str
+
+
+class AtlasRequest(BaseModel):
+    file: str
+    column: str
+    model: str
+    sample: int | None = None
+
+
+class AtlasQueryRequest(AtlasRequest):
     sql: str
 
 
@@ -181,6 +200,11 @@ async def get_config() -> dict[str, Any]:
         "file_serve_roots": [str(p) for p in FILE_SERVE_ROOTS],
         "vis_exclude_dirs": VIS_EXCLUDE_DIRS,
     }
+
+
+@app.get("/api/embedder_models")
+async def embedder_models() -> dict[str, Any]:
+    return {"models": discover_embedder_models()}
 
 
 @app.get("/api/raw")
@@ -402,6 +426,42 @@ async def start_eda_query_job(payload: EdaQueryRequest) -> dict[str, Any]:
     return JOB_STORE.submit("eda_query", work).to_response()
 
 
+@app.post("/api/jobs/atlas")
+async def start_atlas_job(payload: AtlasRequest) -> dict[str, Any]:
+    path = resolve_data_file(payload.file)
+
+    def work(context: JobContext) -> dict[str, Any]:
+        return run_atlas_visualization(
+            file_name=payload.file,
+            path=path,
+            column=payload.column,
+            model=payload.model,
+            sql=None,
+            sample=payload.sample,
+            context=context,
+        )
+
+    return JOB_STORE.submit("atlas", work).to_response()
+
+
+@app.post("/api/jobs/atlas_query")
+async def start_atlas_query_job(payload: AtlasQueryRequest) -> dict[str, Any]:
+    path = resolve_data_file(payload.file)
+
+    def work(context: JobContext) -> dict[str, Any]:
+        return run_atlas_visualization(
+            file_name=payload.file,
+            path=path,
+            column=payload.column,
+            model=payload.model,
+            sql=payload.sql,
+            sample=payload.sample,
+            context=context,
+        )
+
+    return JOB_STORE.submit("atlas_query", work).to_response()
+
+
 @app.get("/api/jobs/{job_id}")
 async def get_job(job_id: str) -> dict[str, Any]:
     record = JOB_STORE.get(job_id)
@@ -582,4 +642,4 @@ async def run_query(payload: QueryRequest) -> dict[str, Any]:
 
 app.mount("/data", StaticFiles(directory=str(DATA_SERVE_ROOT), check_dir=False), name="data")
 app.mount("/cache", StaticFiles(directory=str(CACHE_DIR), check_dir=False), name="cache")
-app.mount("/", StaticFiles(directory=str(BASE_DIR / "static"), html=True), name="static")
+app.mount("/", NoCacheStaticFiles(directory=str(BASE_DIR / "static"), html=True), name="static")

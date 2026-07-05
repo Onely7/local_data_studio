@@ -9,7 +9,6 @@ from pathlib import Path
 from typing import Any, cast
 
 from matplotlib import font_manager
-from zarque_profiling import ProfileReport
 
 from .config import (
     CACHE_DIR,
@@ -19,6 +18,51 @@ from .config import (
     EDA_NESTED_POLICY,
 )
 from .db import open_connection, relation_with_rowid_sql
+
+
+def _install_matplotlib_compat() -> None:
+    """Provide small compatibility aliases expected by older profiling code."""
+    try:
+        from matplotlib import MatplotlibDeprecationWarning, cbook  # noqa: PLC0415
+
+        if not hasattr(cbook, "mplDeprecation"):
+            cast(Any, cbook).mplDeprecation = MatplotlibDeprecationWarning
+    except Exception:
+        pass
+
+
+def _import_zarque_profile_report() -> Any:
+    """
+    zarque_profiling is still built against Pydantic v1 symbols.
+    During its import, expose v1 symbols under pydantic.* so zarque's
+    model classes do not become a broken mix of v1 BaseSettings and v2 BaseModel.
+    Restore the public pydantic module afterwards to keep this app on Pydantic v2.
+    """
+    import pydantic  # noqa: PLC0415
+    from pydantic import v1 as pydantic_v1  # noqa: PLC0415
+
+    names = ("BaseModel", "BaseSettings", "Field", "PrivateAttr")
+    original = {name: pydantic.__dict__.get(name) for name in names}
+    for name in names:
+        setattr(pydantic, name, getattr(pydantic_v1, name))
+
+    try:
+        from zarque_profiling import ProfileReport as ZarqueProfileReport  # noqa: PLC0415
+    finally:
+        for name, value in original.items():
+            if value is None:
+                try:
+                    delattr(pydantic, name)
+                except AttributeError:
+                    pass
+            else:
+                setattr(pydantic, name, value)
+
+    return ZarqueProfileReport
+
+
+_install_matplotlib_compat()
+ProfileReport = _import_zarque_profile_report()
 
 
 def eda_cache_key(path: Path, sample_rows: int, mode: str) -> str:
@@ -184,8 +228,6 @@ def build_eda_report(df: Any, title: str, minimal: bool) -> Any:
       minimal=True は config_minimal.yaml を指定することで表現する
     """
     cfg_path = _select_profile_config_file(minimal=minimal)
-
-    print(f"Using config file: {cfg_path}")
 
     # ここでは minimal 引数を False を絶対に渡す
     kwargs = {

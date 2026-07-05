@@ -39,6 +39,10 @@ const state = {
   queryJobId: null,
   edaJobId: null,
   edaJobKind: "",
+  atlasJobId: null,
+  atlasJobKind: "",
+  atlasUrl: "",
+  embedderModels: [],
 };
 
 const UPLOAD_EXTENSIONS = new Set([".jsonl", ".parquet", ".csv", ".tsv"]);
@@ -80,6 +84,12 @@ const elements = {
   edaStatus: document.getElementById("eda-status"),
   edaLink: document.getElementById("eda-link"),
   edaSample: document.getElementById("eda-sample"),
+  atlasColumn: document.getElementById("atlas-column"),
+  atlasModel: document.getElementById("atlas-model"),
+  runAtlas: document.getElementById("run-atlas"),
+  runAtlasQuery: document.getElementById("run-atlas-query"),
+  atlasStatus: document.getElementById("atlas-status"),
+  atlasLink: document.getElementById("atlas-link"),
   nlInput: document.getElementById("nl-input"),
   nlGenerate: document.getElementById("nl-generate"),
   nlStatus: document.getElementById("nl-status"),
@@ -565,6 +575,27 @@ function formatJobProgress(job, fallback) {
   return job.message || fallback;
 }
 
+function formatFileSize(bytes) {
+  const value = Number(bytes);
+  if (!Number.isFinite(value) || value < 0) return "";
+  const units = ["Bytes", "kB", "MB", "GB", "TB"];
+  let size = value;
+  let unitIndex = 0;
+  while (size >= 1024 && unitIndex < units.length - 1) {
+    size /= 1024;
+    unitIndex += 1;
+  }
+  if (unitIndex === 0) {
+    return `${Math.round(size)} ${units[unitIndex]}`;
+  }
+  const exponent = Math.floor(Math.log10(size));
+  const scale = 10 ** (2 - exponent);
+  const formatted = Number(
+    (Math.floor(size * scale) / scale).toPrecision(3),
+  ).toString();
+  return `${formatted} ${units[unitIndex]}`;
+}
+
 function extractErrorMessage(err) {
   let message = err && err.message ? err.message : "Request failed";
   try {
@@ -604,9 +635,10 @@ function renderFiles() {
     const div = document.createElement("div");
     div.className = "file-item" + (state.file === file.name ? " active" : "");
     div.dataset.file = file.name;
+    div.title = file.name;
     div.innerHTML = `
-      <div>${escapeHtml(file.name)}</div>
-      <div class="meta">${(file.size / 1024).toFixed(1)} KB</div>
+      <div class="file-name">${escapeHtml(file.name)}</div>
+      <div class="meta">${escapeHtml(formatFileSize(file.size))}</div>
     `;
     elements.fileList.appendChild(div);
   });
@@ -839,6 +871,79 @@ function renderMeta() {
           : state.pageIndex + 1
       }`
     : "";
+}
+
+function selectedAtlasColumn() {
+  return elements.atlasColumn ? elements.atlasColumn.value.trim() : "";
+}
+
+function selectedAtlasModel() {
+  return elements.atlasModel ? elements.atlasModel.value.trim() : "";
+}
+
+function normalizeAtlasUrl(url) {
+  if (!url) return "";
+  try {
+    const parsed = new URL(url);
+    if (parsed.protocol !== "http:" && parsed.protocol !== "https:") return "";
+    return parsed.href;
+  } catch (err) {
+    return "";
+  }
+}
+
+function openAtlasUrl() {
+  const url = normalizeAtlasUrl(
+    state.atlasUrl || (elements.atlasLink ? elements.atlasLink.href : ""),
+  );
+  if (!url) {
+    if (elements.atlasStatus) {
+      elements.atlasStatus.textContent =
+        "Atlas is ready, but the Atlas URL is missing. Open http://localhost:5055/ directly.";
+    }
+    return;
+  }
+  window.location.href = url;
+}
+
+function renderAtlasColumnOptions() {
+  if (!elements.atlasColumn) return;
+  const current = selectedAtlasColumn();
+  const options = ['<option value="">Select column</option>']
+    .concat(
+      state.schema.map(
+        (col) =>
+          `<option value="${escapeHtml(col.name)}">${escapeHtml(col.name)}</option>`,
+      ),
+    )
+    .join("");
+  elements.atlasColumn.innerHTML = options;
+  if (current && state.schema.some((col) => col.name === current)) {
+    elements.atlasColumn.value = current;
+  }
+  setAtlasButtonsRunning(state.atlasJobKind);
+}
+
+function renderAtlasModelOptions() {
+  if (!elements.atlasModel) return;
+  const current = selectedAtlasModel();
+  const options = ['<option value="">Select model</option>']
+    .concat(
+      state.embedderModels.map((model) => {
+        const value = model.value || model.name || "";
+        const label = model.name || value;
+        return `<option value="${escapeHtml(value)}">${escapeHtml(label)}</option>`;
+      }),
+    )
+    .join("");
+  elements.atlasModel.innerHTML = options;
+  if (
+    current &&
+    state.embedderModels.some((model) => (model.value || model.name) === current)
+  ) {
+    elements.atlasModel.value = current;
+  }
+  setAtlasButtonsRunning(state.atlasJobKind);
 }
 
 function renderDatasetInfo() {
@@ -1393,6 +1498,19 @@ async function loadConfig() {
   updateDeleteUi();
 }
 
+async function loadEmbedderModels() {
+  try {
+    const data = await fetchJSON("/api/embedder_models");
+    state.embedderModels = data.models || [];
+  } catch (err) {
+    state.embedderModels = [];
+    if (elements.atlasStatus) {
+      elements.atlasStatus.textContent = extractErrorMessage(err);
+    }
+  }
+  renderAtlasModelOptions();
+}
+
 async function selectFile(fileName) {
   state.file = fileName;
   renderFiles();
@@ -1417,6 +1535,9 @@ async function selectFile(fileName) {
   state.queryJobId = null;
   state.edaJobId = null;
   state.edaJobKind = "";
+  state.atlasJobId = null;
+  state.atlasJobKind = "";
+  state.atlasUrl = "";
   closeImageOverlay();
   closeJsonOverlay();
   closeDeleteOverlay();
@@ -1431,6 +1552,18 @@ async function selectFile(fileName) {
     elements.edaLink.textContent = "";
     elements.edaLink.style.display = "none";
   }
+  if (elements.atlasStatus) {
+    elements.atlasStatus.textContent = "";
+  }
+  if (elements.atlasLink) {
+    elements.atlasLink.textContent = "";
+    elements.atlasLink.style.display = "none";
+    elements.atlasLink.removeAttribute("href");
+  }
+  if (elements.atlasColumn) {
+    elements.atlasColumn.value = "";
+  }
+  setAtlasButtonsRunning("");
   if (elements.nlStatus) {
     elements.nlStatus.textContent = "";
   }
@@ -1445,6 +1578,7 @@ async function loadSchema() {
   );
   state.schema = data.columns || [];
   state.datasetWarning = data.warning || "";
+  renderAtlasColumnOptions();
   renderDatasetInfo();
   renderColumnFocus(null);
   renderMeta();
@@ -1732,6 +1866,138 @@ async function runEdaOnQueryResults() {
   await runEdaJob("query");
 }
 
+function setAtlasButtonsRunning(kind) {
+  const hasColumn = Boolean(selectedAtlasColumn());
+  const hasModel = Boolean(selectedAtlasModel());
+  const ready = hasColumn && hasModel;
+  if (elements.runAtlas) {
+    const enabled = kind ? kind === "all" : ready;
+    elements.runAtlas.disabled = !enabled;
+    elements.runAtlas.classList.toggle("atlas-button-disabled", !enabled);
+    elements.runAtlas.classList.toggle("atlas-button-ready", enabled);
+    elements.runAtlas.textContent = kind === "all" ? "Cancel Atlas" : "Run Atlas";
+  }
+  if (elements.runAtlasQuery) {
+    const enabled = kind ? kind === "query" : ready;
+    elements.runAtlasQuery.disabled = !enabled;
+    elements.runAtlasQuery.classList.toggle("atlas-button-disabled", !enabled);
+    elements.runAtlasQuery.classList.toggle("atlas-button-ready", enabled);
+    elements.runAtlasQuery.textContent =
+      kind === "query" ? "Cancel Query Atlas" : "Run Atlas on Query Results";
+  }
+}
+
+async function runAtlasJob(kind) {
+  if (!state.file || !elements.runAtlas) return;
+  if (state.atlasJobId) {
+    await cancelJob(state.atlasJobId);
+    state.atlasJobId = null;
+    state.atlasJobKind = "";
+    setAtlasButtonsRunning("");
+    if (elements.atlasStatus) {
+      elements.atlasStatus.textContent = "Atlas job cancelled.";
+    }
+    return;
+  }
+
+  const column = selectedAtlasColumn();
+  const model = selectedAtlasModel();
+  if (!column) {
+    if (elements.atlasStatus) {
+      elements.atlasStatus.textContent = "Select a column first.";
+    }
+    setAtlasButtonsRunning("");
+    return;
+  }
+  if (!model) {
+    if (elements.atlasStatus) {
+      elements.atlasStatus.textContent = "Select a model first.";
+    }
+    setAtlasButtonsRunning("");
+    return;
+  }
+
+  const payload = { file: state.file, column, model };
+  let jobKind = "atlas";
+  let sourceLabel = "Atlas";
+  if (kind === "query") {
+    const sql = elements.sqlInput.value.trim();
+    if (!sql) {
+      if (elements.atlasStatus) {
+        elements.atlasStatus.textContent = "Enter a SQL query first.";
+      }
+      return;
+    }
+    payload.sql = sql;
+    jobKind = "atlas_query";
+    sourceLabel = "query Atlas";
+  }
+
+  state.atlasJobKind = kind;
+  setAtlasButtonsRunning(kind);
+  if (elements.atlasStatus) {
+    elements.atlasStatus.textContent =
+      kind === "query" ? "Starting query Atlas job..." : "Starting Atlas job...";
+  }
+  if (elements.atlasLink) {
+    elements.atlasLink.style.display = "none";
+    elements.atlasLink.textContent = "";
+    elements.atlasLink.removeAttribute("href");
+  }
+  state.atlasUrl = "";
+
+  try {
+    const fileAtStart = state.file;
+    const job = await startJob(jobKind, payload);
+    state.atlasJobId = job.id;
+    const data = await waitForJob(job.id, {
+      intervalMs: 1000,
+      onUpdate: (nextJob) => {
+        if (elements.atlasStatus) {
+          elements.atlasStatus.textContent = formatJobProgress(
+            nextJob,
+            kind === "query" ? "Generating query Atlas" : "Generating Atlas",
+          );
+        }
+      },
+    });
+    if (state.file !== fileAtStart || state.atlasJobId !== job.id) return;
+    if (elements.atlasStatus) {
+      const modalityNote = data.modality ? ` (${data.modality})` : "";
+      const sampleNote = data.sample ? ` Sample: ${data.sample}.` : "";
+      const modelNote = data.model ? ` Model: ${data.model}.` : "";
+      const projectionNote = data.projection_mode ? ` Projection: ${data.projection_mode}.` : "";
+      const dtypeNote = data.embedding_dtype ? ` Embedding: ${data.embedding_dtype}.` : "";
+      const cacheNote = data.cache_hit ? " Cache: reused." : data.cache_path ? " Cache: refreshed." : "";
+      elements.atlasStatus.textContent = `${sourceLabel} is ready for "${data.column || column}"${modalityNote}.${modelNote}${sampleNote}${projectionNote}${dtypeNote}${cacheNote}`;
+    }
+    const atlasUrl = normalizeAtlasUrl(data.url);
+    if (elements.atlasLink && atlasUrl) {
+      state.atlasUrl = atlasUrl;
+      elements.atlasLink.href = atlasUrl;
+      elements.atlasLink.textContent = "Open Atlas";
+      elements.atlasLink.style.display = "inline-flex";
+    }
+  } catch (err) {
+    if (elements.atlasStatus) {
+      elements.atlasStatus.textContent = extractErrorMessage(err);
+    }
+    console.error(err);
+  } finally {
+    state.atlasJobId = null;
+    state.atlasJobKind = "";
+    setAtlasButtonsRunning("");
+  }
+}
+
+async function runAtlas() {
+  await runAtlasJob("all");
+}
+
+async function runAtlasOnQueryResults() {
+  await runAtlasJob("query");
+}
+
 async function runNlQuery() {
   if (!state.file || !elements.nlInput || !elements.nlGenerate) return;
   const prompt = elements.nlInput.value.trim();
@@ -1868,6 +2134,34 @@ function attachEvents() {
   }
   if (elements.runEdaQuery) {
     elements.runEdaQuery.addEventListener("click", runEdaOnQueryResults);
+  }
+  if (elements.atlasColumn) {
+    elements.atlasColumn.addEventListener("change", () => {
+      if (elements.atlasStatus) {
+        elements.atlasStatus.textContent = "";
+      }
+      setAtlasButtonsRunning(state.atlasJobKind);
+    });
+  }
+  if (elements.atlasModel) {
+    elements.atlasModel.addEventListener("change", () => {
+      if (elements.atlasStatus) {
+        elements.atlasStatus.textContent = "";
+      }
+      setAtlasButtonsRunning(state.atlasJobKind);
+    });
+  }
+  if (elements.runAtlas) {
+    elements.runAtlas.addEventListener("click", runAtlas);
+  }
+  if (elements.runAtlasQuery) {
+    elements.runAtlasQuery.addEventListener("click", runAtlasOnQueryResults);
+  }
+  if (elements.atlasLink) {
+    elements.atlasLink.addEventListener("click", (event) => {
+      event.preventDefault();
+      openAtlasUrl();
+    });
   }
   if (elements.copyRow) {
     elements.copyRow.addEventListener("click", copyRowInspector);
@@ -2125,10 +2419,17 @@ addInfoStyles();
 attachEvents();
 updateRowActions();
 loadConfig()
+  .then(() => loadEmbedderModels())
   .then(() => loadFiles())
   .catch((err) => {
     console.error(err);
-    loadFiles().catch((error) => {
-      console.error(error);
-    });
+    loadEmbedderModels()
+      .catch((error) => {
+        console.error(error);
+      })
+      .finally(() => {
+        loadFiles().catch((error) => {
+          console.error(error);
+        });
+      });
   });

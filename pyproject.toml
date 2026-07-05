@@ -2,19 +2,23 @@
 name = "data-viewer"
 version = "0.0.1"
 description = "Local web viewer for jsonl/json/csv/tsv/parquet files"
-requires-python = ">=3.11,<3.12"
+requires-python = ">=3.12,<3.13"
 dependencies = [
-  "fastapi>=0.115.0",
-  "uvicorn>=0.30.6",
-  "pydantic<2.0",
-  "duckdb==1.0.0",
+  "fastapi>=0.125.0",
+  "uvicorn>=0.50.0",
+  "pydantic>=2.6.0,<2.7.0",
+  "pydantic-settings>=2.2.0,<2.3.0",
+  "duckdb>=1.4.0,<2.0.0",
   "zarque-profiling",
-  "pandas",
+  "pandas>=2.2.0,<2.3.0",
   "python-dotenv",
   "python-multipart",
-  "scipy>=1.7.0",
-  "pyarrow>=22.0.0",
-  "matplotlib<3.8",
+  "scipy>=1.12.0,<1.13.0",
+  "pyarrow>=24.0.0",
+  "matplotlib>=3.8.0,<3.9.0",
+  "embedding-atlas",
+  "transformers>=5.13.0",
+  "torchvision>=0.27.1",
 ]
 
 [tool.uv]
@@ -31,7 +35,7 @@ dev = [
 [tool.ruff]
 exclude = [".git", ".ruff_cache", ".venv", "third_party"]
 line-length = 160
-target-version = "py311"
+target-version = "py312"
 
 [tool.ruff.lint]
 fixable = ["ALL"]
@@ -78,8 +82,8 @@ testpaths = ["tests"]
 project-includes = ["app.py", "server"]
 # project-excludes = [""]
 search-path = ["."]
-site-package-path = [".venv/lib/python3.11/site-packages"]
+site-package-path = [".venv/lib/python3.12/site-packages"]
 #### configuring your python environment
 python-platform = "linux"
-python-version = "3.11"
+python-version = "3.12"
 # python-interpreter-path = ".venv/bin/python3"

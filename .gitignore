@@ -9,6 +9,10 @@ cache/
 data/
 fonts/
 tools/
+models/embedder/**
+!models/embedder/
+!models/embedder/.gitignore
+!models/embedder/.gitkeep
 .DS_Store
 
 # Byte-compiled / optimized / DLL files
