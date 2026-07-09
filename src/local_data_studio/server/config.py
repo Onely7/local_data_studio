@@ -1,22 +1,25 @@
 """Shared configuration helpers and environment-backed settings."""
 
+import os
 from pathlib import Path
 
 from pydantic import Field, field_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 PACKAGE_DIR: Path = Path(__file__).resolve().parents[1]
-BASE_DIR: Path = Path.cwd().resolve()
+BASE_DIR: Path = Path(os.environ.get("LOCAL_DATA_STUDIO_WORKSPACE_DIR") or Path.cwd()).expanduser().resolve()
+ENV_FILE: Path = Path(os.environ.get("LOCAL_DATA_STUDIO_ENV_FILE") or BASE_DIR / ".env").expanduser().resolve()
 
 
 class Settings(BaseSettings):
     """Typed application settings loaded from environment variables."""
 
-    model_config = SettingsConfigDict(env_file=str(BASE_DIR / ".env"), case_sensitive=False, extra="ignore")
+    model_config = SettingsConfigDict(env_file=str(ENV_FILE), case_sensitive=False, extra="ignore")
 
     data_file: str | None = Field(default=None, validation_alias="DATA_FILE")
     data_dir: str = Field(default=str(BASE_DIR / "data"), validation_alias="DATA_DIR")
     cache_dir: str = Field(default=str(BASE_DIR / "cache"), validation_alias="CACHE_DIR")
+    embedder_models_dir: str = Field(default=str(BASE_DIR / "models" / "embedder"), validation_alias="EMBEDDER_MODELS_DIR")
     openai_api_key: str | None = Field(default=None, validation_alias="OPENAI_API_KEY")
     openai_base_url: str = Field(default="https://api.openai.com/v1", validation_alias="OPENAI_BASE_URL")
     openai_model: str = Field(default="gpt-5.2", validation_alias="OPENAI_MODEL")
@@ -101,7 +104,7 @@ DATA_DIR_ENV: str = SETTINGS.data_dir
 SINGLE_FILE: Path | None = Path(DATA_FILE_ENV).resolve() if DATA_FILE_ENV else None
 DATA_ROOT: Path = SINGLE_FILE.parent if SINGLE_FILE else Path(DATA_DIR_ENV).resolve()
 DATA_SERVE_ROOT: Path = DATA_ROOT
-EMBEDDER_MODELS_DIR: Path = BASE_DIR / "models" / "embedder"
+EMBEDDER_MODELS_DIR: Path = Path(SETTINGS.embedder_models_dir).expanduser().resolve()
 EMBEDDER_MODELS_DIR.mkdir(parents=True, exist_ok=True)
 
 
