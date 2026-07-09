@@ -151,7 +151,7 @@ Open [http://127.0.0.1:8000](http://127.0.0.1:8000) to view the Local Data Studi
    You can adjust the sample count with `EDA_ROW_LIMIT` and UI-side settings.
 
 5. **Visualize Embedding**
-   Put local HuggingFace encoder model directories under `models/embedder` (for example, `models/embedder/google/siglip2-base-patch16-224` or `models/embedder/Qwen/Qwen3-Embedding-0.6B`). Directories containing model marker files such as `config.json`, `modules.json`, `tokenizer_config.json`, or `preprocessor_config.json` appear in the Model dropdown.
+   Put local HuggingFace encoder model directories under `models/embedder` (for example, `models/embedder/google/siglip2-base-patch16-224`, `models/embedder/Qwen/Qwen3-Embedding-0.6B`, or `models/embedder/Qwen/Qwen3-VL-Embedding-2B`). Directories containing model marker files such as `config.json`, `modules.json`, `tokenizer_config.json`, or `preprocessor_config.json` appear in the Model dropdown.
    Select a text or image column and a model in **Visualize Embedding**, then run **Run Atlas** to launch a local Embedding Atlas page. Use **Run Atlas on Query Results** to visualize the current SQL Console query results instead.  
    The job runs in the background with progress updates, and an **Open Atlas** link appears when the local Atlas page is ready.
 
@@ -165,6 +165,7 @@ Open [http://127.0.0.1:8000](http://127.0.0.1:8000) to view the Local Data Studi
 - On large datasets, searching and running EDA may take time.
 - For very large datasets, preview uses cursor-style page tokens instead of large `OFFSET` scans where supported. Row counts, global search, sampled statistics, and EDA run through background jobs with progress and cancellation APIs.
 - Embedding Atlas jobs use the selected local encoder model and compute embeddings/projections locally. Projected parquet inputs are cached under `./cache/atlas/datasets`; repeated runs with the same selected data/query/model/settings reuse the projected parquet and skip embedding/UMAP recomputation. Image display columns are kept in their original URL/path/`{bytes, path}` shape while a hidden embedding input column is used only for encoder input conversion. Use `ATLAS_SAMPLE` for faster exploratory runs on large datasets, `ATLAS_TEXT_MAX_CHARS` to bound very long text cells, `ATLAS_EMBEDDING_DTYPE=float16` to reduce embedding memory, `ATLAS_PROJECTION_MODE=anchor_transform` to fit UMAP on anchors and transform the remainder, and `ATLAS_CACHE_MAX_BYTES` to cap the combined Atlas cache size.
+- Qwen3-VL-Embedding models are routed through the Sentence Transformers backend because they do not follow the standard `transformers` image-feature-extraction input contract. Image bytes are converted only for the internal embedding input; the cached Atlas display columns still preserve their original values.
 - Local encoder model files under `models/embedder` are intentionally ignored by Git. Only the directory placeholder files are tracked; download or place model files locally on each machine.
 - Cache files are separated under `./cache/metadata`, `./cache/index`, `./cache/stats`, `./cache/count`, `./cache/search`, and EDA report files, and are invalidated by file path, size, and modification time where applicable.
 - `Run EDA on Query Results` excludes helper columns such as `rn` and `__rowid` from the generated report.
@@ -178,6 +179,7 @@ Open [http://127.0.0.1:8000](http://127.0.0.1:8000) to view the Local Data Studi
 - SQL execution is centralized in `server/sql.py`, which validates read-only SQL, applies DuckDB resource limits, and supports cooperative cancellation for background jobs.
 - EDA report orchestration lives in `server/eda_reports.py`; low-level profiling setup and DataFrame sanitization live in `server/eda.py`.
 - Embedding Atlas launch orchestration lives in `server/atlas.py`; it discovers local models under `models/embedder`, infers text/image modality from selected column samples, materializes/reuses projected parquet cache entries, starts the `embedding-atlas` CLI, tracks progress, returns the local URL, and routes Atlas cache pruning through `server/atlas_cache.py`. Cache pruning removes old files first while preserving the parquet artifact needed by the current Atlas launch.
+- Atlas UMAP projection uses a fixed random seed for reproducible cache artifacts and explicitly sets `n_jobs=1`, matching UMAP's seeded execution mode without emitting thread override warnings.
 - On macOS, Atlas subprocess launch is kept compatible with Python's `posix_spawn` path to avoid child-side fork `SIGSEGV (-11)` failures. Keep Atlas commands on absolute paths, do not pass `cwd` to `Popen`, and keep `close_fds=False`; see [the SIGSEGV incident log](docs/atlas_sigsegv_incident_log_ja.md).
 - Background jobs are managed by `server/jobs.py` and expose progress, cancellation, result, and error state through `/api/jobs/*`.
 
