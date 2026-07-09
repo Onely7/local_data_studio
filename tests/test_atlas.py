@@ -20,6 +20,7 @@ from server.atlas import (
     ATLAS_PROJECTION_X,
     ATLAS_PROJECTION_Y,
     ATLAS_TRUNCATION_SUFFIX,
+    AtlasEmbeddingBackend,
     AtlasOptions,
     _effective_embedder_for_modality,
     _embedding_atlas_env,
@@ -129,6 +130,30 @@ class AtlasModelDiscoveryTests(TestCase):
         self.assertIsInstance(fake_model.inputs[0], dict)
         self.assertIn("image", fake_model.inputs[0])
         self.assertEqual((1, 1), fake_model.inputs[0]["image"].size)
+
+    def test_embedding_backend_policy_is_resolved_once_per_model(self) -> None:
+        with TemporaryDirectory() as tmp:
+            qwen_model = Path(tmp) / "Qwen" / "Qwen3-VL-Embedding-2B"
+            regular_model = Path(tmp) / "google" / "siglip2-base-patch16-224"
+            qwen_model.mkdir(parents=True)
+            regular_model.mkdir(parents=True)
+            options = AtlasOptions(
+                sample=None,
+                host="127.0.0.1",
+                port=5055,
+                batch_size=None,
+                text_embedder=None,
+                image_embedder="transformers",
+                trust_remote_code=False,
+            )
+
+            qwen_backend = AtlasEmbeddingBackend.for_model(modality="image", model_path=qwen_model, options=options)
+            regular_backend = AtlasEmbeddingBackend.for_model(modality="image", model_path=regular_model, options=options)
+
+        self.assertEqual("sentence-transformers", qwen_backend.name)
+        self.assertTrue(qwen_backend.uses_qwen3_vl_adapter)
+        self.assertEqual("transformers", regular_backend.name)
+        self.assertFalse(regular_backend.uses_qwen3_vl_adapter)
 
     def test_non_qwen_image_embedder_keeps_transformers_default(self) -> None:
         with TemporaryDirectory() as tmp:

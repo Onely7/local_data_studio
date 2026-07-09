@@ -140,6 +140,21 @@ class AtlasPreparedDataset:
     cache_hit: bool
 
 
+@dataclass(frozen=True, slots=True)
+class AtlasEmbeddingBackend:
+    """Resolved embedding backend policy for a selected model and modality."""
+
+    name: str
+    uses_qwen3_vl_adapter: bool = False
+
+    @classmethod
+    def for_model(cls, *, modality: AtlasModality, model_path: Path, options: AtlasOptions) -> AtlasEmbeddingBackend:
+        if _is_qwen3_vl_embedding_model(model_path):
+            return cls(name="sentence-transformers", uses_qwen3_vl_adapter=True)
+        configured = _atlas_embedder_for_modality(modality, options)
+        return cls(name=configured or _default_embedder_for_modality(modality))
+
+
 def _embedding_atlas_executable() -> list[str]:
     return [sys.executable, "-m", "embedding_atlas.cli"]
 
@@ -580,10 +595,7 @@ def _default_embedder_for_modality(modality: AtlasModality) -> str:
 
 
 def _effective_embedder_for_modality(modality: AtlasModality, model_path: Path, options: AtlasOptions) -> str:
-    if _is_qwen3_vl_embedding_model(model_path):
-        return "sentence-transformers"
-    configured = _atlas_embedder_for_modality(modality, options)
-    return configured or _default_embedder_for_modality(modality)
+    return AtlasEmbeddingBackend.for_model(modality=modality, model_path=model_path, options=options).name
 
 
 def _load_sentence_transformer_model(model_path: Path, options: AtlasOptions) -> Any:
@@ -617,11 +629,11 @@ def _create_qwen3_vl_sentence_transformer_embedder(modality: AtlasModality, mode
 
 
 def _resolve_embedder_callable(modality: AtlasModality, model_path: Path, options: AtlasOptions) -> Any:
-    embedder_name = _effective_embedder_for_modality(modality, model_path, options)
+    backend = AtlasEmbeddingBackend.for_model(modality=modality, model_path=model_path, options=options)
     embedder_args = {"trust_remote_code": True} if options.trust_remote_code else {}
-    if embedder_name == "sentence-transformers" and _is_qwen3_vl_embedding_model(model_path):
+    if backend.uses_qwen3_vl_adapter:
         return _create_qwen3_vl_sentence_transformer_embedder(modality, model_path, options), embedder_args
-    return create_embedder(embedder_name, modality=modality, model=str(model_path), embedder_args=embedder_args), embedder_args
+    return create_embedder(backend.name, modality=modality, model=str(model_path), embedder_args=embedder_args), embedder_args
 
 
 def _embedding_items(projection_input: Any, input_column: str) -> list[Any]:
