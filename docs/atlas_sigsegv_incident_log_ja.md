@@ -6,9 +6,9 @@
 
 ## 対象
 
-- `server/atlas.py`
+- `src/local_data_studio/server/atlas.py`
 - Visualize Embedding の `Run Atlas` / `Run Atlas on Query Results`
-- macOS 上で `uvicorn app:app --reload` から起動される Embedding Atlas subprocess
+- macOS 上で `uvicorn local_data_studio.app:app --reload` や `local-data-studio --reload` から起動される Embedding Atlas subprocess
 
 ## 現象
 
@@ -47,7 +47,7 @@ uvicorn の reload worker はマルチスレッド状態で動作するため、
 
 ## 対応策
 
-`server/atlas.py` で Embedding Atlas subprocess を `posix_spawn` 互換の条件で起動するように変更した。
+`src/local_data_studio/server/atlas.py` で Embedding Atlas subprocess を `posix_spawn` 互換の条件で起動するように変更した。
 
 - Atlas CLI に渡す dataset path を絶対パス化する。
 - `Popen` から `cwd` 指定を外す。

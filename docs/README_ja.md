@@ -26,7 +26,26 @@ Local Data Studio は、Huggingface Datasets の [Data Studio](https://huggingfa
 - ドラッグ&ドロップでアップロード可能
 - セッション内の非表示/削除
 
-## 環境構築
+## インストール
+
+### PyPI からインストール
+
+パッケージ公開後は pip でインストールできます。
+
+```bash
+python -m pip install local-data-studio
+```
+
+以下のどちらの entrypoint でも起動できます。
+
+```bash
+local-data-studio --data-dir /local/data/path
+python -m local_data_studio --data-dir /local/data/path
+```
+
+単一ファイルを開く場合は `--data-dir` の代わりに `--data-file` を指定します。デフォルトでは `.env`, `data`, `cache`, `models/embedder` は現在の作業ディレクトリ配下から解決されます。`DATA_DIR`, `CACHE_DIR`, `FILE_SERVE_ROOTS` などの環境変数が設定されている場合は、従来通りそちらが優先されます。
+
+### ソースからセットアップ
 
 1. **リポジトリをクローンまたはダウンロード**  
 
@@ -115,7 +134,13 @@ Local Data Studio は、Huggingface Datasets の [Data Studio](https://huggingfa
 ## 実行方法
 
 ```bash
-uv run uvicorn app:app --reload
+uv run local-data-studio --reload
+```
+
+ASGI app を直接起動して開発する場合は以下も使えます。
+
+```bash
+uv run uvicorn local_data_studio.app:app --reload
 ```
 
 実行後、ターミナルに以下のようなメッセージが表示されます。
@@ -179,13 +204,37 @@ INFO:     Application startup complete.
 
 ## 実装メモ
 
-- 形式別 reader は `server/readers.py` にあります。JSONL/CSV/TSV のプレビューは byte/page token ベースの bounded read と sparse line index を使い、Parquet は row group 全体を読み込まずに必要な batch だけを読みます。
-- SQL 実行は `server/sql.py` に集約され、読み取り専用 SQL の検証、DuckDB リソース制限、バックグラウンドジョブの協調キャンセルを扱います。
-- EDA レポートの orchestration は `server/eda_reports.py`、profiling 設定と DataFrame sanitization は `server/eda.py` に分離されています。
-- Embedding Atlas の起動 orchestration は `server/atlas.py` にあり、`models/embedder` 配下のローカルモデル検出、選択カラムのサンプルからの text/image modality 推定、投影済み parquet cache の作成/再利用、`embedding-atlas` CLI の起動、進捗追跡、ローカル URL 返却、`server/atlas_cache.py` 経由の Atlas cache 容量管理を行います。Cache pruning は古いファイルから削除しつつ、現在の Atlas 起動で必要な parquet artifact は保護します。
+- application package は `src/local_data_studio` 配下にあります。静的 UI asset は `src/local_data_studio/static` として package に含め、実行時の `.env`, `data`, `cache`, `models/embedder` は現在の作業ディレクトリ配下をデフォルトにしています。
+- 形式別 reader は `src/local_data_studio/server/readers.py` にあります。JSONL/CSV/TSV のプレビューは byte/page token ベースの bounded read と sparse line index を使い、Parquet は row group 全体を読み込まずに必要な batch だけを読みます。
+- SQL 実行は `src/local_data_studio/server/sql.py` に集約され、読み取り専用 SQL の検証、DuckDB リソース制限、バックグラウンドジョブの協調キャンセルを扱います。
+- EDA レポートの orchestration は `src/local_data_studio/server/eda_reports.py`、profiling 設定と DataFrame sanitization は `src/local_data_studio/server/eda.py` に分離されています。
+- Embedding Atlas の起動 orchestration は `src/local_data_studio/server/atlas.py` にあり、`models/embedder` 配下のローカルモデル検出、選択カラムのサンプルからの text/image modality 推定、投影済み parquet cache の作成/再利用、`embedding-atlas` CLI の起動、進捗追跡、ローカル URL 返却、`src/local_data_studio/server/atlas_cache.py` 経由の Atlas cache 容量管理を行います。Cache pruning は古いファイルから削除しつつ、現在の Atlas 起動で必要な parquet artifact は保護します。
 - Atlas の UMAP projection は cache artifact の再現性のため固定 seed を使い、UMAP の seeded execution mode に合わせて `n_jobs=1` を明示することで thread override warning を出さないようにしています。
 - macOS では child-side fork による `SIGSEGV (-11)` を避けるため、Atlas subprocess 起動を Python の `posix_spawn` path に乗る形に固定しています。Atlas command は絶対パスを使い、`Popen` に `cwd` を渡さず、`close_fds=False` を維持してください。詳細は [SIGSEGV 障害ログ](atlas_sigsegv_incident_log_ja.md) を参照してください。
-- バックグラウンドジョブは `server/jobs.py` で管理され、`/api/jobs/*` 経由で進捗、キャンセル、結果、エラー状態を確認できます。
+- バックグラウンドジョブは `src/local_data_studio/server/jobs.py` で管理され、`/api/jobs/*` 経由で進捗、キャンセル、結果、エラー状態を確認できます。
+
+## PyPI リリース
+
+このプロジェクトは配布名 `local-data-studio`、import package 名 `local_data_studio` として公開できるように構成されています。
+
+1. TestPyPI と PyPI の両方で pending Trusted Publisher を作成します。
+   - Repository: `Onely7/local_data_studio`
+   - Workflow: `publish.yml`
+   - Environments: `testpypi` / `pypi`
+   - Project name: `local-data-studio`
+2. ローカルで検証します。
+
+   ```bash
+   uv run ruff check
+   uv run pyrefly check
+   uv run pytest
+   rm -rf dist build *.egg-info
+   uv run python -m build
+   uv run twine check dist/*
+   ```
+
+3. GitHub Actions の `Publish Python Package` workflow を手動実行し、TestPyPI に公開します。
+4. TestPyPI での install smoke test が通った後、GitHub Release を publish して Trusted Publishing 経由で PyPI に公開します。
 
 ## Contribution
 

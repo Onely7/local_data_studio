@@ -26,7 +26,26 @@ It provides fast preview, DuckDB SQL execution (with optional LLM-assisted SQL g
 - Drag & drop upload support
 - Hide/delete within the current session
 
-## Setup
+## Installation
+
+### From PyPI
+
+After the package is published, install it with pip:
+
+```bash
+python -m pip install local-data-studio
+```
+
+Run the app with either entrypoint:
+
+```bash
+local-data-studio --data-dir /local/data/path
+python -m local_data_studio --data-dir /local/data/path
+```
+
+Use `--data-file` instead of `--data-dir` to open a single dataset file. By default, `.env`, `data`, `cache`, and `models/embedder` are resolved under the current working directory. Environment variables such as `DATA_DIR`, `CACHE_DIR`, and `FILE_SERVE_ROOTS` still take precedence when set.
+
+### From source
 
 1. **Clone or download the repository**
 
@@ -116,7 +135,13 @@ It provides fast preview, DuckDB SQL execution (with optional LLM-assisted SQL g
 ## Run
 
 ```bash
-uv run uvicorn app:app --reload
+uv run local-data-studio --reload
+```
+
+For direct ASGI development, use:
+
+```bash
+uv run uvicorn local_data_studio.app:app --reload
 ```
 
 After running, you will see messages like the following in your terminal:
@@ -180,13 +205,37 @@ Open [http://127.0.0.1:8000](http://127.0.0.1:8000) to view the Local Data Studi
 
 ## Implementation Notes
 
-- Format-specific readers live in `server/readers.py`. JSONL/CSV/TSV previews use byte/page-token based reads with sparse line indexing, and Parquet previews avoid loading whole row groups.
-- SQL execution is centralized in `server/sql.py`, which validates read-only SQL, applies DuckDB resource limits, and supports cooperative cancellation for background jobs.
-- EDA report orchestration lives in `server/eda_reports.py`; low-level profiling setup and DataFrame sanitization live in `server/eda.py`.
-- Embedding Atlas launch orchestration lives in `server/atlas.py`; it discovers local models under `models/embedder`, infers text/image modality from selected column samples, materializes/reuses projected parquet cache entries, starts the `embedding-atlas` CLI, tracks progress, returns the local URL, and routes Atlas cache pruning through `server/atlas_cache.py`. Cache pruning removes old files first while preserving the parquet artifact needed by the current Atlas launch.
+- The application package lives under `src/local_data_studio`. Static UI assets are packaged in `src/local_data_studio/static`, while runtime `.env`, `data`, `cache`, and `models/embedder` directories default to the current working directory.
+- Format-specific readers live in `src/local_data_studio/server/readers.py`. JSONL/CSV/TSV previews use byte/page-token based reads with sparse line indexing, and Parquet previews avoid loading whole row groups.
+- SQL execution is centralized in `src/local_data_studio/server/sql.py`, which validates read-only SQL, applies DuckDB resource limits, and supports cooperative cancellation for background jobs.
+- EDA report orchestration lives in `src/local_data_studio/server/eda_reports.py`; low-level profiling setup and DataFrame sanitization live in `src/local_data_studio/server/eda.py`.
+- Embedding Atlas launch orchestration lives in `src/local_data_studio/server/atlas.py`; it discovers local models under `models/embedder`, infers text/image modality from selected column samples, materializes/reuses projected parquet cache entries, starts the `embedding-atlas` CLI, tracks progress, returns the local URL, and routes Atlas cache pruning through `src/local_data_studio/server/atlas_cache.py`. Cache pruning removes old files first while preserving the parquet artifact needed by the current Atlas launch.
 - Atlas UMAP projection uses a fixed random seed for reproducible cache artifacts and explicitly sets `n_jobs=1`, matching UMAP's seeded execution mode without emitting thread override warnings.
 - On macOS, Atlas subprocess launch is kept compatible with Python's `posix_spawn` path to avoid child-side fork `SIGSEGV (-11)` failures. Keep Atlas commands on absolute paths, do not pass `cwd` to `Popen`, and keep `close_fds=False`; see [the SIGSEGV incident log](docs/atlas_sigsegv_incident_log_ja.md).
-- Background jobs are managed by `server/jobs.py` and expose progress, cancellation, result, and error state through `/api/jobs/*`.
+- Background jobs are managed by `src/local_data_studio/server/jobs.py` and expose progress, cancellation, result, and error state through `/api/jobs/*`.
+
+## PyPI Release
+
+This project is prepared for distribution as `local-data-studio` with import package `local_data_studio`.
+
+1. Create pending Trusted Publishers on TestPyPI and PyPI:
+   - Repository: `Onely7/local_data_studio`
+   - Workflow: `publish.yml`
+   - Environments: `testpypi` and `pypi`
+   - Project name: `local-data-studio`
+2. Validate locally:
+
+   ```bash
+   uv run ruff check
+   uv run pyrefly check
+   uv run pytest
+   rm -rf dist build *.egg-info
+   uv run python -m build
+   uv run twine check dist/*
+   ```
+
+3. Use the GitHub Actions `Publish Python Package` workflow dispatch to publish to TestPyPI.
+4. After the TestPyPI install smoke test passes, publish a GitHub Release to upload the same package to PyPI through Trusted Publishing.
 
 ## Contribution
 
