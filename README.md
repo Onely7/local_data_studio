@@ -254,7 +254,7 @@ This project is prepared for distribution as `local-data-studio` with import pac
 
    ```bash
    uv run ruff check
-   uv run pyrefly check
+   uv run ty check
    uv run pytest
    rm -rf dist build *.egg-info
    uv run python -m build
@@ -271,7 +271,7 @@ This project is prepared for distribution as `local-data-studio` with import pac
 
   - `uv run ruff format` (or `uvx ruff format`)
   - `uv run ruff check` (or `uvx ruff check`)
-  - `uv run pyrefly check` (or `uvx pyrefly check`)
+  - `uv run ty check` (or `uvx ty check`)
 - Please make sure to fix all reported errors before committing.
 
 ## Acknowledgements

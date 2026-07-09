@@ -253,7 +253,7 @@ INFO:     Application startup complete.
 
    ```bash
    uv run ruff check
-   uv run pyrefly check
+   uv run ty check
    uv run pytest
    rm -rf dist build *.egg-info
    uv run python -m build
@@ -269,7 +269,7 @@ INFO:     Application startup complete.
 - コードの品質管理には pre-commit を使用しており、`uv run pre-commit run --all-files` (あるいは `uvx pre-commit run --all-files`) を実行することで、以下のコマンド実行に相当するフォーマット / Lint / 型チェックが実施されます:
   - `uv run ruff format` (あるいは `uvx ruff format`)
   - `uv run ruff check` (あるいは `uvx ruff check`)
-  - `uv run pyrefly check` (あるいは `uvx pyrefly check`)
+  - `uv run ty check` (あるいは `uvx ty check`)
 - 上で指摘された全てのエラーを解消した後に、コミットするようにしてください。
 
 ## 謝辞

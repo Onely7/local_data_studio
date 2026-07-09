@@ -70,7 +70,7 @@ uvicorn の reload worker はマルチスレッド状態で動作するため、
 ```bash
 uv run pytest
 uv run ruff check
-uv run pyrefly check
+uv run ty check
 ```
 
 API 経由の確認例:
