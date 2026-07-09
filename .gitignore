@@ -5,6 +5,7 @@ hostfile/
 archive/
 artifacts/
 cache/
+_docs/
 .uv-cache/
 data/
 fonts/
