@@ -134,7 +134,7 @@ class ApiJobTests(TestCase):
                     path=prepared_path,
                     x="x",
                     y="y",
-                    neighbors="neighbors",
+                    neighbors=None,
                     cache_hit=True,
                 ),
             ),
@@ -168,7 +168,7 @@ class ApiJobTests(TestCase):
                     path=prepared_path,
                     x="x",
                     y="y",
-                    neighbors="neighbors",
+                    neighbors=None,
                     cache_hit=False,
                 ),
             ),
@@ -192,7 +192,7 @@ class ApiJobTests(TestCase):
         self.assertIn("--disable-projection", captured_command)
         self.assertIn("--x", captured_command)
         self.assertIn("--y", captured_command)
-        self.assertIn("--neighbors", captured_command)
+        self.assertNotIn("--neighbors", captured_command)
         self.assertNotIn("--query", captured_command)
         self.assertNotIn("--model", captured_command)
         self.assertIn(str(prepared_path), captured_command)

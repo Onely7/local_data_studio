@@ -8,14 +8,14 @@ import json
 import os
 import queue
 import re
-import shutil
+import signal
 import subprocess
 import sys
 import threading
 import time
 from base64 import b64decode
 from binascii import Error as BinasciiError
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from importlib.metadata import PackageNotFoundError, version
 from pathlib import Path
 from typing import Any
@@ -69,12 +69,13 @@ IMAGE_HEX_PREFIXES = ("89504e47", "ffd8ff", "47494638", "52494646")
 IMAGE_BASE64_PREFIXES = ("ivborw0kggo", "/9j/", "r0lgod", "uklgr")
 IMAGE_COLUMN_HINTS = ("image", "img", "photo", "picture", "thumbnail", "patch")
 RUNNING_ATLAS_PROCESSES: list[subprocess.Popen[str]] = []
-ATLAS_DATASET_CACHE_VERSION = 4
+ATLAS_DATASET_CACHE_VERSION = 9
 ATLAS_PROJECTION_X = "__local_data_studio_atlas_x"
 ATLAS_PROJECTION_Y = "__local_data_studio_atlas_y"
 ATLAS_PROJECTION_NEIGHBORS = "__local_data_studio_atlas_neighbors"
 ATLAS_EMBED_INPUT_COLUMN = "__local_data_studio_atlas_embed_input"
 ATLAS_IMAGE_FETCH_TIMEOUT_SECONDS = 20
+ATLAS_IMAGE_FETCH_RETRIES = 3
 ATLAS_IMAGE_MAX_BYTES = 50 * 1024 * 1024
 ATLAS_TRUNCATION_SUFFIX = "... (truncated for Atlas)"
 ATLAS_PORT_LOCK = threading.Lock()
@@ -134,10 +135,7 @@ class AtlasPreparedDataset:
 
 
 def _embedding_atlas_executable() -> list[str]:
-    executable = shutil.which("embedding-atlas")
-    if executable:
-        return [executable]
-    return [sys.executable, "-m", "embedding_atlas"]
+    return [sys.executable, "-m", "embedding_atlas.cli"]
 
 
 def _is_model_directory(path: Path) -> bool:
@@ -268,18 +266,7 @@ def reserve_atlas_start_port(options: AtlasOptions) -> AtlasOptions:
     with ATLAS_PORT_LOCK:
         port = max(options.port, ATLAS_PORT_STATE["next"])
         ATLAS_PORT_STATE["next"] = port + 1
-    return AtlasOptions(
-        sample=options.sample,
-        host=options.host,
-        port=port,
-        batch_size=options.batch_size,
-        text_embedder=options.text_embedder,
-        image_embedder=options.image_embedder,
-        trust_remote_code=options.trust_remote_code,
-        embedding_dtype=options.embedding_dtype,
-        projection_mode=options.projection_mode,
-        anchor_sample=options.anchor_sample,
-    )
+    return replace(options, port=port)
 
 
 def _decode_data_image(value: str) -> bytes | None:
@@ -313,23 +300,32 @@ def _decode_image_bytes_string(value: str) -> bytes | None:
     return None
 
 
-def _read_url_bytes(url: str) -> bytes:
+def _read_url_bytes_once(url: str) -> bytes:
     request = Request(url, headers={"User-Agent": "local-data-studio/atlas"})
-    try:
-        with urlopen(request, timeout=ATLAS_IMAGE_FETCH_TIMEOUT_SECONDS) as response:
-            chunks: list[bytes] = []
-            total = 0
-            while True:
-                chunk = response.read(1024 * 1024)
-                if not chunk:
-                    break
-                total += len(chunk)
-                if total > ATLAS_IMAGE_MAX_BYTES:
-                    raise ValueError(f"image exceeds {ATLAS_IMAGE_MAX_BYTES} bytes")
-                chunks.append(chunk)
-    except (OSError, URLError) as exc:
-        raise ValueError(f"failed to read image URL {url}: {exc}") from exc
+    with urlopen(request, timeout=ATLAS_IMAGE_FETCH_TIMEOUT_SECONDS) as response:
+        chunks: list[bytes] = []
+        total = 0
+        while True:
+            chunk = response.read(1024 * 1024)
+            if not chunk:
+                break
+            total += len(chunk)
+            if total > ATLAS_IMAGE_MAX_BYTES:
+                raise ValueError(f"image exceeds {ATLAS_IMAGE_MAX_BYTES} bytes")
+            chunks.append(chunk)
     return b"".join(chunks)
+
+
+def _read_url_bytes(url: str) -> bytes:
+    last_error: Exception | None = None
+    for attempt in range(ATLAS_IMAGE_FETCH_RETRIES):
+        try:
+            return _read_url_bytes_once(url)
+        except (OSError, URLError, ValueError) as exc:
+            last_error = exc
+            if attempt + 1 < ATLAS_IMAGE_FETCH_RETRIES:
+                time.sleep(0.4 * (attempt + 1))
+    raise ValueError(f"failed to read image URL {url}: {last_error}") from last_error
 
 
 def _resolve_image_path(reference: str, dataset_path: Path) -> Path:
@@ -427,17 +423,92 @@ def _sanitize_atlas_cell(value: Any) -> Any:
     return value
 
 
-def _sanitize_atlas_output_frame(data_frame: Any) -> Any:
+def _normalize_image_display_bytes(value: Any) -> Any:
+    if isinstance(value, bytes | bytearray):
+        return bytes(value)
+    if isinstance(value, str):
+        decoded = _decode_data_image(value) or _decode_image_bytes_string(value)
+        return decoded if decoded is not None else value
+    return value
+
+
+def _normalize_image_display_value(value: Any, *, key: str | None = None) -> Any:
+    if key == "bytes":
+        return _normalize_image_display_bytes(value)
+    if isinstance(value, bytes | bytearray):
+        return bytes(value)
+    if isinstance(value, dict):
+        return {str(item_key): _normalize_image_display_value(item, key=str(item_key)) for item_key, item in value.items()}
+    if isinstance(value, list):
+        return [_normalize_image_display_value(item) for item in value]
+    if isinstance(value, tuple):
+        return [_normalize_image_display_value(item) for item in value]
+    return value
+
+
+def _normalize_image_display_columns(data_frame: Any, columns: set[str]) -> Any:
+    if not columns or not hasattr(data_frame, "copy") or not hasattr(data_frame, "columns"):
+        return data_frame
+    normalized = data_frame.copy()
+    for column in normalized.columns:
+        if str(column) in columns:
+            normalized[column] = normalized[column].map(_normalize_image_display_value)
+    return normalized
+
+
+def _sanitize_atlas_output_frame(data_frame: Any, *, preserve_columns: set[str] | None = None) -> Any:
     output = _drop_atlas_embed_input(data_frame)
     if not hasattr(output, "copy") or not hasattr(output, "columns"):
         return output
     sanitized = output.copy()
     projection_columns = {ATLAS_PROJECTION_X, ATLAS_PROJECTION_Y, ATLAS_PROJECTION_NEIGHBORS}
+    preserved = preserve_columns or set()
     for column in sanitized.columns:
-        if column in projection_columns:
+        if column in projection_columns or str(column) in preserved:
             continue
         sanitized[column] = sanitized[column].map(_sanitize_atlas_cell)
     return sanitized
+
+
+def _image_like_columns(data_frame: Any, *, sample_size: int = 50) -> set[str]:
+    if not hasattr(data_frame, "columns"):
+        return set()
+    columns: set[str] = set()
+    for column in data_frame.columns:
+        try:
+            values = data_frame[column].dropna().head(sample_size).tolist()
+        except Exception:
+            continue
+        if any(_is_image_like_value(value) for value in values):
+            columns.add(str(column))
+    return columns
+
+
+def _prepare_image_projection_input(data_frame: Any, *, column: str, dataset_path: Path) -> tuple[Any, Any]:
+    try:
+        values = data_frame[column].tolist()
+    except Exception as exc:
+        raise ValueError(f"failed to read image column {column}: {exc}") from exc
+
+    kept_indices: list[int] = []
+    embedding_items: list[dict[str, bytes]] = []
+    conversion_errors: list[str] = []
+    for index, value in enumerate(values):
+        try:
+            image_bytes = _image_value_to_bytes(value, dataset_path)
+        except ValueError as exc:
+            conversion_errors.append(f"row {index + 1}: {exc}")
+            continue
+        kept_indices.append(index)
+        embedding_items.append({"bytes": image_bytes})
+
+    if not kept_indices:
+        detail = conversion_errors[0] if conversion_errors else "no image values found"
+        raise ValueError(f"no readable images in column {column}; first error: {detail}")
+
+    output_frame = data_frame.iloc[kept_indices].copy().reset_index(drop=True)
+    projection_frame = pd.DataFrame({ATLAS_EMBED_INPUT_COLUMN: embedding_items})
+    return projection_frame, output_frame
 
 
 def _prepare_projection_input(data_frame: Any, *, column: str, modality: AtlasModality, dataset_path: Path) -> tuple[Any, str, Any]:
@@ -448,12 +519,12 @@ def _prepare_projection_input(data_frame: Any, *, column: str, modality: AtlasMo
     if modality != "image":
         return data_frame, column, data_frame
 
-    try:
-        values = data_frame[column].tolist()
-    except Exception as exc:
-        raise ValueError(f"failed to read image column {column}: {exc}") from exc
-    projection_frame = pd.DataFrame({ATLAS_EMBED_INPUT_COLUMN: [{"bytes": _image_value_to_bytes(value, dataset_path)} for value in values]})
-    return projection_frame, ATLAS_EMBED_INPUT_COLUMN, data_frame
+    projection_frame, output_frame = _prepare_image_projection_input(
+        data_frame,
+        column=column,
+        dataset_path=dataset_path,
+    )
+    return projection_frame, ATLAS_EMBED_INPUT_COLUMN, output_frame
 
 
 def _drop_atlas_embed_input(data_frame: Any) -> Any:
@@ -464,7 +535,7 @@ def _drop_atlas_embed_input(data_frame: Any) -> Any:
 
 def _attach_projection_columns(base_frame: Any, projected_frame: Any) -> Any:
     output = base_frame.copy()
-    for column in (ATLAS_PROJECTION_X, ATLAS_PROJECTION_Y, ATLAS_PROJECTION_NEIGHBORS):
+    for column in (ATLAS_PROJECTION_X, ATLAS_PROJECTION_Y):
         if column in projected_frame.columns:
             output[column] = projected_frame[column].to_list()
     return output
@@ -544,7 +615,11 @@ def _compute_full_projection(
     output[ATLAS_PROJECTION_X] = projection_result.projection[:, 0].tolist()
     output[ATLAS_PROJECTION_Y] = projection_result.projection[:, 1].tolist()
     output[ATLAS_PROJECTION_NEIGHBORS] = [
-        {"ids": ids, "distances": distances} for ids, distances in zip(projection_result.knn_indices, projection_result.knn_distances)
+        {
+            "ids": np.asarray(ids, dtype=np.int64).tolist(),
+            "distances": np.asarray(distances, dtype=float).tolist(),
+        }
+        for ids, distances in zip(projection_result.knn_indices, projection_result.knn_distances)
     ]
     return output
 
@@ -635,7 +710,7 @@ def build_atlas_command(
 ) -> list[str]:
     command = [
         *_embedding_atlas_executable(),
-        str(path),
+        str(path.resolve()),
         f"--{modality}",
         column,
         "--host",
@@ -643,8 +718,6 @@ def build_atlas_command(
         "--port",
         str(options.port),
         "--auto-port",
-        "--with",
-        "server.atlas_cache_patch",
     ]
     if projection_columns is not None:
         x_column, y_column, neighbors_column = projection_columns
@@ -668,6 +741,7 @@ def build_atlas_command(
     if options.batch_size is not None:
         command.extend(["--batch-size", str(options.batch_size)])
 
+    command.extend(["--with", "server.atlas_cache_patch"])
     command.extend(["--model", str(model_path)])
 
     embedder = options.image_embedder if modality == "image" else options.text_embedder
@@ -715,7 +789,40 @@ def _embedding_atlas_env() -> dict[str, str]:
     env["LOCAL_DATA_STUDIO_ATLAS_CACHE_DIR"] = str(ATLAS_CACHE_DIR)
     env["LOCAL_DATA_STUDIO_ATLAS_CACHE_PRUNE_DIR"] = str(ATLAS_CACHE_ROOT)
     env["LOCAL_DATA_STUDIO_ATLAS_CACHE_MAX_BYTES"] = str(ATLAS_CACHE_MAX_BYTES)
+    env.setdefault("TOKENIZERS_PARALLELISM", "false")
+    env.setdefault("OMP_NUM_THREADS", "1")
+    env.setdefault("OPENBLAS_NUM_THREADS", "1")
+    env.setdefault("MKL_NUM_THREADS", "1")
+    env.setdefault("VECLIB_MAXIMUM_THREADS", "1")
+    env.setdefault("NUMEXPR_NUM_THREADS", "1")
     return env
+
+
+def _format_process_returncode(returncode: int | None) -> str:
+    if returncode is None:
+        return "still running"
+    if returncode >= 0:
+        return f"exit code {returncode}"
+    try:
+        signal_name = signal.Signals(-returncode).name
+    except ValueError:
+        signal_name = f"signal {-returncode}"
+    return f"{signal_name} ({returncode})"
+
+
+def _spawn_embedding_atlas(command: list[str], env: dict[str, str]) -> subprocess.Popen[str]:
+    # Keep this call eligible for Python's posix_spawn path on macOS. Passing
+    # cwd/preexec_fn/pass_fds/start_new_session or using close_fds=True can
+    # reintroduce child-side fork crashes; see docs/atlas_sigsegv_incident_log_ja.md.
+    return subprocess.Popen(
+        command,
+        env=env,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.STDOUT,
+        text=True,
+        bufsize=1,
+        close_fds=False,
+    )
 
 
 def launch_embedding_atlas(command: list[str], context: JobContext) -> tuple[str, int]:
@@ -724,15 +831,7 @@ def launch_embedding_atlas(command: list[str], context: JobContext) -> tuple[str
     env = _embedding_atlas_env()
 
     try:
-        process = subprocess.Popen(
-            command,
-            cwd=str(BASE_DIR),
-            env=env,
-            stdout=subprocess.PIPE,
-            stderr=subprocess.STDOUT,
-            text=True,
-            bufsize=1,
-        )
+        process = _spawn_embedding_atlas(command, env)
     except FileNotFoundError as exc:
         raise HTTPException(status_code=500, detail="embedding-atlas is not installed; run uv sync") from exc
 
@@ -764,7 +863,7 @@ def launch_embedding_atlas(command: list[str], context: JobContext) -> tuple[str
                     context.update(progress=None, message=line[-180:])
 
             if process.poll() is not None:
-                details = "\n".join(recent_lines[-6:]) or f"exit code {process.returncode}"
+                details = "\n".join(recent_lines[-6:]) or _format_process_returncode(process.returncode)
                 raise HTTPException(status_code=500, detail=f"embedding-atlas exited before producing a URL: {details}")
 
             elapsed = time.monotonic() - started
@@ -871,12 +970,11 @@ def prepare_atlas_dataset(
     if cache_path.exists():
         prune_cache_dir(ATLAS_CACHE_ROOT, ATLAS_CACHE_MAX_BYTES, preserve=(cache_path,))
         context.update(progress=0.08, message="Using cached Atlas dataset")
-        neighbors_column = ATLAS_PROJECTION_NEIGHBORS if options.projection_mode == "full" else None
         return AtlasPreparedDataset(
             path=cache_path,
             x=ATLAS_PROJECTION_X,
             y=ATLAS_PROJECTION_Y,
-            neighbors=neighbors_column,
+            neighbors=None,
             cache_hit=True,
         )
 
@@ -899,7 +997,9 @@ def prepare_atlas_dataset(
             options=options,
         )
         projected = _attach_projection_columns(output_frame, projected)
-        projected = _sanitize_atlas_output_frame(projected)
+        preserve_columns = _image_like_columns(output_frame)
+        projected = _normalize_image_display_columns(projected, preserve_columns)
+        projected = _sanitize_atlas_output_frame(projected, preserve_columns=preserve_columns)
         cache_path.parent.mkdir(parents=True, exist_ok=True)
         tmp_path = cache_path.with_name(f".{cache_path.name}.{os.getpid()}.{threading.get_ident()}.tmp")
         projected.to_parquet(tmp_path)
@@ -915,7 +1015,7 @@ def prepare_atlas_dataset(
         path=cache_path,
         x=ATLAS_PROJECTION_X,
         y=ATLAS_PROJECTION_Y,
-        neighbors=ATLAS_PROJECTION_NEIGHBORS if options.projection_mode == "full" else None,
+        neighbors=None,
         cache_hit=False,
     )
 

@@ -1,4 +1,5 @@
 import os
+import sys
 from pathlib import Path
 from tempfile import TemporaryDirectory
 from typing import Any
@@ -23,6 +24,7 @@ from server.atlas import (
     atlas_dataset_cache_path,
     build_atlas_command,
     discover_embedder_models,
+    launch_embedding_atlas,
     prepare_atlas_dataset,
     project_atlas_frame,
     reserve_atlas_start_port,
@@ -85,6 +87,42 @@ class AtlasModelDiscoveryTests(TestCase):
 
         self.assertIn("--with", command)
         self.assertIn("server.atlas_cache_patch", command)
+        self.assertTrue(Path(command[3]).is_absolute())
+
+    def test_launch_embedding_atlas_uses_posix_spawn_compatible_popen(self) -> None:
+        class DummyContext:
+            def check_cancelled(self) -> None:
+                return None
+
+            def update(self, *, progress=None, message=None):  # noqa: ANN001
+                return None
+
+        class FakeStdout:
+            def __init__(self) -> None:
+                self._lines = iter(["Embedding Atlas\n", "URL: http://127.0.0.1:5055\n"])
+
+            def readline(self) -> str:
+                return next(self._lines, "")
+
+            def close(self) -> None:
+                return None
+
+        class FakeProcess:
+            stdout = FakeStdout()
+            pid = 12345
+            returncode = None
+
+            def poll(self) -> None:
+                return None
+
+        with patch("server.atlas.subprocess.Popen", return_value=FakeProcess()) as popen:
+            url, pid = launch_embedding_atlas(["/usr/bin/python3", "-m", "embedding_atlas.cli"], DummyContext())
+
+        self.assertEqual("http://127.0.0.1:5055", url)
+        self.assertEqual(12345, pid)
+        kwargs = popen.call_args.kwargs
+        self.assertFalse(kwargs["close_fds"])
+        self.assertNotIn("cwd", kwargs)
 
     def test_embedding_atlas_env_can_import_local_server_package(self) -> None:
         env = _embedding_atlas_env()
@@ -92,6 +130,8 @@ class AtlasModelDiscoveryTests(TestCase):
         self.assertIn(str(BASE_DIR), env["PYTHONPATH"].split(os.pathsep))
         self.assertEqual(str(BASE_DIR / "cache" / "atlas" / "projection"), env["LOCAL_DATA_STUDIO_ATLAS_CACHE_DIR"])
         self.assertEqual(str(BASE_DIR / "cache" / "atlas"), env["LOCAL_DATA_STUDIO_ATLAS_CACHE_PRUNE_DIR"])
+        self.assertEqual("false", env["TOKENIZERS_PARALLELISM"])
+        self.assertEqual("1", env["VECLIB_MAXIMUM_THREADS"])
 
     def test_projection_cache_prunes_oldest_files_first(self) -> None:
         with TemporaryDirectory() as tmp:
@@ -297,13 +337,16 @@ class AtlasModelDiscoveryTests(TestCase):
                     context=DummyContext(),
                 )
 
+            cached_columns = pd.read_parquet(first.path).columns
+
         self.assertFalse(first.cache_hit)
         self.assertTrue(second.cache_hit)
         self.assertEqual(first.path, second.path)
         self.assertEqual(1, calls)
         self.assertEqual(ATLAS_PROJECTION_X, first.x)
         self.assertEqual(ATLAS_PROJECTION_Y, first.y)
-        self.assertEqual(ATLAS_PROJECTION_NEIGHBORS, first.neighbors)
+        self.assertIsNone(first.neighbors)
+        self.assertNotIn(ATLAS_PROJECTION_NEIGHBORS, cached_columns)
 
     def test_prepare_atlas_dataset_converts_image_urls_to_bytes_for_embedding(self) -> None:
         class DummyContext:
@@ -364,7 +407,261 @@ class AtlasModelDiscoveryTests(TestCase):
             cached = pd.read_parquet(prepared.path)
             self.assertIn("image", cached.columns)
             self.assertNotIn(ATLAS_EMBED_INPUT_COLUMN, cached.columns)
+            self.assertNotIn(ATLAS_PROJECTION_NEIGHBORS, cached.columns)
             self.assertEqual("https://example.test/image.jpg", cached["image"].iloc[0])
+
+    def test_prepare_atlas_dataset_skips_unreadable_image_rows(self) -> None:
+        class DummyContext:
+            def update(self, *, progress=None, message=None):  # noqa: ANN001
+                return None
+
+        with TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            data_path = root / "data.jsonl"
+            data_path.write_text('{"image":"https://example.test/good.jpg"}\n', encoding="utf-8")
+            model_root = root / "models"
+            model_path = model_root / "image-model"
+            model_path.mkdir(parents=True)
+            (model_path / "preprocessor_config.json").write_text("{}", encoding="utf-8")
+            data_cache = root / "cache" / "atlas" / "datasets"
+            projection_cache = root / "cache" / "atlas" / "projection"
+            cache_root = root / "cache" / "atlas"
+            options = AtlasOptions(
+                sample=None,
+                host="127.0.0.1",
+                port=5055,
+                batch_size=None,
+                text_embedder=None,
+                image_embedder="transformers",
+                trust_remote_code=False,
+            )
+
+            def fake_load_datasets(inputs, query=None, sample=None, splits=None):  # noqa: ANN001, ARG001
+                return pd.DataFrame({"image": ["https://example.test/good.jpg", "https://example.test/bad.jpg"], "label": ["good", "bad"]})
+
+            def fake_project_atlas_frame(data_frame, **kwargs):  # noqa: ANN001
+                self.assertEqual(1, len(data_frame))
+                self.assertEqual(b"\xff\xd8\xffgood", data_frame[ATLAS_EMBED_INPUT_COLUMN].iloc[0]["bytes"])
+                data_frame[ATLAS_PROJECTION_X] = [0.0]
+                data_frame[ATLAS_PROJECTION_Y] = [1.0]
+                data_frame[ATLAS_PROJECTION_NEIGHBORS] = [{"ids": [], "distances": []}]
+                return data_frame
+
+            def fake_read_url_bytes(url: str) -> bytes:
+                if url.endswith("bad.jpg"):
+                    raise ValueError("connection reset")
+                return b"\xff\xd8\xffgood"
+
+            with (
+                patch("server.atlas.EMBEDDER_MODELS_DIR", model_root),
+                patch("server.atlas.ATLAS_DATA_CACHE_DIR", data_cache),
+                patch("server.atlas.ATLAS_CACHE_DIR", projection_cache),
+                patch("server.atlas.ATLAS_CACHE_ROOT", cache_root),
+                patch("server.atlas.load_datasets", side_effect=fake_load_datasets),
+                patch("server.atlas.project_atlas_frame", side_effect=fake_project_atlas_frame),
+                patch("server.atlas._read_url_bytes", side_effect=fake_read_url_bytes),
+            ):
+                prepared = prepare_atlas_dataset(
+                    path=data_path,
+                    column="image",
+                    modality="image",
+                    sql=None,
+                    model_path=model_path,
+                    options=options,
+                    context=DummyContext(),
+                )
+
+            cached = pd.read_parquet(prepared.path)
+            self.assertEqual(["good"], cached["label"].tolist())
+            self.assertEqual("https://example.test/good.jpg", cached["image"].iloc[0])
+
+    def test_prepare_atlas_dataset_preserves_dict_image_bytes_for_display(self) -> None:
+        class DummyContext:
+            def update(self, *, progress=None, message=None):  # noqa: ANN001
+                return None
+
+        with TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            data_path = root / "data.jsonl"
+            data_path.write_text('{"image":{"bytes":"89504e470d0a1a0a","path":"scenes/scene_003444.png"}}\n', encoding="utf-8")
+            model_root = root / "models"
+            model_path = model_root / "image-model"
+            model_path.mkdir(parents=True)
+            (model_path / "preprocessor_config.json").write_text("{}", encoding="utf-8")
+            data_cache = root / "cache" / "atlas" / "datasets"
+            projection_cache = root / "cache" / "atlas" / "projection"
+            cache_root = root / "cache" / "atlas"
+            options = AtlasOptions(
+                sample=None,
+                host="127.0.0.1",
+                port=5055,
+                batch_size=None,
+                text_embedder=None,
+                image_embedder="transformers",
+                trust_remote_code=False,
+            )
+
+            def fake_load_datasets(inputs, query=None, sample=None, splits=None):  # noqa: ANN001, ARG001
+                return pd.DataFrame({"image": [{"bytes": "89504e470d0a1a0a", "path": "scenes/scene_003444.png"}]})
+
+            def fake_project_atlas_frame(data_frame, **kwargs):  # noqa: ANN001
+                self.assertEqual(b"\x89PNG\r\n\x1a\n", data_frame[ATLAS_EMBED_INPUT_COLUMN].iloc[0]["bytes"])
+                data_frame[ATLAS_PROJECTION_X] = [0.0]
+                data_frame[ATLAS_PROJECTION_Y] = [1.0]
+                data_frame[ATLAS_PROJECTION_NEIGHBORS] = [{"ids": [], "distances": []}]
+                return data_frame
+
+            with (
+                patch("server.atlas.EMBEDDER_MODELS_DIR", model_root),
+                patch("server.atlas.ATLAS_DATA_CACHE_DIR", data_cache),
+                patch("server.atlas.ATLAS_CACHE_DIR", projection_cache),
+                patch("server.atlas.ATLAS_CACHE_ROOT", cache_root),
+                patch("server.atlas.load_datasets", side_effect=fake_load_datasets),
+                patch("server.atlas.project_atlas_frame", side_effect=fake_project_atlas_frame),
+            ):
+                prepared = prepare_atlas_dataset(
+                    path=data_path,
+                    column="image",
+                    modality="image",
+                    sql=None,
+                    model_path=model_path,
+                    options=options,
+                    context=DummyContext(),
+                )
+
+            cached = pd.read_parquet(prepared.path)
+            image = cached["image"].iloc[0]
+            self.assertEqual(b"\x89PNG\r\n\x1a\n", image["bytes"])
+            self.assertEqual("scenes/scene_003444.png", image["path"])
+
+    def test_prepare_atlas_dataset_preserves_python_bytes_in_image_objects(self) -> None:
+        class DummyContext:
+            def update(self, *, progress=None, message=None):  # noqa: ANN001
+                return None
+
+        with TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            data_path = root / "data.jsonl"
+            data_path.write_text('{"image":"placeholder"}\n', encoding="utf-8")
+            model_root = root / "models"
+            model_path = model_root / "image-model"
+            model_path.mkdir(parents=True)
+            (model_path / "preprocessor_config.json").write_text("{}", encoding="utf-8")
+            data_cache = root / "cache" / "atlas" / "datasets"
+            projection_cache = root / "cache" / "atlas" / "projection"
+            cache_root = root / "cache" / "atlas"
+            options = AtlasOptions(
+                sample=None,
+                host="127.0.0.1",
+                port=5055,
+                batch_size=None,
+                text_embedder=None,
+                image_embedder="transformers",
+                trust_remote_code=False,
+            )
+
+            image_bytes = b"\x89PNG\r\n\x1a\n"
+
+            def fake_load_datasets(inputs, query=None, sample=None, splits=None):  # noqa: ANN001, ARG001
+                return pd.DataFrame({"image": [{"bytes": image_bytes, "path": "scenes/scene_003444.png"}]})
+
+            def fake_project_atlas_frame(data_frame, **kwargs):  # noqa: ANN001
+                self.assertEqual(image_bytes, data_frame[ATLAS_EMBED_INPUT_COLUMN].iloc[0]["bytes"])
+                data_frame[ATLAS_PROJECTION_X] = [0.0]
+                data_frame[ATLAS_PROJECTION_Y] = [1.0]
+                data_frame[ATLAS_PROJECTION_NEIGHBORS] = [{"ids": [], "distances": []}]
+                return data_frame
+
+            with (
+                patch("server.atlas.EMBEDDER_MODELS_DIR", model_root),
+                patch("server.atlas.ATLAS_DATA_CACHE_DIR", data_cache),
+                patch("server.atlas.ATLAS_CACHE_DIR", projection_cache),
+                patch("server.atlas.ATLAS_CACHE_ROOT", cache_root),
+                patch("server.atlas.load_datasets", side_effect=fake_load_datasets),
+                patch("server.atlas.project_atlas_frame", side_effect=fake_project_atlas_frame),
+            ):
+                prepared = prepare_atlas_dataset(
+                    path=data_path,
+                    column="image",
+                    modality="image",
+                    sql=None,
+                    model_path=model_path,
+                    options=options,
+                    context=DummyContext(),
+                )
+
+            cached = pd.read_parquet(prepared.path)
+            image = cached["image"].iloc[0]
+            self.assertEqual(image_bytes, image["bytes"])
+            self.assertEqual("scenes/scene_003444.png", image["path"])
+
+    def test_prepare_atlas_dataset_preserves_other_image_columns(self) -> None:
+        class DummyContext:
+            def update(self, *, progress=None, message=None):  # noqa: ANN001
+                return None
+
+        with TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            data_path = root / "data.jsonl"
+            data_path.write_text('{"image":"https://example.test/image.jpg"}\n', encoding="utf-8")
+            model_root = root / "models"
+            model_path = model_root / "image-model"
+            model_path.mkdir(parents=True)
+            (model_path / "preprocessor_config.json").write_text("{}", encoding="utf-8")
+            data_cache = root / "cache" / "atlas" / "datasets"
+            projection_cache = root / "cache" / "atlas" / "projection"
+            cache_root = root / "cache" / "atlas"
+            options = AtlasOptions(
+                sample=None,
+                host="127.0.0.1",
+                port=5055,
+                batch_size=None,
+                text_embedder=None,
+                image_embedder="transformers",
+                trust_remote_code=False,
+            )
+
+            def fake_load_datasets(inputs, query=None, sample=None, splits=None):  # noqa: ANN001, ARG001
+                return pd.DataFrame(
+                    {
+                        "image": ["https://example.test/image.jpg"],
+                        "part_mask": [{"bytes": "89504e470d0a1a0a", "path": "masks/part/scene.png"}],
+                        "metadata": [{"nested": "not an image", "payload": b"binary"}],
+                    }
+                )
+
+            def fake_project_atlas_frame(data_frame, **kwargs):  # noqa: ANN001
+                self.assertEqual(b"\xff\xd8\xfftest", data_frame[ATLAS_EMBED_INPUT_COLUMN].iloc[0]["bytes"])
+                data_frame[ATLAS_PROJECTION_X] = [0.0]
+                data_frame[ATLAS_PROJECTION_Y] = [1.0]
+                data_frame[ATLAS_PROJECTION_NEIGHBORS] = [{"ids": [], "distances": []}]
+                return data_frame
+
+            with (
+                patch("server.atlas.EMBEDDER_MODELS_DIR", model_root),
+                patch("server.atlas.ATLAS_DATA_CACHE_DIR", data_cache),
+                patch("server.atlas.ATLAS_CACHE_DIR", projection_cache),
+                patch("server.atlas.ATLAS_CACHE_ROOT", cache_root),
+                patch("server.atlas.load_datasets", side_effect=fake_load_datasets),
+                patch("server.atlas.project_atlas_frame", side_effect=fake_project_atlas_frame),
+                patch("server.atlas._read_url_bytes", return_value=b"\xff\xd8\xfftest"),
+            ):
+                prepared = prepare_atlas_dataset(
+                    path=data_path,
+                    column="image",
+                    modality="image",
+                    sql=None,
+                    model_path=model_path,
+                    options=options,
+                    context=DummyContext(),
+                )
+
+            cached = pd.read_parquet(prepared.path)
+            self.assertEqual("https://example.test/image.jpg", cached["image"].iloc[0])
+            self.assertEqual(b"\x89PNG\r\n\x1a\n", cached["part_mask"].iloc[0]["bytes"])
+            self.assertEqual("masks/part/scene.png", cached["part_mask"].iloc[0]["path"])
+            self.assertIsInstance(cached["metadata"].iloc[0], str)
+            self.assertIn("<binary 6 bytes>", cached["metadata"].iloc[0])
 
     def test_prepare_atlas_dataset_truncates_long_text_for_embedding_and_cache(self) -> None:
         class DummyContext:
@@ -462,6 +759,11 @@ class AtlasModelDiscoveryTests(TestCase):
 
         self.assertEqual(np.float16, seen_dtype)
         self.assertIn(ATLAS_PROJECTION_NEIGHBORS, projected.columns)
+        neighbor = projected[ATLAS_PROJECTION_NEIGHBORS].iloc[0]
+        self.assertEqual([0], neighbor["ids"])
+        self.assertEqual([0.0], neighbor["distances"])
+        self.assertIsInstance(neighbor["ids"], list)
+        self.assertIsInstance(neighbor["distances"], list)
 
     def test_anchor_transform_projects_remainder_without_neighbors(self) -> None:
         options = AtlasOptions(
@@ -527,6 +829,28 @@ class AtlasModelDiscoveryTests(TestCase):
 
         self.assertIn("--disable-projection", command)
         self.assertNotIn("--neighbors", command)
+        self.assertNotIn("--with", command)
+
+    def test_atlas_command_uses_current_python_module(self) -> None:
+        command = build_atlas_command(
+            path=Path("cache/atlas/datasets/example.parquet"),
+            column="text",
+            modality="text",
+            sql=None,
+            model_path=Path("models/embedder/example"),
+            options=AtlasOptions(
+                sample=None,
+                host="127.0.0.1",
+                port=5055,
+                batch_size=None,
+                text_embedder=None,
+                image_embedder=None,
+                trust_remote_code=False,
+            ),
+            projection_columns=(ATLAS_PROJECTION_X, ATLAS_PROJECTION_Y, None),
+        )
+
+        self.assertEqual([sys.executable, "-m", "embedding_atlas.cli"], command[:3])
 
     def test_reserve_atlas_start_port_advances_preferred_ports(self) -> None:
         options = AtlasOptions(
