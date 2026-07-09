@@ -163,7 +163,7 @@ INFO:     Application startup complete.
 - サポートしているデータフォーマット: `.jsonl`, `.json`, `.csv`, `.tsv`, `.parquet`.
 - 大規模データでは検索・EDA の実行に時間がかかることがあります。
 - 非常に大きなデータセットでは、対応形式のプレビューに大きな `OFFSET` ではなくカーソル形式の `page_token` を使用します。行数カウント、全体検索、サンプル統計、EDA は進捗確認とキャンセルが可能なバックグラウンドジョブとして実行されます。
-- Embedding Atlas ジョブは選択したローカル encoder model で embedding/projection 計算を行うため、時間がかかる場合があります。投影済み parquet input は `./cache/atlas/datasets` に保存され、同じデータ・クエリ・モデル・設定での再実行時は投影済み parquet を再利用して embedding/UMAP 再計算をスキップします。大規模データで素早く試す場合は `ATLAS_SAMPLE` を指定し、長文テキスト列は `ATLAS_TEXT_MAX_CHARS` で上限を調整し、embedding メモリは `ATLAS_EMBEDDING_DTYPE=float16` で削減できます。`ATLAS_PROJECTION_MODE=anchor_transform` を使うと代表サンプルで UMAP を fit し、残りを transform します。容量上限は `ATLAS_CACHE_MAX_BYTES` で調整してください。
+- Embedding Atlas ジョブは選択したローカル encoder model で embedding/projection 計算を行うため、時間がかかる場合があります。投影済み parquet input は `./cache/atlas/datasets` に保存され、同じデータ・クエリ・モデル・設定での再実行時は投影済み parquet を再利用して embedding/UMAP 再計算をスキップします。画像表示カラムは元の URL/path/`{bytes, path}` 形式を保持し、encoder 入力変換には hidden embedding input column だけを使います。大規模データで素早く試す場合は `ATLAS_SAMPLE` を指定し、長文テキスト列は `ATLAS_TEXT_MAX_CHARS` で上限を調整し、embedding メモリは `ATLAS_EMBEDDING_DTYPE=float16` で削減できます。`ATLAS_PROJECTION_MODE=anchor_transform` を使うと代表サンプルで UMAP を fit し、残りを transform します。容量上限は `ATLAS_CACHE_MAX_BYTES` で調整してください。
 - `models/embedder` 配下のローカル encoder model 実体は Git 管理対象外です。リポジトリにはディレクトリ用の placeholder のみを含め、モデルファイルは各環境で配置してください。
 - キャッシュは `./cache/metadata`, `./cache/index`, `./cache/stats`, `./cache/count`, `./cache/search` および EDA レポートファイルに分離され、該当するものはファイルパス・サイズ・更新時刻に基づいて無効化されます。
 - `Run EDA on Query Results` では、`rn` や `__rowid` のような補助カラムはレポートから除外されます。
@@ -177,6 +177,7 @@ INFO:     Application startup complete.
 - SQL 実行は `server/sql.py` に集約され、読み取り専用 SQL の検証、DuckDB リソース制限、バックグラウンドジョブの協調キャンセルを扱います。
 - EDA レポートの orchestration は `server/eda_reports.py`、profiling 設定と DataFrame sanitization は `server/eda.py` に分離されています。
 - Embedding Atlas の起動 orchestration は `server/atlas.py` にあり、`models/embedder` 配下のローカルモデル検出、選択カラムのサンプルからの text/image modality 推定、投影済み parquet cache の作成/再利用、`embedding-atlas` CLI の起動、進捗追跡、ローカル URL 返却、`server/atlas_cache.py` 経由の Atlas cache 容量管理を行います。Cache pruning は古いファイルから削除しつつ、現在の Atlas 起動で必要な parquet artifact は保護します。
+- macOS では child-side fork による `SIGSEGV (-11)` を避けるため、Atlas subprocess 起動を Python の `posix_spawn` path に乗る形に固定しています。Atlas command は絶対パスを使い、`Popen` に `cwd` を渡さず、`close_fds=False` を維持してください。詳細は [SIGSEGV 障害ログ](atlas_sigsegv_incident_log_ja.md) を参照してください。
 - バックグラウンドジョブは `server/jobs.py` で管理され、`/api/jobs/*` 経由で進捗、キャンセル、結果、エラー状態を確認できます。
 
 ## Contribution
