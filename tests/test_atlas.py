@@ -26,6 +26,7 @@ from server.atlas import (
     _is_qwen3_vl_embedding_model,
     _normalize_atlas_url,
     _resolve_embedder_callable,
+    _run_full_projection,
     atlas_dataset_cache_path,
     build_atlas_command,
     discover_embedder_models,
@@ -858,6 +859,26 @@ class AtlasModelDiscoveryTests(TestCase):
         self.assertEqual([0.0], neighbor["distances"])
         self.assertIsInstance(neighbor["ids"], list)
         self.assertIsInstance(neighbor["distances"], list)
+
+    def test_full_projection_sets_single_threaded_umap_with_seed(self) -> None:
+        seen_args: dict[str, Any] | None = None
+
+        def fake_run_umap(embeddings, *, umap_args=None):  # noqa: ANN001
+            nonlocal seen_args
+            seen_args = umap_args
+            row_count = len(embeddings)
+            return projection.Projection(
+                projection=np.zeros((row_count, 2), dtype=np.float32),
+                knn_indices=np.zeros((row_count, 0), dtype=np.int64),
+                knn_distances=np.zeros((row_count, 0), dtype=np.float32),
+            )
+
+        with patch("server.atlas._run_umap", side_effect=fake_run_umap):
+            _run_full_projection(np.ones((3, 2), dtype=np.float32))
+
+        self.assertIsNotNone(seen_args)
+        self.assertEqual(42, seen_args["random_state"])
+        self.assertEqual(1, seen_args["n_jobs"])
 
     def test_anchor_transform_projects_remainder_without_neighbors(self) -> None:
         options = AtlasOptions(

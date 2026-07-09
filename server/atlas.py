@@ -74,6 +74,8 @@ IMAGE_COLUMN_HINTS = ("image", "img", "photo", "picture", "thumbnail", "patch")
 QWEN3_VL_EMBEDDING_MARKER = "qwen3-vl-embedding"
 RUNNING_ATLAS_PROCESSES: list[subprocess.Popen[str]] = []
 ATLAS_DATASET_CACHE_VERSION = 10
+ATLAS_UMAP_RANDOM_STATE = 42
+ATLAS_UMAP_N_JOBS = 1
 ATLAS_PROJECTION_X = "__local_data_studio_atlas_x"
 ATLAS_PROJECTION_Y = "__local_data_studio_atlas_y"
 ATLAS_PROJECTION_NEIGHBORS = "__local_data_studio_atlas_neighbors"
@@ -664,7 +666,15 @@ def _run_full_projection(embeddings: np.ndarray) -> Projection:
     if len(embeddings) <= 1:
         return _zero_projection(len(embeddings))
     n_neighbors = min(15, max(2, len(embeddings) - 1))
-    return _run_umap(embeddings, umap_args={"metric": "cosine", "n_neighbors": n_neighbors, "random_state": 42})
+    return _run_umap(
+        embeddings,
+        umap_args={
+            "metric": "cosine",
+            "n_neighbors": n_neighbors,
+            "random_state": ATLAS_UMAP_RANDOM_STATE,
+            "n_jobs": ATLAS_UMAP_N_JOBS,
+        },
+    )
 
 
 def _compute_full_projection(
@@ -721,7 +731,12 @@ def _compute_anchor_transform_projection(
     anchor_embeddings = _embed_items(anchor_items, modality=modality, model_path=model_path, options=options)
 
     n_neighbors = min(15, max(2, len(anchor_indices) - 1))
-    reducer = umap.UMAP(metric="cosine", n_neighbors=n_neighbors, random_state=42)
+    reducer = umap.UMAP(
+        metric="cosine",
+        n_neighbors=n_neighbors,
+        random_state=ATLAS_UMAP_RANDOM_STATE,
+        n_jobs=ATLAS_UMAP_N_JOBS,
+    )
     anchor_projection = reducer.fit_transform(anchor_embeddings)
     projection_values = np.empty((row_count, 2), dtype=np.float32)
     projection_values[anchor_indices] = np.asarray(anchor_projection, dtype=np.float32)
