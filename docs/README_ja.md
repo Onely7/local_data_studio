@@ -43,7 +43,32 @@ local-data-studio --data-dir /local/data/path
 python -m local_data_studio --data-dir /local/data/path
 ```
 
-単一ファイルを開く場合は `--data-dir` の代わりに `--data-file` を指定します。デフォルトでは `.env`, `data`, `cache`, `models/embedder` は現在の作業ディレクトリ配下から解決されます。`DATA_DIR`, `CACHE_DIR`, `FILE_SERVE_ROOTS` などの環境変数が設定されている場合は、従来通りそちらが優先されます。
+単一ファイルを開く場合は `--data-dir` の代わりに `--data-file` を指定します。デフォルトでは `.env`, `data`, `cache`, `models/embedder` は現在の作業ディレクトリ配下から解決されます。再現性のある起動には `--workspace-dir` または `--config` を使い、個別のパスは `--data-dir`, `--data-file`, `--cache-dir`, `--models-dir`, `--env-file`, `--file-serve-roots` で上書きできます。
+
+設定ファイルの例:
+
+```toml
+[paths]
+workspace_dir = "/Users/me/local-data-studio"
+env_file = ".env"
+data_dir = "/Users/me/datasets"
+cache_dir = "/Users/me/.cache/local-data-studio"
+models_dir = "/Users/me/models/embedder"
+file_serve_roots = ["/Users/me/datasets", "/Users/me/images"]
+
+[server]
+host = "127.0.0.1"
+port = 8000
+reload = false
+```
+
+以下のように起動できます。
+
+```bash
+local-data-studio --config /path/to/local_data_studio.toml
+```
+
+パス設定の優先順位は、CLI option、OS environment variable、config file、`.env`、workspace default、current-working-directory default の順です。
 
 ### ソースからセットアップ
 
@@ -88,6 +113,7 @@ python -m local_data_studio --data-dir /local/data/path
    EDA_NESTED_POLICY=stringify
 
    # Embedding Atlas Settings
+   EMBEDDER_MODELS_DIR=models/embedder
    ATLAS_HOST=127.0.0.1
    ATLAS_PORT=5055
    # ATLAS_SAMPLE=5000
@@ -119,6 +145,7 @@ python -m local_data_studio --data-dir /local/data/path
    - `EDA_PROFILE_MODE`: `minimal` または `maximal` を指定できます。`minimal` は軽量なレポート、`maximal` は詳細な統計を含む代わりに時間がかかります。
    - `EDA_CELL_MAX_CHARS`: EDA で文字列が長い場合の最大表示文字数です。超過分は `... (truncated)` として省略されます。
    - `EDA_NESTED_POLICY`: ネスト型（list/struct/object/binary など）の扱い方です。`stringify` は文字列化して残し、`drop` は該当列を除外します。
+   - `EMBEDDER_MODELS_DIR`: ローカル HuggingFace encoder model ディレクトリを含むディレクトリです。デフォルトは workspace/current directory 配下の `models/embedder` です。
    - `ATLAS_HOST` / `ATLAS_PORT`: ローカル Embedding Atlas ページの host と開始 port です。port が使用中の場合、`embedding-atlas` が別 port を選ぶことがあります。
    - `ATLAS_SAMPLE`: Embedding Atlas に渡す任意のランダムサンプル数です。未設定または `0` の場合は全行を対象にします。
    - `ATLAS_BATCH_SIZE`: 任意の embedding batch size です。未設定または `0` の場合は Embedding Atlas のデフォルトを使用します。
@@ -179,7 +206,7 @@ INFO:     Application startup complete.
    <img src="../images/local_data_studio_05.png" alt="local data studio 05" width=45%> <img src="../images/local_data_studio_06.png" alt="local data studio 06" width=45%>
 
 5. **Embedding 可視化**  
-   HuggingFace 形式のローカル encoder model ディレクトリを `models/embedder` 配下に配置します（例: `models/embedder/google/siglip2-base-patch16-224`, `models/embedder/Qwen/Qwen3-Embedding-0.6B`, `models/embedder/Qwen/Qwen3-VL-Embedding-2B`）。`config.json`, `modules.json`, `tokenizer_config.json`, `preprocessor_config.json` などの model marker file を含むディレクトリが Model プルダウンに表示されます。
+   HuggingFace 形式のローカル encoder model ディレクトリを `models/embedder` または `--models-dir` / `EMBEDDER_MODELS_DIR` で指定したディレクトリ配下に配置します（例: `models/embedder/google/siglip2-base-patch16-224`, `models/embedder/Qwen/Qwen3-Embedding-0.6B`, `models/embedder/Qwen/Qwen3-VL-Embedding-2B`）。`config.json`, `modules.json`, `tokenizer_config.json`, `preprocessor_config.json` などの model marker file を含むディレクトリが Model プルダウンに表示されます。
    **Visualize Embedding** でテキストまたは画像カラムとモデルを選択し、**Run Atlas** を実行するとローカルの Embedding Atlas ページが起動します。**Run Atlas on Query Results** を使うと、SQL Console の現在のクエリ結果を対象に可視化できます。  
    処理はバックグラウンドジョブとして進捗表示され、準備が完了すると **Open Atlas** リンクが表示されます。  
    <img src="../images/local_data_studio_07.png" alt="local data studio 07" width=45%> <img src="../images/local_data_studio_08.png" alt="local data studio 08" width=45%>
@@ -195,7 +222,7 @@ INFO:     Application startup complete.
 - 非常に大きなデータセットでは、対応形式のプレビューに大きな `OFFSET` ではなくカーソル形式の `page_token` を使用します。行数カウント、全体検索、サンプル統計、EDA は進捗確認とキャンセルが可能なバックグラウンドジョブとして実行されます。
 - Embedding Atlas ジョブは選択したローカル encoder model で embedding/projection 計算を行うため、時間がかかる場合があります。投影済み parquet input は `./cache/atlas/datasets` に保存され、同じデータ・クエリ・モデル・設定での再実行時は投影済み parquet を再利用して embedding/UMAP 再計算をスキップします。画像表示カラムは元の URL/path/`{bytes, path}` 形式を保持し、encoder 入力変換には hidden embedding input column だけを使います。大規模データで素早く試す場合は `ATLAS_SAMPLE` を指定し、長文テキスト列は `ATLAS_TEXT_MAX_CHARS` で上限を調整し、embedding メモリは `ATLAS_EMBEDDING_DTYPE=float16` で削減できます。`ATLAS_PROJECTION_MODE=anchor_transform` を使うと代表サンプルで UMAP を fit し、残りを transform します。容量上限は `ATLAS_CACHE_MAX_BYTES` で調整してください。
 - Qwen3-VL-Embedding model は標準の `transformers` image-feature-extraction 入力契約と異なるため、Sentence Transformers backend に routing されます。画像 bytes の変換は内部 embedding input に限定され、cached Atlas display column は元の値を保持します。
-- `models/embedder` 配下のローカル encoder model 実体は Git 管理対象外です。リポジトリにはディレクトリ用の placeholder のみを含め、モデルファイルは各環境で配置してください。
+- `models/embedder` または設定した models directory 配下のローカル encoder model 実体は配布物に含めません。リポジトリにはディレクトリ用の placeholder のみを含め、モデルファイルは各環境で配置してください。
 - キャッシュは `./cache/metadata`, `./cache/index`, `./cache/stats`, `./cache/count`, `./cache/search` および EDA レポートファイルに分離され、該当するものはファイルパス・サイズ・更新時刻に基づいて無効化されます。
 - `Run EDA on Query Results` では、`rn` や `__rowid` のような補助カラムはレポートから除外されます。
 - TB 級の `.json` 配列は推奨しません。高速な閲覧には JSONL または Parquet を推奨します。
@@ -204,7 +231,7 @@ INFO:     Application startup complete.
 
 ## 実装メモ
 
-- application package は `src/local_data_studio` 配下にあります。静的 UI asset は `src/local_data_studio/static` として package に含め、実行時の `.env`, `data`, `cache`, `models/embedder` は現在の作業ディレクトリ配下をデフォルトにしています。
+- application package は `src/local_data_studio` 配下にあります。静的 UI asset は `src/local_data_studio/static` として package に含め、実行時の `.env`, `data`, `cache`, `models/embedder` は選択された workspace または現在の作業ディレクトリ配下をデフォルトにしています。CLI option、OS environment variable、config file、`.env`、workspace default の順で上書きされます。
 - 形式別 reader は `src/local_data_studio/server/readers.py` にあります。JSONL/CSV/TSV のプレビューは byte/page token ベースの bounded read と sparse line index を使い、Parquet は row group 全体を読み込まずに必要な batch だけを読みます。
 - SQL 実行は `src/local_data_studio/server/sql.py` に集約され、読み取り専用 SQL の検証、DuckDB リソース制限、バックグラウンドジョブの協調キャンセルを扱います。
 - EDA レポートの orchestration は `src/local_data_studio/server/eda_reports.py`、profiling 設定と DataFrame sanitization は `src/local_data_studio/server/eda.py` に分離されています。
