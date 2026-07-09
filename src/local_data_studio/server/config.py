@@ -5,7 +5,8 @@ from pathlib import Path
 from pydantic import Field, field_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
-BASE_DIR: Path = Path(__file__).resolve().parents[1]
+PACKAGE_DIR: Path = Path(__file__).resolve().parents[1]
+BASE_DIR: Path = Path.cwd().resolve()
 
 
 class Settings(BaseSettings):

@@ -1,7 +1,7 @@
 from unittest import TestCase
 
-from server.config import MAX_CELL_CHARS, MAX_SEQ_ITEMS
-from server.serialization import serialize_value
+from local_data_studio.server.config import MAX_CELL_CHARS, MAX_SEQ_ITEMS
+from local_data_studio.server.serialization import serialize_value
 
 
 class SerializationTests(TestCase):

@@ -4,7 +4,7 @@ from unittest import TestCase
 
 from fastapi import HTTPException
 
-from server.files import discover_dataset_files, resolve_raw_image_file
+from local_data_studio.server.files import discover_dataset_files, resolve_raw_image_file
 
 
 class DatasetDiscoveryTests(TestCase):

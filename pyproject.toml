@@ -75,15 +75,15 @@ quote-style = "double"
 line-ending = "auto"
 
 [tool.pytest.ini_options]
-pythonpath = ["."]
+pythonpath = ["src", "."]
 testpaths = ["tests"]
 
 # Pyrefly header
 [tool.pyrefly]
 #### configuring what to type check and where to import from
-project-includes = ["app.py", "server"]
+project-includes = ["src/local_data_studio"]
 # project-excludes = [""]
-search-path = ["."]
+search-path = ["src", "."]
 site-package-path = [".venv/lib/python3.12/site-packages"]
 #### configuring your python environment
 python-platform = "linux"
