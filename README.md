@@ -136,28 +136,33 @@ Open [http://127.0.0.1:8000](http://127.0.0.1:8000) to view the Local Data Studi
 ## Usage
 
 1. **Select a file from DATASETS**
-   Choose a dataset from the DATASETS list on the left. You can also filter by using the search box. Long file names are ellipsized in the list, and file sizes are shown with up to three significant digits using `Bytes`, `kB`, `MB`, `GB`, or `TB`.
+   Choose a dataset from the DATASETS list on the left. You can also filter by using the search box. Long file names are ellipsized in the list, and file sizes are shown with up to three significant digits using `Bytes`, `kB`, `MB`, `GB`, or `TB`.  
+   <img src="images/local_data_studio_02.png" alt="local data studio 02" width=45%>
 
 2. **Preview / Search / Paging**
-   Use Search at the top to search the data, Rows to change the number of displayed rows, and Prev/Next to move between pages.
+   Use Search at the top to search the data, Rows to change the number of displayed rows, and Prev/Next to move between pages.  
+   <img src="images/local_data_studio_03.png" alt="local data studio 03" width=45%>
 
 3. **SQL Console**
    Run DuckDB SQL queries against the `data` table.  
-   It also supports converting natural-language instructions into SQL using an LLM. SQL execution is limited to a single `SELECT`/CTE statement and runs with timeout, memory, and large-dataset scan-risk guards.
+   It also supports converting natural-language instructions into SQL using an LLM. SQL execution is limited to a single `SELECT`/CTE statement and runs with timeout, memory, and large-dataset scan-risk guards.  
+   <img src="images/local_data_studio_04.png" alt="local data studio 04" width=45%>
 
 4. **EDA Report**
    Run EDA to generate and cache a report for the dataset sample. Use **Run EDA on Query Results** to profile the current SQL Console query results instead.  
    Dataset reports are cached under `./cache` based on {file fingerprint, number of samples, `EDA_PROFILE_MODE`}. Query-result reports are cached separately based on {file fingerprint, SQL, number of samples, `EDA_PROFILE_MODE`}.  
-   You can adjust the sample count with `EDA_ROW_LIMIT` and UI-side settings.
+   You can adjust the sample count with `EDA_ROW_LIMIT` and UI-side settings.  
+   <img src="images/local_data_studio_05.png" alt="local data studio 05" width=45%> <img src="images/local_data_studio_06.png" alt="local data studio 06" width=45%>
 
 5. **Visualize Embedding**
    Put local HuggingFace encoder model directories under `models/embedder` (for example, `models/embedder/google/siglip2-base-patch16-224`, `models/embedder/Qwen/Qwen3-Embedding-0.6B`, or `models/embedder/Qwen/Qwen3-VL-Embedding-2B`). Directories containing model marker files such as `config.json`, `modules.json`, `tokenizer_config.json`, or `preprocessor_config.json` appear in the Model dropdown.
    Select a text or image column and a model in **Visualize Embedding**, then run **Run Atlas** to launch a local Embedding Atlas page. Use **Run Atlas on Query Results** to visualize the current SQL Console query results instead.  
-   The job runs in the background with progress updates, and an **Open Atlas** link appears when the local Atlas page is ready.
+   The job runs in the background with progress updates, and an **Open Atlas** link appears when the local Atlas page is ready.  
+   <img src="images/local_data_studio_07.png" alt="local data studio 07" width=45%> <img src="images/local_data_studio_08.png" alt="local data studio 08" width=45%>
 
 6. **Row Inspector / Image Zoom**
    Click a row to expand it in the details panel. Long values are compacted by default and can be toggled with Raw. For image columns, click to open a zoomed view. Image candidates are detected from image URLs, relative/absolute image paths, and dictionaries such as `{ "bytes": ..., "path": ... }`; bytes are tried first and path is used as a fallback.  
-   <img src="images/local_data_studio_02.png" alt="local data studio 02" width=45%> <img src="images/local_data_studio_03.png" alt="local data studio 03" width=45%>
+   <img src="images/local_data_studio_09.png" alt="local data studio 09" width=45%> <img src="images/local_data_studio_10.png" alt="local data studio 10" width=45%>
 
 ## Notes
 
