@@ -1,5 +1,7 @@
+import asyncio
 import os
 import sys
+from base64 import b64decode
 from pathlib import Path
 from tempfile import TemporaryDirectory
 from typing import Any
@@ -19,8 +21,11 @@ from server.atlas import (
     ATLAS_PROJECTION_Y,
     ATLAS_TRUNCATION_SUFFIX,
     AtlasOptions,
+    _effective_embedder_for_modality,
     _embedding_atlas_env,
+    _is_qwen3_vl_embedding_model,
     _normalize_atlas_url,
+    _resolve_embedder_callable,
     atlas_dataset_cache_path,
     build_atlas_command,
     discover_embedder_models,
@@ -32,6 +37,8 @@ from server.atlas import (
 )
 from server.atlas_cache import prune_cache_dir
 from server.config import BASE_DIR
+
+VALID_PNG_BYTES = b64decode("iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+/p9sAAAAASUVORK5CYII=")
 
 
 class AtlasModelDiscoveryTests(TestCase):
@@ -62,6 +69,93 @@ class AtlasModelDiscoveryTests(TestCase):
             with patch("server.atlas.EMBEDDER_MODELS_DIR", root):
                 with self.assertRaises(HTTPException):
                     resolve_embedder_model("../outside")
+
+    def test_detects_qwen3_vl_embedding_model_from_path_or_config(self) -> None:
+        with TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            named_model = root / "Qwen" / "Qwen3-VL-Embedding-2B"
+            config_model = root / "renamed-model"
+            named_model.mkdir(parents=True)
+            config_model.mkdir()
+            (config_model / "config.json").write_text(
+                '{"model_type":"qwen3_vl","architectures":["Qwen3VLEmbeddingModel"]}',
+                encoding="utf-8",
+            )
+
+            self.assertTrue(_is_qwen3_vl_embedding_model(named_model))
+            self.assertTrue(_is_qwen3_vl_embedding_model(config_model))
+            self.assertFalse(_is_qwen3_vl_embedding_model(root / "google" / "siglip2-base-patch16-224"))
+
+    def test_qwen3_vl_image_embedder_uses_sentence_transformer_inputs(self) -> None:
+        class FakeSentenceTransformer:
+            def __init__(self) -> None:
+                self.inputs: list[Any] | None = None
+                self.batch_size: int | None = None
+
+            def encode(self, inputs, *, show_progress_bar, batch_size):  # noqa: ANN001
+                if show_progress_bar:
+                    raise AssertionError("Qwen3-VL test embedder should disable progress bars")
+                self.inputs = inputs
+                self.batch_size = batch_size
+                return np.ones((len(inputs), 3), dtype=np.float32)
+
+        with TemporaryDirectory() as tmp:
+            model_path = Path(tmp) / "Qwen" / "Qwen3-VL-Embedding-2B"
+            model_path.mkdir(parents=True)
+            fake_model = FakeSentenceTransformer()
+            options = AtlasOptions(
+                sample=None,
+                host="127.0.0.1",
+                port=5055,
+                batch_size=None,
+                text_embedder=None,
+                image_embedder="transformers",
+                trust_remote_code=False,
+            )
+
+            with (
+                patch("server.atlas._load_sentence_transformer_model", return_value=fake_model),
+                patch("server.atlas.create_embedder") as create_embedder,
+            ):
+                embedder, embedder_args = _resolve_embedder_callable("image", model_path, options)
+                embeddings = asyncio.run(embedder([{"bytes": VALID_PNG_BYTES}], model=str(model_path), embedder_args=embedder_args))
+
+        create_embedder.assert_not_called()
+        self.assertEqual((1, 3), embeddings.shape)
+        self.assertEqual("sentence-transformers", _effective_embedder_for_modality("image", model_path, options))
+        self.assertIsNotNone(fake_model.inputs)
+        self.assertEqual(1, fake_model.batch_size)
+        self.assertIsInstance(fake_model.inputs[0], dict)
+        self.assertIn("image", fake_model.inputs[0])
+        self.assertEqual((1, 1), fake_model.inputs[0]["image"].size)
+
+    def test_non_qwen_image_embedder_keeps_transformers_default(self) -> None:
+        with TemporaryDirectory() as tmp:
+            model_path = Path(tmp) / "google" / "siglip2-base-patch16-224"
+            model_path.mkdir(parents=True)
+            options = AtlasOptions(
+                sample=None,
+                host="127.0.0.1",
+                port=5055,
+                batch_size=None,
+                text_embedder=None,
+                image_embedder=None,
+                trust_remote_code=False,
+            )
+
+            def fake_create_embedder(name, *, modality, model, embedder_args):  # noqa: ANN001
+                self.assertEqual("transformers", name)
+                self.assertEqual("image", modality)
+
+                async def fake_embed(batch, *, model, embedder_args):  # noqa: ANN001
+                    return np.ones((len(batch), 3), dtype=np.float32)
+
+                return fake_embed
+
+            with patch("server.atlas.create_embedder", side_effect=fake_create_embedder) as create_embedder:
+                _resolve_embedder_callable("image", model_path, options)
+
+        create_embedder.assert_called_once()
 
     def test_normalizes_atlas_url_from_cli_output(self) -> None:
         self.assertEqual("http://localhost:5055", _normalize_atlas_url("\x1b[32mhttp://localhost:5055\x1b[0m."))

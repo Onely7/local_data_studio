@@ -17,6 +17,7 @@ from base64 import b64decode
 from binascii import Error as BinasciiError
 from dataclasses import dataclass, replace
 from importlib.metadata import PackageNotFoundError, version
+from io import BytesIO
 from pathlib import Path
 from typing import Any
 from urllib.error import URLError
@@ -30,6 +31,8 @@ from embedding_atlas.cli import load_datasets
 from embedding_atlas.embedding import create_embedder
 from embedding_atlas.projection import Projection, _run_embedding, _run_umap
 from fastapi import HTTPException
+from PIL import Image
+from sentence_transformers import SentenceTransformer
 
 from .atlas_cache import prune_cache_dir
 from .cache import DatasetFingerprint
@@ -68,8 +71,9 @@ IMAGE_REFERENCE_PATTERN = re.compile(r"\.(png|jpg|jpeg|gif|webp|svg)(?:\?.*)?$",
 IMAGE_HEX_PREFIXES = ("89504e47", "ffd8ff", "47494638", "52494646")
 IMAGE_BASE64_PREFIXES = ("ivborw0kggo", "/9j/", "r0lgod", "uklgr")
 IMAGE_COLUMN_HINTS = ("image", "img", "photo", "picture", "thumbnail", "patch")
+QWEN3_VL_EMBEDDING_MARKER = "qwen3-vl-embedding"
 RUNNING_ATLAS_PROCESSES: list[subprocess.Popen[str]] = []
-ATLAS_DATASET_CACHE_VERSION = 9
+ATLAS_DATASET_CACHE_VERSION = 10
 ATLAS_PROJECTION_X = "__local_data_studio_atlas_x"
 ATLAS_PROJECTION_Y = "__local_data_studio_atlas_y"
 ATLAS_PROJECTION_NEIGHBORS = "__local_data_studio_atlas_neighbors"
@@ -187,6 +191,30 @@ def resolve_embedder_model(model: str) -> Path:
     if not _is_model_directory(candidate):
         raise HTTPException(status_code=404, detail="model not found under models/embedder")
     return candidate
+
+
+def _normalize_model_identity(value: str) -> str:
+    return value.lower().replace("_", "-").replace("/", "-")
+
+
+def _is_qwen3_vl_embedding_model(model_path: Path) -> bool:
+    """Return True for Qwen3-VL-Embedding models that need SentenceTransformer inputs."""
+    normalized_path = _normalize_model_identity(model_path.as_posix())
+    if QWEN3_VL_EMBEDDING_MARKER in normalized_path:
+        return True
+
+    config_path = model_path / "config.json"
+    try:
+        config = json.loads(config_path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError):
+        return False
+
+    candidates = [str(config.get("model_type", ""))]
+    architectures = config.get("architectures")
+    if isinstance(architectures, list):
+        candidates.extend(str(item) for item in architectures)
+    normalized_config = _normalize_model_identity(" ".join(candidates))
+    return "qwen3-vl" in normalized_config and "embedding" in normalized_config
 
 
 def _is_image_reference(value: str) -> bool:
@@ -549,9 +577,48 @@ def _default_embedder_for_modality(modality: AtlasModality) -> str:
     return "sentence-transformers" if modality == "text" else "transformers"
 
 
+def _effective_embedder_for_modality(modality: AtlasModality, model_path: Path, options: AtlasOptions) -> str:
+    if _is_qwen3_vl_embedding_model(model_path):
+        return "sentence-transformers"
+    configured = _atlas_embedder_for_modality(modality, options)
+    return configured or _default_embedder_for_modality(modality)
+
+
+def _load_sentence_transformer_model(model_path: Path, options: AtlasOptions) -> Any:
+    kwargs = {"trust_remote_code": True} if options.trust_remote_code else {}
+    return SentenceTransformer(str(model_path), **kwargs)
+
+
+def _qwen3_vl_image_input(item: Any) -> Any:
+    if isinstance(item, dict) and isinstance(item.get("bytes"), bytes | bytearray):
+        return Image.open(BytesIO(bytes(item["bytes"]))).convert("RGB")
+    if isinstance(item, dict) and item.get("image") is not None:
+        return item["image"]
+    return item
+
+
+def _qwen3_vl_sentence_transformer_input(item: Any, modality: AtlasModality) -> Any:
+    if modality == "image":
+        return {"image": _qwen3_vl_image_input(item)}
+    return item
+
+
+def _create_qwen3_vl_sentence_transformer_embedder(modality: AtlasModality, model_path: Path, options: AtlasOptions) -> Any:
+    st_model = _load_sentence_transformer_model(model_path, options)
+
+    async def _embed(batch: list[Any], *, model: str | None, embedder_args: dict) -> np.ndarray:  # noqa: ARG001
+        encoded_inputs = [_qwen3_vl_sentence_transformer_input(item, modality) for item in batch]
+        embeddings = st_model.encode(encoded_inputs, show_progress_bar=False, batch_size=max(len(encoded_inputs), 1))
+        return np.asarray(embeddings, dtype=np.float32)
+
+    return _embed
+
+
 def _resolve_embedder_callable(modality: AtlasModality, model_path: Path, options: AtlasOptions) -> Any:
-    embedder_name = _atlas_embedder_for_modality(modality, options) or _default_embedder_for_modality(modality)
+    embedder_name = _effective_embedder_for_modality(modality, model_path, options)
     embedder_args = {"trust_remote_code": True} if options.trust_remote_code else {}
+    if embedder_name == "sentence-transformers" and _is_qwen3_vl_embedding_model(model_path):
+        return _create_qwen3_vl_sentence_transformer_embedder(modality, model_path, options), embedder_args
     return create_embedder(embedder_name, modality=modality, model=str(model_path), embedder_args=embedder_args), embedder_args
 
 
@@ -744,7 +811,7 @@ def build_atlas_command(
     command.extend(["--with", "server.atlas_cache_patch"])
     command.extend(["--model", str(model_path)])
 
-    embedder = options.image_embedder if modality == "image" else options.text_embedder
+    embedder = _effective_embedder_for_modality(modality, model_path, options)
     if embedder:
         command.extend(["--embedder", embedder])
 
@@ -929,7 +996,7 @@ def atlas_dataset_cache_path(
         "column": column,
         "modality": modality,
         "model": _model_cache_identity(model_path),
-        "embedder": _atlas_embedder_for_modality(modality, options),
+        "embedder": _effective_embedder_for_modality(modality, model_path, options),
         "sample": options.sample,
         "batch_size": options.batch_size,
         "text_max_chars": ATLAS_TEXT_MAX_CHARS,
