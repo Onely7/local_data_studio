@@ -1,10 +1,16 @@
 from pathlib import Path
 from tempfile import TemporaryDirectory
 from unittest import TestCase
+from unittest.mock import patch
 
 from fastapi import HTTPException
 
-from local_data_studio.server.files import discover_dataset_files, resolve_raw_image_file
+from local_data_studio.server.files import (
+    discover_dataset_files,
+    refresh_dataset_file_catalog,
+    resolve_data_file,
+    resolve_raw_image_file,
+)
 
 
 class DatasetDiscoveryTests(TestCase):
@@ -24,6 +30,22 @@ class DatasetDiscoveryTests(TestCase):
             files = discover_dataset_files(data_root, None, [excluded_dir])
 
             self.assertEqual([keep_file], files)
+
+    def test_resolve_data_file_uses_discovered_name_allowlist(self) -> None:
+        with TemporaryDirectory() as tmpdir:
+            data_root = Path(tmpdir).resolve()
+            dataset = data_root / "example.jsonl"
+            dataset.write_text('{"value": 1}\n', encoding="utf-8")
+
+            with (
+                patch("local_data_studio.server.files.DATA_ROOT", data_root),
+                patch("local_data_studio.server.files.SINGLE_FILE", None),
+                patch("local_data_studio.server.files.VIS_EXCLUDE_PATHS", []),
+            ):
+                refresh_dataset_file_catalog()
+                self.assertEqual(dataset, resolve_data_file("example.jsonl"))
+                with self.assertRaises(HTTPException):
+                    resolve_data_file("../outside.jsonl")
 
 
 class RawImageFileResolutionTests(TestCase):
