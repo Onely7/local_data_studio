@@ -240,29 +240,6 @@ INFO:     Application startup complete.
 - macOS では child-side fork による `SIGSEGV (-11)` を避けるため、Atlas subprocess 起動を Python の `posix_spawn` path に乗る形に固定しています。Atlas command は絶対パスを使い、`Popen` に `cwd` を渡さず、`close_fds=False` を維持してください。詳細は [SIGSEGV 障害ログ](atlas_sigsegv_incident_log_ja.md) を参照してください。
 - バックグラウンドジョブは `src/local_data_studio/server/jobs.py` で管理され、`/api/jobs/*` 経由で進捗、キャンセル、結果、エラー状態を確認できます。
 
-## PyPI リリース
-
-このプロジェクトは配布名 `local-data-studio`、import package 名 `local_data_studio` として公開できるように構成されています。
-
-1. TestPyPI と PyPI の両方で pending Trusted Publisher を作成します。
-   - Repository: `Onely7/local_data_studio`
-   - Workflow: `publish.yml`
-   - Environments: `testpypi` / `pypi`
-   - Project name: `local-data-studio`
-2. ローカルで検証します。
-
-   ```bash
-   uv run ruff check
-   uv run ty check
-   uv run pytest
-   rm -rf dist build *.egg-info
-   uv run python -m build
-   uv run twine check dist/*
-   ```
-
-3. GitHub Actions の `Publish Python Package` workflow を手動実行し、TestPyPI に公開します。
-4. TestPyPI での install smoke test が通った後、GitHub Release を publish して Trusted Publishing 経由で PyPI に公開します。
-
 ## Contribution
 
 - バグ報告・機能提案は Issue からお願いします。

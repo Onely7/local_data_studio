@@ -241,29 +241,6 @@ Open [http://127.0.0.1:8000](http://127.0.0.1:8000) to view the Local Data Studi
 - On macOS, Atlas subprocess launch is kept compatible with Python's `posix_spawn` path to avoid child-side fork `SIGSEGV (-11)` failures. Keep Atlas commands on absolute paths, do not pass `cwd` to `Popen`, and keep `close_fds=False`; see [the SIGSEGV incident log](docs/atlas_sigsegv_incident_log_ja.md).
 - Background jobs are managed by `src/local_data_studio/server/jobs.py` and expose progress, cancellation, result, and error state through `/api/jobs/*`.
 
-## PyPI Release
-
-This project is prepared for distribution as `local-data-studio` with import package `local_data_studio`.
-
-1. Create pending Trusted Publishers on TestPyPI and PyPI:
-   - Repository: `Onely7/local_data_studio`
-   - Workflow: `publish.yml`
-   - Environments: `testpypi` and `pypi`
-   - Project name: `local-data-studio`
-2. Validate locally:
-
-   ```bash
-   uv run ruff check
-   uv run ty check
-   uv run pytest
-   rm -rf dist build *.egg-info
-   uv run python -m build
-   uv run twine check dist/*
-   ```
-
-3. Use the GitHub Actions `Publish Python Package` workflow dispatch to publish to TestPyPI.
-4. After the TestPyPI install smoke test passes, publish a GitHub Release to upload the same package to PyPI through Trusted Publishing.
-
 ## Contribution
 
 - Please use Issues for bug reports and feature requests.
