@@ -23,8 +23,6 @@ class Settings(BaseSettings):
     openai_api_key: str | None = Field(default=None, validation_alias="OPENAI_API_KEY")
     openai_base_url: str = Field(default="https://api.openai.com/v1", validation_alias="OPENAI_BASE_URL")
     openai_model: str = Field(default="gpt-5.2", validation_alias="OPENAI_MODEL")
-    eda_font_family: str | None = Field(default=None, validation_alias="EDA_FONT_FAMILY")
-    eda_font_path: str | None = Field(default=None, validation_alias="EDA_FONT_PATH")
     default_eda_sample: int = Field(default=5000, validation_alias="EDA_ROW_LIMIT")
     allow_delete_data: bool = Field(default=True, validation_alias="ALLOW_DELETE_DATA")
     default_eda_mode: str = Field(default="minimal", validation_alias="EDA_PROFILE_MODE")
@@ -165,8 +163,6 @@ CACHE_DIR.mkdir(parents=True, exist_ok=True)
 OPENAI_API_KEY: str | None = SETTINGS.openai_api_key
 OPENAI_BASE_URL: str = SETTINGS.openai_base_url
 OPENAI_MODEL: str = SETTINGS.openai_model
-EDA_FONT_FAMILY: str | None = SETTINGS.eda_font_family
-EDA_FONT_PATH: str | None = SETTINGS.eda_font_path
 
 ALLOWED_EXTENSIONS: set[str] = {".jsonl", ".json", ".csv", ".tsv", ".parquet"}
 UPLOAD_EXTENSIONS: set[str] = {".jsonl", ".csv", ".tsv", ".parquet"}

@@ -106,8 +106,6 @@ Path precedence is: CLI option, OS environment variable, config file, `.env`, wo
 
     # EDA Settings
     EDA_ROW_LIMIT=10000000
-    # EDA_FONT_FAMILY=IPAexGothic
-    # EDA_FONT_PATH=fonts/ipaexg.ttf
     EDA_PROFILE_MODE=minimal
     EDA_CELL_MAX_CHARS=5000
     EDA_NESTED_POLICY=stringify
@@ -141,8 +139,6 @@ Path precedence is: CLI option, OS environment variable, config file, `.env`, wo
    - `OPENAI_BASE_URL`: Endpoint for an OpenAI-compatible API.
    - `OPENAI_MODEL`: OpenAI model name to use.
    - `EDA_ROW_LIMIT`: Maximum number of rows to load when generating an EDA report.
-   - `EDA_FONT_FAMILY`: Font family name used in EDA reports. (Optional)
-   - `EDA_FONT_PATH`: Path to a font file (takes precedence if set). (Optional)
    - `EDA_PROFILE_MODE`: Either `minimal` or `maximal`. `minimal` generates a lightweight report, while `maximal` includes more detailed statistics but takes longer.
    - `EDA_CELL_MAX_CHARS`: Maximum number of characters to display for long strings in EDA. Excess text is truncated as `... (truncated)`.
    - `EDA_NESTED_POLICY`: How to handle nested types (list/struct/object/binary, etc.). `stringify` keeps them as strings, and `drop` removes the corresponding columns.
@@ -254,7 +250,7 @@ Open [http://127.0.0.1:8000](http://127.0.0.1:8000) to view the Local Data Studi
 ## Acknowledgements
 
 - [Dataset viewer (Huggingface)](https://github.com/huggingface/dataset-viewer): Used as a reference for UI/feature design.
-- [Zarque-profiling](https://github.com/crescendo-medix/zarque-profiling): Used for EDA report generation.
+- [YData Profiling](https://github.com/ydataai/ydata-profiling): Used for EDA report generation.
 - [Embedding Atlas](https://github.com/apple/embedding-atlas): Used for interactive embedding visualization.
 
 ## License

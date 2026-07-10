@@ -11,11 +11,11 @@ from fastapi import HTTPException
 
 from .config import CACHE_DIR, DEFAULT_EDA_MODE, DEFAULT_EDA_SAMPLE, MAX_EDA_SAMPLE
 from .deleted_rows import deleted_row_ids_for
-from .eda import build_eda_report, eda_cache_path, load_eda_dataframe_polars, sanitize_eda_dataframe
+from .eda import build_eda_report, eda_cache_path, load_eda_dataframe, sanitize_eda_dataframe
 from .jobs import JobContext
 from .sql import guard_select_sql_for_dataset, load_query_dataframe_guarded
 
-QUERY_EDA_CACHE_VERSION = "query-v2"
+QUERY_EDA_CACHE_VERSION = "query-v3"
 QUERY_EDA_HELPER_COLUMNS = frozenset({"__rowid", "rn"})
 
 
@@ -89,7 +89,7 @@ def _write_profile_report(df: Any, *, title: str, cache_path: Path, options: Eda
         report = build_eda_report(df, title=title, minimal=options.minimal)
         report.to_file(str(cache_path))
     except ImportError as exc:
-        raise HTTPException(status_code=500, detail="zarque_profiling is not installed") from exc
+        raise HTTPException(status_code=500, detail="ydata-profiling is not installed") from exc
     except Exception as exc:
         raise HTTPException(status_code=500, detail=f"EDA generation failed: {exc}") from exc
 
@@ -113,7 +113,7 @@ def generate_dataset_eda_report(
     if context is not None:
         context.update(progress=0.1, message="Loading sampled rows")
     deleted_ids = deleted_row_ids_for(path)
-    df = load_eda_dataframe_polars(path, options.sample, deleted_ids)
+    df = load_eda_dataframe(path, options.sample, deleted_ids)
     if df is None:
         raise HTTPException(status_code=400, detail="failed to load dataset")
 
