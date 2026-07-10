@@ -1014,7 +1014,7 @@ dev = [
 [package.metadata]
 requires-dist = [
     { name = "duckdb", specifier = ">=1.4.0,<2.0.0" },
-    { name = "embedding-atlas" },
+    { name = "embedding-atlas", specifier = ">=0.20.0,<0.22.0" },
     { name = "fastapi", specifier = ">=0.125.0" },
     { name = "matplotlib", specifier = ">=3.8.0,<3.9.0" },
     { name = "pandas", specifier = ">=2.2.0,<2.3.0" },

@@ -19,6 +19,22 @@ updates:
       python-dependencies:
         patterns:
           - "*"
+    # Keep automated updates within the compatibility ranges enforced by this
+    # project's direct requirements. Crossing these bounds requires coordinated
+    # EDA or Pydantic migration work, not a standalone dependency update.
+    ignore:
+      - dependency-name: "pydantic"
+        versions: [">=2.7.0"]
+      - dependency-name: "pydantic-settings"
+        versions: [">=2.3.0"]
+      - dependency-name: "pandas"
+        versions: [">=2.3.0"]
+      - dependency-name: "scipy"
+        versions: [">=1.13.0"]
+      - dependency-name: "matplotlib"
+        versions: [">=3.9.0"]
+      - dependency-name: "embedding-atlas"
+        versions: [">=0.22.0"]
 
   - package-ecosystem: "github-actions"
     directory: "/"
