@@ -237,7 +237,7 @@ INFO:     Application startup complete.
 - EDA レポートの orchestration は `src/local_data_studio/server/eda_reports.py`、profiling 設定と DataFrame sanitization は `src/local_data_studio/server/eda.py` に分離されています。
 - Embedding Atlas の起動 orchestration は `src/local_data_studio/server/atlas.py` にあり、`models/embedder` 配下のローカルモデル検出、選択カラムのサンプルからの text/image modality 推定、投影済み parquet cache の作成/再利用、`embedding-atlas` CLI の起動、進捗追跡、ローカル URL 返却、`src/local_data_studio/server/atlas_cache.py` 経由の Atlas cache 容量管理を行います。Cache pruning は古いファイルから削除しつつ、現在の Atlas 起動で必要な parquet artifact は保護します。
 - Atlas の UMAP projection は cache artifact の再現性のため固定 seed を使い、UMAP の seeded execution mode に合わせて `n_jobs=1` を明示することで thread override warning を出さないようにしています。
-- macOS では child-side fork による `SIGSEGV (-11)` を避けるため、Atlas subprocess 起動を Python の `posix_spawn` path に乗る形に固定しています。Atlas command は絶対パスを使い、`Popen` に `cwd` を渡さず、`close_fds=False` を維持してください。詳細は [SIGSEGV 障害ログ](atlas_sigsegv_incident_log_ja.md) を参照してください。
+- macOS では child-side fork による `SIGSEGV (-11)` を避けるため、Atlas subprocess 起動を Python の `posix_spawn` path に乗る形に固定しています。Atlas command は絶対パスを使い、`Popen` に `cwd` を渡さず、`close_fds=False` を維持してください。
 - バックグラウンドジョブは `src/local_data_studio/server/jobs.py` で管理され、`/api/jobs/*` 経由で進捗、キャンセル、結果、エラー状態を確認できます。
 
 ## Contribution

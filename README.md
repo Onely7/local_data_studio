@@ -238,7 +238,7 @@ Open [http://127.0.0.1:8000](http://127.0.0.1:8000) to view the Local Data Studi
 - EDA report orchestration lives in `src/local_data_studio/server/eda_reports.py`; low-level profiling setup and DataFrame sanitization live in `src/local_data_studio/server/eda.py`.
 - Embedding Atlas launch orchestration lives in `src/local_data_studio/server/atlas.py`; it discovers local models under `models/embedder`, infers text/image modality from selected column samples, materializes/reuses projected parquet cache entries, starts the `embedding-atlas` CLI, tracks progress, returns the local URL, and routes Atlas cache pruning through `src/local_data_studio/server/atlas_cache.py`. Cache pruning removes old files first while preserving the parquet artifact needed by the current Atlas launch.
 - Atlas UMAP projection uses a fixed random seed for reproducible cache artifacts and explicitly sets `n_jobs=1`, matching UMAP's seeded execution mode without emitting thread override warnings.
-- On macOS, Atlas subprocess launch is kept compatible with Python's `posix_spawn` path to avoid child-side fork `SIGSEGV (-11)` failures. Keep Atlas commands on absolute paths, do not pass `cwd` to `Popen`, and keep `close_fds=False`; see [the SIGSEGV incident log](docs/atlas_sigsegv_incident_log_ja.md).
+- On macOS, Atlas subprocess launch is kept compatible with Python's `posix_spawn` path to avoid child-side fork `SIGSEGV (-11)` failures. Keep Atlas commands on absolute paths, do not pass `cwd` to `Popen`, and keep `close_fds=False`.
 - Background jobs are managed by `src/local_data_studio/server/jobs.py` and expose progress, cancellation, result, and error state through `/api/jobs/*`.
 
 ## Contribution
