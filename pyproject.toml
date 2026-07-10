@@ -1,8 +1,28 @@
+[build-system]
+requires = ["hatchling>=1.26"]
+build-backend = "hatchling.build"
+
 [project]
-name = "data-viewer"
-version = "0.0.1"
+name = "local-data-studio"
+version = "0.1.0"
 description = "Local web viewer for jsonl/json/csv/tsv/parquet files"
+readme = "README.md"
 requires-python = ">=3.12,<3.13"
+license = "MIT"
+license-files = ["LICENSE"]
+authors = [
+  { name = "Daiki Shiono" },
+]
+keywords = ["data-viewer", "jsonl", "parquet", "duckdb", "eda", "embedding-atlas"]
+classifiers = [
+  "Development Status :: 3 - Alpha",
+  "Framework :: FastAPI",
+  "Intended Audience :: Developers",
+  "License :: OSI Approved :: MIT License",
+  "Programming Language :: Python :: 3",
+  "Programming Language :: Python :: 3.12",
+  "Operating System :: OS Independent",
+]
 dependencies = [
   "fastapi>=0.125.0",
   "uvicorn>=0.50.0",
@@ -23,15 +43,37 @@ dependencies = [
   "torchvision>=0.27.1",
 ]
 
-[tool.uv]
-package = false
+[project.urls]
+Homepage = "https://github.com/Onely7/local_data_studio"
+Repository = "https://github.com/Onely7/local_data_studio"
+Issues = "https://github.com/Onely7/local_data_studio/issues"
+
+[project.scripts]
+local-data-studio = "local_data_studio.cli:main"
 
 [dependency-groups]
 dev = [
+  "build",
   "pre-commit",
   "pytest",
   "ruff",
-  "pyrefly",
+  "twine",
+  "ty",
+]
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/local_data_studio"]
+
+[tool.hatch.build.targets.sdist]
+include = [
+  "/src",
+  "/tests",
+  "/docs",
+  "/images",
+  "/README.md",
+  "/LICENSE",
+  "/pyproject.toml",
+  "/uv.lock",
 ]
 
 [tool.ruff]
@@ -75,17 +117,12 @@ quote-style = "double"
 line-ending = "auto"
 
 [tool.pytest.ini_options]
-pythonpath = ["."]
+pythonpath = ["src", "."]
 testpaths = ["tests"]
 
-# Pyrefly header
-[tool.pyrefly]
-#### configuring what to type check and where to import from
-project-includes = ["app.py", "server"]
-# project-excludes = [""]
-search-path = ["."]
-site-package-path = [".venv/lib/python3.12/site-packages"]
-#### configuring your python environment
-python-platform = "linux"
+[tool.ty.environment]
 python-version = "3.12"
-# python-interpreter-path = ".venv/bin/python3"
+root = ["./src"]
+
+[tool.ty.src]
+include = ["src/local_data_studio"]

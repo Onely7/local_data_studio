@@ -54,6 +54,7 @@ from .config import (
     ATLAS_TRUST_REMOTE_CODE,
     BASE_DIR,
     EMBEDDER_MODELS_DIR,
+    PACKAGE_DIR,
 )
 from .db import open_connection, quote_ident
 from .deleted_rows import deleted_row_ids_for
@@ -835,7 +836,7 @@ def build_atlas_command(
     if options.batch_size is not None:
         command.extend(["--batch-size", str(options.batch_size)])
 
-    command.extend(["--with", "server.atlas_cache_patch"])
+    command.extend(["--with", "local_data_studio.server.atlas_cache_patch"])
     command.extend(["--model", str(model_path)])
 
     embedder = _effective_embedder_for_modality(modality, model_path, options)
@@ -879,7 +880,11 @@ def _embedding_atlas_env() -> dict[str, str]:
     env = os.environ.copy()
     env["PYTHONUNBUFFERED"] = "1"
     env["PATH"] = f"{Path(sys.executable).parent}{os.pathsep}{env.get('PATH', '')}"
-    env["PYTHONPATH"] = f"{BASE_DIR}{os.pathsep}{env.get('PYTHONPATH', '')}"
+    python_paths = [str(PACKAGE_DIR.parent), str(BASE_DIR)]
+    existing_python_path = env.get("PYTHONPATH")
+    if existing_python_path:
+        python_paths.append(existing_python_path)
+    env["PYTHONPATH"] = os.pathsep.join(python_paths)
     env["LOCAL_DATA_STUDIO_ATLAS_CACHE_DIR"] = str(ATLAS_CACHE_DIR)
     env["LOCAL_DATA_STUDIO_ATLAS_CACHE_PRUNE_DIR"] = str(ATLAS_CACHE_ROOT)
     env["LOCAL_DATA_STUDIO_ATLAS_CACHE_MAX_BYTES"] = str(ATLAS_CACHE_MAX_BYTES)

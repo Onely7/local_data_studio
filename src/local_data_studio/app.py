@@ -9,11 +9,10 @@ from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 
-from server.atlas import discover_embedder_models, run_atlas_visualization
-from server.cache import count_cache_path, search_cache_path, stats_cache_path
-from server.config import (
+from .server.atlas import discover_embedder_models, run_atlas_visualization
+from .server.cache import count_cache_path, search_cache_path, stats_cache_path
+from .server.config import (
     ALLOW_DELETE_DATA,
-    BASE_DIR,
     CACHE_DIR,
     DATA_ROOT,
     DATA_SERVE_ROOT,
@@ -21,12 +20,13 @@ from server.config import (
     DEFAULT_SAMPLE,
     FILE_SERVE_ROOTS,
     HARD_DELETE_MAX_BYTES,
+    PACKAGE_DIR,
     SINGLE_FILE,
     UPLOAD_EXTENSIONS,
     VIS_EXCLUDE_DIRS,
     VIS_EXCLUDE_PATHS,
 )
-from server.db import (
+from .server.db import (
     build_table_response,
     count_relation_rows,
     count_relation_rows_raw,
@@ -38,31 +38,31 @@ from server.db import (
     relation_sql,
     relation_with_rowid_sql,
 )
-from server.delete_ops import delete_column_from_file, delete_row_from_file
-from server.deleted_rows import (
+from .server.delete_ops import delete_column_from_file, delete_row_from_file
+from .server.deleted_rows import (
     add_deleted_row_id,
     clear_deleted_row_ids,
     deleted_row_ids_for,
 )
-from server.eda_reports import generate_dataset_eda_report, generate_query_eda_report
-from server.files import (
+from .server.eda_reports import generate_dataset_eda_report, generate_query_eda_report
+from .server.files import (
     discover_dataset_files,
     resolve_data_file,
     resolve_raw_image_file,
     unique_path,
 )
-from server.jobs import JOB_STORE, JobContext
-from server.llm import generate_sql_from_prompt
-from server.readers import (
+from .server.jobs import JOB_STORE, JobContext
+from .server.llm import generate_sql_from_prompt
+from .server.readers import (
     build_line_index_with_progress,
     count_rows_with_progress,
     fetch_preview_page,
     load_dataset_metadata,
     search_dataset,
 )
-from server.serialization import serialize_value
-from server.sql import execute_query_guarded, is_large_dataset
-from server.stats import compute_column_stats
+from .server.serialization import serialize_value
+from .server.sql import execute_query_guarded, is_large_dataset
+from .server.stats import compute_column_stats
 
 app = FastAPI(title="Data Viewer")
 UPLOAD_FILES = File(...)
@@ -642,4 +642,4 @@ async def run_query(payload: QueryRequest) -> dict[str, Any]:
 
 app.mount("/data", StaticFiles(directory=str(DATA_SERVE_ROOT), check_dir=False), name="data")
 app.mount("/cache", StaticFiles(directory=str(CACHE_DIR), check_dir=False), name="cache")
-app.mount("/", NoCacheStaticFiles(directory=str(BASE_DIR / "static"), html=True), name="static")
+app.mount("/", NoCacheStaticFiles(directory=str(PACKAGE_DIR / "static"), html=True), name="static")

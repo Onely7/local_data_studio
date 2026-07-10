@@ -26,7 +26,51 @@ It provides fast preview, DuckDB SQL execution (with optional LLM-assisted SQL g
 - Drag & drop upload support
 - Hide/delete within the current session
 
-## Setup
+## Installation
+
+### From PyPI
+
+After the package is published, install it with pip:
+
+```bash
+python -m pip install local-data-studio
+```
+
+Run the app with either entrypoint:
+
+```bash
+local-data-studio --data-dir /local/data/path
+python -m local_data_studio --data-dir /local/data/path
+```
+
+Use `--data-file` instead of `--data-dir` to open a single dataset file. By default, `.env`, `data`, `cache`, and `models/embedder` are resolved under the current working directory. For repeatable launches, use `--workspace-dir` or `--config`; individual paths can still be overridden with `--data-dir`, `--data-file`, `--cache-dir`, `--models-dir`, `--env-file`, and `--file-serve-roots`.
+
+Example config file:
+
+```toml
+[paths]
+workspace_dir = "/Users/me/local-data-studio"
+env_file = ".env"
+data_dir = "/Users/me/datasets"
+cache_dir = "/Users/me/.cache/local-data-studio"
+models_dir = "/Users/me/models/embedder"
+file_serve_roots = ["/Users/me/datasets", "/Users/me/images"]
+
+[server]
+host = "127.0.0.1"
+port = 8000
+reload = false
+```
+
+Run it with:
+
+```bash
+local-data-studio --config /path/to/local_data_studio.toml
+```
+
+Path precedence is: CLI option, OS environment variable, config file, `.env`, workspace default, then current-working-directory default.
+
+### From source
 
 1. **Clone or download the repository**
 
@@ -69,6 +113,7 @@ It provides fast preview, DuckDB SQL execution (with optional LLM-assisted SQL g
     EDA_NESTED_POLICY=stringify
 
     # Embedding Atlas Settings
+    EMBEDDER_MODELS_DIR=models/embedder
     ATLAS_HOST=127.0.0.1
     ATLAS_PORT=5055
     # ATLAS_SAMPLE=5000
@@ -101,6 +146,7 @@ It provides fast preview, DuckDB SQL execution (with optional LLM-assisted SQL g
    - `EDA_PROFILE_MODE`: Either `minimal` or `maximal`. `minimal` generates a lightweight report, while `maximal` includes more detailed statistics but takes longer.
    - `EDA_CELL_MAX_CHARS`: Maximum number of characters to display for long strings in EDA. Excess text is truncated as `... (truncated)`.
    - `EDA_NESTED_POLICY`: How to handle nested types (list/struct/object/binary, etc.). `stringify` keeps them as strings, and `drop` removes the corresponding columns.
+   - `EMBEDDER_MODELS_DIR`: Directory containing local HuggingFace encoder model directories. Defaults to `models/embedder` under the workspace/current directory.
    - `ATLAS_HOST` / `ATLAS_PORT`: Host and starting port for local Embedding Atlas pages. `embedding-atlas` may choose another port if the port is already in use.
    - `ATLAS_SAMPLE`: Optional random sample size passed to Embedding Atlas. Leave unset or `0` to use all rows.
    - `ATLAS_BATCH_SIZE`: Optional embedding batch size. Leave unset or `0` to use Embedding Atlas defaults.
@@ -116,7 +162,13 @@ It provides fast preview, DuckDB SQL execution (with optional LLM-assisted SQL g
 ## Run
 
 ```bash
-uv run uvicorn app:app --reload
+uv run local-data-studio --reload
+```
+
+For direct ASGI development, use:
+
+```bash
+uv run uvicorn local_data_studio.app:app --reload
 ```
 
 After running, you will see messages like the following in your terminal:
@@ -155,7 +207,7 @@ Open [http://127.0.0.1:8000](http://127.0.0.1:8000) to view the Local Data Studi
    <img src="images/local_data_studio_05.png" alt="local data studio 05" width=45%> <img src="images/local_data_studio_06.png" alt="local data studio 06" width=45%>
 
 5. **Visualize Embedding**
-   Put local HuggingFace encoder model directories under `models/embedder` (for example, `models/embedder/google/siglip2-base-patch16-224`, `models/embedder/Qwen/Qwen3-Embedding-0.6B`, or `models/embedder/Qwen/Qwen3-VL-Embedding-2B`). Directories containing model marker files such as `config.json`, `modules.json`, `tokenizer_config.json`, or `preprocessor_config.json` appear in the Model dropdown.
+   Put local HuggingFace encoder model directories under `models/embedder` or the directory selected with `--models-dir` / `EMBEDDER_MODELS_DIR` (for example, `models/embedder/google/siglip2-base-patch16-224`, `models/embedder/Qwen/Qwen3-Embedding-0.6B`, or `models/embedder/Qwen/Qwen3-VL-Embedding-2B`). Directories containing model marker files such as `config.json`, `modules.json`, `tokenizer_config.json`, or `preprocessor_config.json` appear in the Model dropdown.
    Select a text or image column and a model in **Visualize Embedding**, then run **Run Atlas** to launch a local Embedding Atlas page. Use **Run Atlas on Query Results** to visualize the current SQL Console query results instead.  
    The job runs in the background with progress updates, and an **Open Atlas** link appears when the local Atlas page is ready.  
    <img src="images/local_data_studio_07.png" alt="local data studio 07" width=45%> <img src="images/local_data_studio_08.png" alt="local data studio 08" width=45%>
@@ -171,7 +223,7 @@ Open [http://127.0.0.1:8000](http://127.0.0.1:8000) to view the Local Data Studi
 - For very large datasets, preview uses cursor-style page tokens instead of large `OFFSET` scans where supported. Row counts, global search, sampled statistics, and EDA run through background jobs with progress and cancellation APIs.
 - Embedding Atlas jobs use the selected local encoder model and compute embeddings/projections locally. Projected parquet inputs are cached under `./cache/atlas/datasets`; repeated runs with the same selected data/query/model/settings reuse the projected parquet and skip embedding/UMAP recomputation. Image display columns are kept in their original URL/path/`{bytes, path}` shape while a hidden embedding input column is used only for encoder input conversion. Use `ATLAS_SAMPLE` for faster exploratory runs on large datasets, `ATLAS_TEXT_MAX_CHARS` to bound very long text cells, `ATLAS_EMBEDDING_DTYPE=float16` to reduce embedding memory, `ATLAS_PROJECTION_MODE=anchor_transform` to fit UMAP on anchors and transform the remainder, and `ATLAS_CACHE_MAX_BYTES` to cap the combined Atlas cache size.
 - Qwen3-VL-Embedding models are routed through the Sentence Transformers backend because they do not follow the standard `transformers` image-feature-extraction input contract. Image bytes are converted only for the internal embedding input; the cached Atlas display columns still preserve their original values.
-- Local encoder model files under `models/embedder` are intentionally ignored by Git. Only the directory placeholder files are tracked; download or place model files locally on each machine.
+- Local encoder model files under `models/embedder` or a configured models directory are intentionally not bundled. Only the directory placeholder files are tracked; download or place model files locally on each machine.
 - Cache files are separated under `./cache/metadata`, `./cache/index`, `./cache/stats`, `./cache/count`, `./cache/search`, and EDA report files, and are invalidated by file path, size, and modification time where applicable.
 - `Run EDA on Query Results` excludes helper columns such as `rn` and `__rowid` from the generated report.
 - TB-scale `.json` arrays are not recommended. Prefer JSONL or Parquet for responsive preview.
@@ -180,13 +232,14 @@ Open [http://127.0.0.1:8000](http://127.0.0.1:8000) to view the Local Data Studi
 
 ## Implementation Notes
 
-- Format-specific readers live in `server/readers.py`. JSONL/CSV/TSV previews use byte/page-token based reads with sparse line indexing, and Parquet previews avoid loading whole row groups.
-- SQL execution is centralized in `server/sql.py`, which validates read-only SQL, applies DuckDB resource limits, and supports cooperative cancellation for background jobs.
-- EDA report orchestration lives in `server/eda_reports.py`; low-level profiling setup and DataFrame sanitization live in `server/eda.py`.
-- Embedding Atlas launch orchestration lives in `server/atlas.py`; it discovers local models under `models/embedder`, infers text/image modality from selected column samples, materializes/reuses projected parquet cache entries, starts the `embedding-atlas` CLI, tracks progress, returns the local URL, and routes Atlas cache pruning through `server/atlas_cache.py`. Cache pruning removes old files first while preserving the parquet artifact needed by the current Atlas launch.
+- The application package lives under `src/local_data_studio`. Static UI assets are packaged in `src/local_data_studio/static`, while runtime `.env`, `data`, `cache`, and `models/embedder` directories default to the selected workspace or current working directory. CLI options override OS environment variables, config-file values, `.env`, and workspace defaults in that order.
+- Format-specific readers live in `src/local_data_studio/server/readers.py`. JSONL/CSV/TSV previews use byte/page-token based reads with sparse line indexing, and Parquet previews avoid loading whole row groups.
+- SQL execution is centralized in `src/local_data_studio/server/sql.py`, which validates read-only SQL, applies DuckDB resource limits, and supports cooperative cancellation for background jobs.
+- EDA report orchestration lives in `src/local_data_studio/server/eda_reports.py`; low-level profiling setup and DataFrame sanitization live in `src/local_data_studio/server/eda.py`.
+- Embedding Atlas launch orchestration lives in `src/local_data_studio/server/atlas.py`; it discovers local models under `models/embedder`, infers text/image modality from selected column samples, materializes/reuses projected parquet cache entries, starts the `embedding-atlas` CLI, tracks progress, returns the local URL, and routes Atlas cache pruning through `src/local_data_studio/server/atlas_cache.py`. Cache pruning removes old files first while preserving the parquet artifact needed by the current Atlas launch.
 - Atlas UMAP projection uses a fixed random seed for reproducible cache artifacts and explicitly sets `n_jobs=1`, matching UMAP's seeded execution mode without emitting thread override warnings.
-- On macOS, Atlas subprocess launch is kept compatible with Python's `posix_spawn` path to avoid child-side fork `SIGSEGV (-11)` failures. Keep Atlas commands on absolute paths, do not pass `cwd` to `Popen`, and keep `close_fds=False`; see [the SIGSEGV incident log](docs/atlas_sigsegv_incident_log_ja.md).
-- Background jobs are managed by `server/jobs.py` and expose progress, cancellation, result, and error state through `/api/jobs/*`.
+- On macOS, Atlas subprocess launch is kept compatible with Python's `posix_spawn` path to avoid child-side fork `SIGSEGV (-11)` failures. Keep Atlas commands on absolute paths, do not pass `cwd` to `Popen`, and keep `close_fds=False`.
+- Background jobs are managed by `src/local_data_studio/server/jobs.py` and expose progress, cancellation, result, and error state through `/api/jobs/*`.
 
 ## Contribution
 
@@ -195,7 +248,7 @@ Open [http://127.0.0.1:8000](http://127.0.0.1:8000) to view the Local Data Studi
 
   - `uv run ruff format` (or `uvx ruff format`)
   - `uv run ruff check` (or `uvx ruff check`)
-  - `uv run pyrefly check` (or `uvx pyrefly check`)
+  - `uv run ty check` (or `uvx ty check`)
 - Please make sure to fix all reported errors before committing.
 
 ## Acknowledgements

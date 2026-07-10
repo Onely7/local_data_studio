@@ -5,8 +5,8 @@ from unittest import TestCase
 
 from fastapi import HTTPException
 
-from server.config import MAX_COLUMNS, MAX_JSON_PREVIEW_BYTES, MAX_OFFSET_FALLBACK
-from server.readers import count_rows_with_progress, fetch_preview_page, load_dataset_metadata, search_dataset
+from local_data_studio.server.config import MAX_COLUMNS, MAX_JSON_PREVIEW_BYTES, MAX_OFFSET_FALLBACK
+from local_data_studio.server.readers import count_rows_with_progress, fetch_preview_page, load_dataset_metadata, search_dataset
 
 
 class _NoCancelControl:
