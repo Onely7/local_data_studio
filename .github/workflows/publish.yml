@@ -5,6 +5,9 @@ on:
   release:
     types: [published]
 
+permissions:
+  contents: read
+
 jobs:
   build:
     name: Build distributions
@@ -42,6 +45,8 @@ jobs:
     runs-on: ubuntu-latest
     environment: testpypi
     permissions:
+      actions: read
+      contents: read
       id-token: write
 
     steps:
@@ -63,6 +68,8 @@ jobs:
     runs-on: ubuntu-latest
     environment: pypi
     permissions:
+      actions: read
+      contents: read
       id-token: write
 
     steps:

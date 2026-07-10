@@ -46,7 +46,7 @@ from .server.deleted_rows import (
 )
 from .server.eda_reports import generate_dataset_eda_report, generate_query_eda_report
 from .server.files import (
-    discover_dataset_files,
+    refresh_dataset_file_catalog,
     resolve_data_file,
     resolve_raw_image_file,
     unique_path,
@@ -181,11 +181,11 @@ def _write_cached_result(cache_path: Path, result: dict[str, Any]) -> None:
 @app.get("/api/files")
 async def list_files() -> dict[str, Any]:
     files: list[dict[str, Any]] = []
-    for path in discover_dataset_files(DATA_ROOT, SINGLE_FILE, VIS_EXCLUDE_PATHS):
+    for name, path in refresh_dataset_file_catalog().items():
         stat = path.stat()
         files.append(
             {
-                "name": str(path.relative_to(DATA_ROOT)),
+                "name": name,
                 "size": stat.st_size,
                 "modified": datetime.datetime.fromtimestamp(stat.st_mtime).isoformat(),
             }
@@ -245,6 +245,7 @@ async def upload_files(files: list[UploadFile] = UPLOAD_FILES) -> dict[str, Any]
     if not saved:
         raise HTTPException(status_code=400, detail="unsupported file extension")
 
+    refresh_dataset_file_catalog()
     return {"saved": saved, "skipped": skipped}
 
 

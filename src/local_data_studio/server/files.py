@@ -1,14 +1,19 @@
 """Helpers for discovering, resolving, and naming local files."""
 
 import os
+import threading
 from collections.abc import Sequence
 from pathlib import Path
 
 from fastapi import HTTPException
 
-from .config import ALLOWED_EXTENSIONS, DATA_ROOT, SINGLE_FILE
+from .config import ALLOWED_EXTENSIONS, DATA_ROOT, SINGLE_FILE, VIS_EXCLUDE_PATHS
 
 IMAGE_PREVIEW_EXTENSIONS: set[str] = {".png", ".jpg", ".jpeg", ".gif", ".webp", ".svg"}
+
+_DATASET_CATALOG_LOCK = threading.Lock()
+_DATASET_CATALOG: dict[str, Path] = {}
+_DATASET_CATALOG_READY = threading.Event()
 
 
 def _resolve_path_best_effort(path: Path) -> Path:
@@ -72,27 +77,39 @@ def discover_dataset_files(
     return sorted(discovered)
 
 
-def resolve_data_file(file_name: str | None) -> Path:
-    """Resolve a dataset path within the configured data root."""
-    if SINGLE_FILE:
-        candidate = SINGLE_FILE if not file_name else (DATA_ROOT / file_name).resolve()
-        if candidate != SINGLE_FILE:
-            raise HTTPException(status_code=400, detail="file does not match DATA_FILE target")
-        if candidate.suffix.lower() not in ALLOWED_EXTENSIONS:
-            raise HTTPException(status_code=400, detail="unsupported file extension")
-        if not candidate.exists() or not candidate.is_file():
-            raise HTTPException(status_code=404, detail="file not found")
-        return candidate
+def refresh_dataset_file_catalog() -> dict[str, Path]:
+    """Discover datasets and cache an allowlist keyed by their displayed names."""
+    files = discover_dataset_files(DATA_ROOT, SINGLE_FILE, VIS_EXCLUDE_PATHS)
+    catalog: dict[str, Path] = {}
+    for path in files:
+        resolved = _resolve_path_best_effort(path)
+        try:
+            name = str(resolved.relative_to(DATA_ROOT))
+        except ValueError:
+            continue
+        catalog[name] = resolved
 
+    with _DATASET_CATALOG_LOCK:
+        _DATASET_CATALOG.clear()
+        _DATASET_CATALOG.update(catalog)
+        _DATASET_CATALOG_READY.set()
+    return dict(catalog)
+
+
+def _dataset_file_catalog() -> dict[str, Path]:
+    with _DATASET_CATALOG_LOCK:
+        if _DATASET_CATALOG_READY.is_set():
+            return dict(_DATASET_CATALOG)
+    return refresh_dataset_file_catalog()
+
+
+def resolve_data_file(file_name: str | None) -> Path:
+    """Resolve an API dataset name through the server-owned dataset allowlist."""
     if not file_name:
         raise HTTPException(status_code=400, detail="file is required")
 
-    candidate = (DATA_ROOT / file_name).resolve()
-    if DATA_ROOT != candidate and DATA_ROOT not in candidate.parents:
-        raise HTTPException(status_code=400, detail="file path is outside data directory")
-    if candidate.suffix.lower() not in ALLOWED_EXTENSIONS:
-        raise HTTPException(status_code=400, detail="unsupported file extension")
-    if not candidate.exists() or not candidate.is_file():
+    candidate = _dataset_file_catalog().get(file_name)
+    if candidate is None:
         raise HTTPException(status_code=404, detail="file not found")
     return candidate
 
