@@ -106,8 +106,6 @@ local-data-studio --config /path/to/local_data_studio.toml
 
    # EDA Settings
    EDA_ROW_LIMIT=10000000
-   # EDA_FONT_FAMILY=IPAexGothic
-   # EDA_FONT_PATH=fonts/ipaexg.ttf
    EDA_PROFILE_MODE=minimal
    EDA_CELL_MAX_CHARS=5000
    EDA_NESTED_POLICY=stringify
@@ -140,8 +138,6 @@ local-data-studio --config /path/to/local_data_studio.toml
    - `OPENAI_BASE_URL`: OpenAI 互換 API のエンドポイントです。
    - `OPENAI_MODEL`: 使用する OpenAI モデル名です。
    - `EDA_ROW_LIMIT`: EDA レポート生成時に読み込む最大行数です。
-   - `EDA_FONT_FAMILY`: EDA レポートで使用するフォント名です。(任意)
-   - `EDA_FONT_PATH`: フォントファイルへのパスです（指定すると優先されます）。(任意)
    - `EDA_PROFILE_MODE`: `minimal` または `maximal` を指定できます。`minimal` は軽量なレポート、`maximal` は詳細な統計を含む代わりに時間がかかります。
    - `EDA_CELL_MAX_CHARS`: EDA で文字列が長い場合の最大表示文字数です。超過分は `... (truncated)` として省略されます。
    - `EDA_NESTED_POLICY`: ネスト型（list/struct/object/binary など）の扱い方です。`stringify` は文字列化して残し、`drop` は該当列を除外します。
@@ -252,7 +248,7 @@ INFO:     Application startup complete.
 ## 謝辞
 
 - [Dataset viewer (Huggingface)](https://github.com/huggingface/dataset-viewer): UI/機能設計の参考にしました。
-- [Zarque-profiling](https://github.com/crescendo-medix/zarque-profiling): EDA レポート生成に利用しています。
+- [YData Profiling](https://github.com/ydataai/ydata-profiling): EDA レポート生成に利用しています。
 - [Embedding Atlas](https://github.com/apple/embedding-atlas): Embedding のインタラクティブな可視化に利用しています。
 
 ## ライセンス
