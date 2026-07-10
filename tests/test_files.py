@@ -80,4 +80,4 @@ class RawImageFileResolutionTests(TestCase):
             with self.assertRaises(HTTPException) as raised:
                 resolve_raw_image_file(str(outside_image), [allowed_root])
 
-            self.assertEqual(403, raised.exception.status_code)
+            self.assertEqual(404, raised.exception.status_code)

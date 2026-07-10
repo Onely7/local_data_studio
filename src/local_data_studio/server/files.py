@@ -148,15 +148,20 @@ def resolve_raw_image_file(raw_path: str | None, allowed_roots: Sequence[Path]) 
     if not requested_path:
         raise HTTPException(status_code=400, detail="path is required")
 
-    resolved = _resolve_path_best_effort(Path(requested_path))
+    # Normalize after joining with each trusted root.  `realpath` resolves
+    # symlinks, while the prefix check rejects absolute paths and `..` segments
+    # that would escape the root.
+    for root in allowed_roots:
+        root_path = os.path.realpath(os.fspath(root))
+        candidate_path = os.path.realpath(os.path.join(root_path, requested_path))
+        if candidate_path != root_path and not candidate_path.startswith(f"{root_path}{os.sep}"):
+            continue
 
-    if not resolved.exists() or not resolved.is_file():
-        raise HTTPException(status_code=404, detail="file not found")
+        resolved = Path(candidate_path)
+        if not resolved.exists() or not resolved.is_file():
+            continue
+        if resolved.suffix.lower() not in IMAGE_PREVIEW_EXTENSIONS:
+            raise HTTPException(status_code=400, detail="unsupported file type")
+        return resolved
 
-    if resolved.suffix.lower() not in IMAGE_PREVIEW_EXTENSIONS:
-        raise HTTPException(status_code=400, detail="unsupported file type")
-
-    if not is_path_within_roots(resolved, allowed_roots):
-        raise HTTPException(status_code=403, detail="path is outside allowed roots")
-
-    return resolved
+    raise HTTPException(status_code=404, detail="file not found")
