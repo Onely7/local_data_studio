@@ -39,6 +39,7 @@ updates:
         patterns:
           - "*"
 
+  # Dependabot discovers /.pre-commit-config.yaml from this root directory.
   - package-ecosystem: "pre-commit"
     directory: "/"
     schedule:
