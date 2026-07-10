@@ -189,19 +189,10 @@ def _load_query_dataframe_worker(
         connection_holder["connection"] = connection
         configure_duckdb_limits(connection)
         create_data_view(connection, path, deleted_ids)
-        cursor = connection.execute(f"SELECT * FROM ({sql}) AS q LIMIT {sample}")
-
-        if hasattr(cursor, "pl"):
-            try:
-                return cursor.pl()
-            except Exception:
-                pass
-
-        pandas_df = cursor.df()
-
-    import polars as pl  # noqa: PLC0415
-
-    return pl.from_pandas(pandas_df)
+        # YData Profiling expects pandas (and otherwise attempts its Spark path,
+        # which requires an ``rdd`` attribute). Keep query EDA aligned with the
+        # full-dataset EDA loader in ``eda.py``.
+        return connection.execute(f"SELECT * FROM ({sql}) AS q LIMIT {sample}").df()
 
 
 def load_query_dataframe_guarded(

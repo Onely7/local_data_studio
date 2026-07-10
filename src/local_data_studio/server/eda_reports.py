@@ -78,7 +78,12 @@ def _drop_query_helper_columns(df: Any) -> Any:
     drop = getattr(df, "drop", None)
     if not callable(drop):
         return df
-    return drop(drop_columns)
+    try:
+        return drop(columns=drop_columns)
+    except TypeError:
+        # Polars accepts positional column names while pandas requires the
+        # explicit ``columns=`` keyword to avoid interpreting them as rows.
+        return drop(drop_columns)
 
 
 def _write_profile_report(df: Any, *, title: str, cache_path: Path, options: EdaReportOptions, context: JobContext | None) -> None:

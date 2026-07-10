@@ -27,6 +27,7 @@ from local_data_studio.app import (
     start_stats_job,
 )
 from local_data_studio.server.atlas import AtlasPreparedDataset
+from local_data_studio.server.sql import load_query_dataframe_guarded
 
 
 class ApiJobTests(TestCase):
@@ -105,6 +106,17 @@ class ApiJobTests(TestCase):
         self.assertIn("/cache/", payload["result"]["url"])
         self.assertNotIn("rn", report_columns)
         self.assertIn("object", report_columns)
+
+    def test_query_eda_loader_returns_pandas_dataframe(self) -> None:
+        dataframe = load_query_dataframe_guarded(
+            path=Path.cwd() / "data" / "example.jsonl",
+            sql="SELECT object, final_rating FROM data WHERE object = 'horse'",
+            sample=100,
+            context=None,
+        )
+
+        self.assertEqual("DataFrame", type(dataframe).__name__)
+        self.assertFalse(dataframe.empty)
 
     def test_eda_job_completes_for_dataset_sample(self) -> None:
         started = asyncio.run(start_eda_job(EdaRequest(file="example.jsonl", sample=100, force=True, mode="minimal")))
