@@ -124,22 +124,22 @@ SELECT * FROM data LIMIT 100</textarea
                 Run EDA on Query Results
               </button>
             </div>
-            <div class="muted" id="row-count"></div>
-            <div class="eda-settings">
-              <label for="eda-sample">EDA rows</label>
-              <input
-                id="eda-sample"
-                type="number"
-                min="100"
-                max="10000000"
-                step="100"
-                value="100000"
-              />
-            </div>
+            <div
+              class="operation-status"
+              id="row-count"
+              role="status"
+              aria-live="polite"
+            ></div>
             <div class="hint">
-              EDA Report is cached under <code>./cache/eda</code>.
+              EDA rows are configured with <code>EDA_ROW_LIMIT</code>. Reports
+              are cached under <code>./cache/eda</code>.
             </div>
-            <div class="muted" id="eda-status"></div>
+            <div
+              class="operation-status"
+              id="eda-status"
+              role="status"
+              aria-live="polite"
+            ></div>
             <a
               id="eda-link"
               class="eda-link"
@@ -196,7 +196,12 @@ SELECT * FROM data LIMIT 100</textarea
               Embedding Atlas opens in a separate local page after embeddings
               and projection are ready.
             </div>
-            <div class="muted" id="atlas-status"></div>
+            <div
+              class="operation-status"
+              id="atlas-status"
+              role="status"
+              aria-live="polite"
+            ></div>
             <a
               id="atlas-link"
               class="eda-link"

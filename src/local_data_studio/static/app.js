@@ -87,7 +87,6 @@ const elements = {
   runEdaQuery: document.getElementById("run-eda-query"),
   edaStatus: document.getElementById("eda-status"),
   edaLink: document.getElementById("eda-link"),
-  edaSample: document.getElementById("eda-sample"),
   atlasColumn: document.getElementById("atlas-column"),
   atlasModel: document.getElementById("atlas-model"),
   atlasBackend: document.getElementById("atlas-backend"),
@@ -1708,7 +1707,7 @@ async function selectFile(fileName) {
   closeColumnDeleteOverlay();
   elements.searchInput.value = "";
   elements.currentFile.textContent = fileName;
-  elements.rowCount.textContent = "All Data Num: Unknown";
+  elements.rowCount.textContent = "";
   if (elements.edaStatus) {
     elements.edaStatus.textContent = "";
   }
@@ -1934,13 +1933,6 @@ function setEdaButtonsRunning(kind) {
   }
 }
 
-function edaSampleRequest() {
-  const sampleValue = elements.edaSample
-    ? Number(elements.edaSample.value)
-    : null;
-  return Number.isFinite(sampleValue) && sampleValue > 0 ? sampleValue : undefined;
-}
-
 async function runEdaJob(kind) {
   if (!state.file || !elements.runEda) return;
   if (state.edaJobId) {
@@ -1954,8 +1946,7 @@ async function runEdaJob(kind) {
     return;
   }
 
-  const sample = edaSampleRequest();
-  const payload = { file: state.file, sample };
+  const payload = { file: state.file };
   let jobKind = "eda";
   let sourceLabel = "EDA report";
   if (kind === "query") {
@@ -1999,7 +1990,7 @@ async function runEdaJob(kind) {
     if (state.file !== fileAtStart || state.edaJobId !== job.id) return;
     if (elements.edaStatus) {
       const sampleNote = data.sample
-        ? ` EDA target data maximum number of records: ${data.sample}.`
+        ? ` Row limit: ${data.sample.toLocaleString()}.`
         : "";
       elements.edaStatus.textContent = data.cached
         ? `Cached ${sourceLabel} ready.${sampleNote}`
