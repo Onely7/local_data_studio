@@ -18,7 +18,7 @@ Local Data Studio は、Huggingface Datasets の [Data Studio](https://huggingfa
 
 - 大規模データに対応した bounded preview とカーソル形式ページング
 - タイムアウト・メモリ制限・大規模スキャン警告を備えた DuckDB SQL コンソール（読み取り専用）
-- データセット全体または SQL クエリ結果を対象にした EDA レポート生成（`./cache` にキャッシュ）
+- データセット全体または SQL クエリ結果を対象にした EDA レポート生成（`./cache/eda` にキャッシュ）
 - 選択したテキスト/画像カラム、または SQL クエリ結果を対象にした Embedding Atlas 可視化
 - Row Inspector（コピー、削除、ハイライト）
 - URL、ローカルパス、`{bytes, path}` 形式の画像辞書からの画像レンダリング
@@ -111,6 +111,7 @@ local-data-studio --config /path/to/local_data_studio.toml
    EDA_PROFILE_MODE=minimal
    EDA_CELL_MAX_CHARS=5000
    EDA_NESTED_POLICY=stringify
+   EDA_CACHE_MAX_BYTES=1073741824
 
    # Embedding Atlas Settings
    EMBEDDER_MODELS_DIR=models/embedder
@@ -143,6 +144,7 @@ local-data-studio --config /path/to/local_data_studio.toml
    - `EDA_PROFILE_MODE`: `minimal` または `maximal` を指定できます。`minimal` は軽量なレポート、`maximal` は詳細な統計を含む代わりに時間がかかります。
    - `EDA_CELL_MAX_CHARS`: EDA で文字列が長い場合の最大表示文字数です。超過分は `... (truncated)` として省略されます。
    - `EDA_NESTED_POLICY`: ネスト型（list/struct/object/binary など）の扱い方です。`stringify` は文字列化して残し、`drop` は該当列を除外します。
+   - `EDA_CACHE_MAX_BYTES`: `./cache/eda` に保存する EDA レポート cache 全体の最大容量です。既定値は 1 GiB で、超過時は古いレポートから削除されます。
    - `EMBEDDER_MODELS_DIR`: ローカル HuggingFace encoder model ディレクトリを含むディレクトリです。デフォルトは workspace/current directory 配下の `models/embedder` です。
    - `ATLAS_HOST` / `ATLAS_PORT`: ローカル Embedding Atlas ページの host と開始 port です。port が使用中の場合、`embedding-atlas` が別 port を選ぶことがあります。
    - `ATLAS_SAMPLE`: Embedding Atlas に渡す任意のランダムサンプル数です。未設定または `0` の場合は全行を対象にします。
@@ -199,7 +201,7 @@ INFO:     Application startup complete.
 
 4. **EDA レポート**  
    Run EDA を実行するとデータセットのサンプルを対象にしたレポートが生成され、キャッシュされます。**Run EDA on Query Results** を使うと、SQL Console の現在のクエリ結果を対象にした EDA レポートを生成できます。  
-   データセット全体のレポートは {ファイル fingerprint, サンプル数, `EDA_PROFILE_MODE`} に基づいてキャッシュされます。クエリ結果のレポートは {ファイル fingerprint, SQL, サンプル数, `EDA_PROFILE_MODE`} に基づいて別キャッシュされます。  
+   データセット全体のレポートは `./cache/eda` に {ファイル fingerprint, サンプル数, `EDA_PROFILE_MODE`} に基づいてキャッシュされます。クエリ結果のレポートは {ファイル fingerprint, SQL, サンプル数, `EDA_PROFILE_MODE`} に基づいて別キャッシュされます。EDA cache 全体は既定で 1 GiB に制限され、`EDA_CACHE_MAX_BYTES` を超えると古いレポートから削除されます。
    `EDA_ROW_LIMIT` と UI 側の設定でサンプル数を調整できます。  
    <img src="../images/local_data_studio_05.png" alt="local data studio 05" width=45%> <img src="../images/local_data_studio_06.png" alt="local data studio 06" width=45%>
 
@@ -222,7 +224,7 @@ INFO:     Application startup complete.
 - Embedding Atlas ジョブは選択したローカル encoder model で embedding/projection 計算を行うため、時間がかかる場合があります。投影済み parquet input は `./cache/atlas/datasets` に保存され、dataset fingerprint、SQL、column、model、backend、prompt template、capability fingerprint、projection 設定が一致する場合だけ再利用されます。画像表示カラムは元の URL/path/`{bytes, path}` 形式を保持し、encoder 入力変換には hidden embedding input column だけを使います。大規模データで素早く試す場合は `ATLAS_SAMPLE` を指定し、長文テキスト列と展開後 prompt は `ATLAS_TEXT_MAX_CHARS` で上限を調整し、embedding メモリは `ATLAS_EMBEDDING_DTYPE=float16` で削減できます。`ATLAS_PROJECTION_MODE=anchor_transform` を使うと代表サンプルで UMAP を fit し、残りを transform します。容量上限は `ATLAS_CACHE_MAX_BYTES` で調整してください。
 - backend 対応状況はモデル名ではなく、ローカルの `modules.json`、`config.json`、tokenizer/processor、pooling、normalization metadata を上限付きで解析して判定します。Sentence Transformers は `native`, `generic_fallback`, `metadata_only`, `unsupported`, `unknown`、Transformers は `direct`, `remote_code`, `backbone_only`, `unsupported`, `unknown` の状態を返します。Sentence Transformers の generic fallback は tokenizer を確認できるテキスト専用 Transformers model だけで選択でき、画像・multimodal model には native な `modules.json` が必要です。そのため画像専用 DINOv3 checkpoint は Transformers のみを選択でき、宣言された `pooler_output` を利用します。native Sentence Transformers pipeline を持つ Qwen3-VL-Embedding は両 backend を利用できます。実行可能な adapter を確認できた backend だけを選択でき、`remote_code` は `ATLAS_TRUST_REMOTE_CODE=true` で repository code の実行を明示許可した場合だけ利用できます。組み込み Transformer/Pooling/Normalize 構成は、モデルリポジトリ内の Python を import せず Transformers adapter で再現します。
 - `models/embedder` または設定した models directory 配下のローカル encoder model 実体は配布物に含めません。リポジトリにはディレクトリ用の placeholder のみを含め、モデルファイルは各環境で配置してください。
-- キャッシュは `./cache/metadata`, `./cache/index`, `./cache/stats`, `./cache/count`, `./cache/search` および EDA レポートファイルに分離され、該当するものはファイルパス・サイズ・更新時刻に基づいて無効化されます。
+- キャッシュは `./cache/metadata`, `./cache/index`, `./cache/stats`, `./cache/count`, `./cache/search`, `./cache/eda` に分離されます。EDA レポートは `EDA_CACHE_MAX_BYTES` で全体容量を制限し、超過時は古いものから削除します。fingerprint を使う cache は該当するファイルパス・サイズ・更新時刻に基づいて無効化されます。
 - `Run EDA on Query Results` では、`rn` や `__rowid` のような補助カラムはレポートから除外されます。
 - TB 級の `.json` 配列は推奨しません。高速な閲覧には JSONL または Parquet を推奨します。
 - `Delete from file` は実ファイルを書き換えるため、必要に応じてバックアップを推奨します。
@@ -235,7 +237,7 @@ INFO:     Application startup complete.
 - `src/local_data_studio/server/readers.py` は互換 facade として維持し、形式別実装を `src/local_data_studio/server/dataset_readers` に分割しています。JSONL metadata 推論は行数と byte 数の固定上限で停止し、JSONL/CSV/TSV preview は fingerprint 付き sparse line index と byte/page token を使います。完成済み index は再利用し、checkpoint は batch transaction で保存します。CSV/TSV の schema、preview、search、Raw は長大 field 対応 parser を共有します。Parquet schema は footer metadata のみを読み、preview と Raw は bounded record batch、offset 互換処理は行単位 scan ではなく row-group metadata を使います。
 - `src/local_data_studio/server/stats.py` は互換 facade として維持し、`src/local_data_studio/server/column_stats` で値の推論、カラム単位の集計、DuckDB orchestration を分離しています。Sample row は固定サイズ batch で取得し、全 row matrix と column copy を同時に保持せず、column accumulator へ直接渡します。
 - SQL 実行は `src/local_data_studio/server/sql.py` に集約され、読み取り専用 SQL の検証、DuckDB リソース制限、バックグラウンドジョブの協調キャンセルを扱います。
-- EDA レポートの orchestration は `src/local_data_studio/server/eda_reports.py`、profiling 設定と DataFrame sanitization は `src/local_data_studio/server/eda.py` に分離されています。
+- EDA レポートの orchestration は `src/local_data_studio/server/eda_reports.py`、profiling 設定と DataFrame sanitization は `src/local_data_studio/server/eda.py` に分離されています。report は `./cache/eda` に隔離し、共通の古いファイルから削除する容量管理を使います。
 - `src/local_data_studio/server/atlas.py` は互換 facade として維持し、`src/local_data_studio/server/atlas_components` で contract、capability-driven embedding adapter、安全な prompt template、画像変換、projection、dataset cache、subprocess 制御、orchestration を分離しています。`server/embedder_capabilities.py` は上限付きの metadata-only model inspection と関連設定の fingerprint 作成を担当します。Encoder は Atlas job ごとに 1 回だけ生成して anchor/transform batch 間で再利用します。Anchor-transform は input column 全体を Python list に変換せず、anchor と現在の transform batch だけを取得します。表示値の sanitization と projection column の追加は 1 つの owned DataFrame copy 上で行い、同じ fingerprint・query・column・model・backend・prompt・設定に対する並行 cache miss は 1 回の cache 生成を共有します。
 - Atlas の UMAP projection は cache artifact の再現性のため固定 seed を使い、UMAP の seeded execution mode に合わせて `n_jobs=1` を明示することで thread override warning を出さないようにしています。
 - macOS では child-side fork による `SIGSEGV (-11)` を避けるため、Atlas subprocess 起動を Python の `posix_spawn` path に乗る形に固定しています。Atlas command は絶対パスを使い、`Popen` に `cwd` を渡さず、`close_fds=False` を維持してください。
