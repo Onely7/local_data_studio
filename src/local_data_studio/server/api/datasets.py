@@ -20,6 +20,7 @@ from ..config import (
 )
 from ..db import open_connection, quote_ident, relation_sql
 from ..deleted_rows import deleted_row_ids_for
+from ..embedder_capabilities import library_versions
 from ..embedder_models import discover_embedder_models
 from ..files import refresh_dataset_file_catalog, resolve_data_file, resolve_raw_image_file, unique_path
 from ..readers import fetch_preview_page, fetch_raw_row, load_dataset_metadata
@@ -61,7 +62,7 @@ def get_config() -> dict[str, Any]:
 @router.get("/api/embedder_models")
 def embedder_models() -> dict[str, Any]:
     """Discover locally installed encoder model directories."""
-    return {"models": discover_embedder_models(EMBEDDER_MODELS_DIR)}
+    return {"models": discover_embedder_models(EMBEDDER_MODELS_DIR), "libraries": library_versions()}
 
 
 @router.get("/api/raw")
