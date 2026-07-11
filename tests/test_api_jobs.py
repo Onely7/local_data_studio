@@ -41,7 +41,7 @@ class ApiJobTests(TestCase):
             with TemporaryDirectory() as tmpdir:
                 path = Path(tmpdir) / "data.jsonl"
                 path.write_text(json.dumps({"text": long_text, "items": list(range(40))}) + "\n", encoding="utf-8")
-                with patch("local_data_studio.app.resolve_data_file", return_value=path) as resolve_data_file:
+                with patch("local_data_studio.server.api.datasets.resolve_data_file", return_value=path) as resolve_data_file:
                     payload = asyncio.run(raw_row(RawRowRequest(file="example.jsonl", row_id=1)))
 
             self.assertEqual(long_text, payload["row"][0])
@@ -50,7 +50,7 @@ class ApiJobTests(TestCase):
 
         with self.subTest("query result"):
             long_text = "x" * 2_500
-            with patch("local_data_studio.app.fetch_raw_query_row_guarded", return_value=(["text"], [long_text])):
+            with patch("local_data_studio.server.api.datasets.fetch_raw_query_row_guarded", return_value=(["text"], [long_text])):
                 payload = asyncio.run(raw_row(RawRowRequest(file="example.jsonl", sql="SELECT text FROM data", offset=0)))
 
             self.assertEqual(long_text, payload["row"][0])

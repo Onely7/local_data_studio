@@ -48,9 +48,10 @@ class ApplicationContractTests(TestCase):
         data_index = paths.index("/data")
         cache_index = paths.index("/cache")
         static_index = paths.index("")
-        last_api_index = max(index for index, path in enumerate(paths) if isinstance(path, str) and path.startswith("/api/"))
+        included_router_indices = [index for index, route in enumerate(app.routes) if type(route).__name__ == "_IncludedRouter"]
 
-        self.assertLess(last_api_index, data_index)
+        self.assertTrue(included_router_indices)
+        self.assertLess(max(included_router_indices), data_index)
         self.assertLess(data_index, cache_index)
         self.assertLess(cache_index, static_index)
 
