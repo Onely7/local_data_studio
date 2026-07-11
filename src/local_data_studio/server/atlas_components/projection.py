@@ -3,131 +3,24 @@
 from __future__ import annotations
 
 import asyncio
-import json
 from dataclasses import dataclass
-from io import BytesIO
 from pathlib import Path
 from typing import Any
 
 import numpy as np
 import umap
-from embedding_atlas.embedding import create_embedder
 from embedding_atlas.projection import Projection, _run_embedding, _run_umap
-from PIL import Image
-from sentence_transformers import SentenceTransformer
 
 from .contracts import AtlasModality, AtlasOptions, AtlasProjectionCoordinates
+from .embedding_backends import (
+    AtlasEmbeddingBackend,
+    effective_embedder_for_modality,
+    load_sentence_transformer_model,
+    resolve_embedder_callable,
+)
 
-QWEN3_VL_EMBEDDING_MARKER = "qwen3-vl-embedding"
 ATLAS_UMAP_RANDOM_STATE = 42
 ATLAS_UMAP_N_JOBS = 1
-
-
-def _normalize_model_identity(value: str) -> str:
-    return value.lower().replace("_", "-").replace("/", "-")
-
-
-def is_qwen3_vl_embedding_model(model_path: Path) -> bool:
-    """Detect Qwen3-VL embedding models from path and local config metadata."""
-    normalized_path = _normalize_model_identity(model_path.as_posix())
-    if QWEN3_VL_EMBEDDING_MARKER in normalized_path:
-        return True
-    try:
-        config = json.loads((model_path / "config.json").read_text(encoding="utf-8"))
-    except (OSError, json.JSONDecodeError):
-        return False
-    candidates = [str(config.get("model_type", ""))]
-    architectures = config.get("architectures")
-    if isinstance(architectures, list):
-        candidates.extend(str(item) for item in architectures)
-    normalized_config = _normalize_model_identity(" ".join(candidates))
-    return "qwen3-vl" in normalized_config and "embedding" in normalized_config
-
-
-def atlas_embedder_for_modality(modality: AtlasModality, options: AtlasOptions) -> str | None:
-    """Return the explicitly configured backend for text or image input."""
-    return options.image_embedder if modality == "image" else options.text_embedder
-
-
-def default_embedder_for_modality(modality: AtlasModality) -> str:
-    """Return the Embedding Atlas default backend for a modality."""
-    return "sentence-transformers" if modality == "text" else "transformers"
-
-
-@dataclass(frozen=True, slots=True)
-class AtlasEmbeddingBackend:
-    """Resolved embedding backend policy for a selected model and modality."""
-
-    name: str
-    uses_qwen3_vl_adapter: bool = False
-
-    @classmethod
-    def for_model(
-        cls,
-        *,
-        modality: AtlasModality,
-        model_path: Path,
-        options: AtlasOptions,
-    ) -> AtlasEmbeddingBackend:
-        """Resolve the backend and model-specific adapter without loading weights."""
-        if is_qwen3_vl_embedding_model(model_path):
-            return cls(name="sentence-transformers", uses_qwen3_vl_adapter=True)
-        configured = atlas_embedder_for_modality(modality, options)
-        return cls(name=configured or default_embedder_for_modality(modality))
-
-
-def effective_embedder_for_modality(modality: AtlasModality, model_path: Path, options: AtlasOptions) -> str:
-    """Return the backend name included in the deterministic cache identity."""
-    return AtlasEmbeddingBackend.for_model(modality=modality, model_path=model_path, options=options).name
-
-
-def load_sentence_transformer_model(model_path: Path, options: AtlasOptions) -> Any:
-    """Load one local SentenceTransformer, honoring remote-code consent."""
-    kwargs = {"trust_remote_code": True} if options.trust_remote_code else {}
-    return SentenceTransformer(str(model_path), **kwargs)
-
-
-def _qwen3_vl_image_input(item: Any) -> Any:
-    if isinstance(item, dict) and isinstance(item.get("bytes"), bytes | bytearray):
-        return Image.open(BytesIO(bytes(item["bytes"]))).convert("RGB")
-    if isinstance(item, dict) and item.get("image") is not None:
-        return item["image"]
-    return item
-
-
-def _qwen3_vl_sentence_transformer_input(item: Any, modality: AtlasModality) -> Any:
-    return {"image": _qwen3_vl_image_input(item)} if modality == "image" else item
-
-
-def create_qwen3_vl_sentence_transformer_embedder(
-    modality: AtlasModality,
-    model_path: Path,
-    options: AtlasOptions,
-) -> Any:
-    """Create a Qwen3-VL adapter that owns one reusable model instance."""
-    st_model = load_sentence_transformer_model(model_path, options)
-
-    async def embed(batch: list[Any], *, model: str | None, embedder_args: dict) -> np.ndarray:  # noqa: ARG001
-        """Encode one batch through the model captured by the adapter."""
-        encoded_inputs = [_qwen3_vl_sentence_transformer_input(item, modality) for item in batch]
-        embeddings = st_model.encode(
-            encoded_inputs,
-            show_progress_bar=False,
-            batch_size=max(len(encoded_inputs), 1),
-        )
-        return np.asarray(embeddings, dtype=np.float32)
-
-    return embed
-
-
-def resolve_embedder_callable(modality: AtlasModality, model_path: Path, options: AtlasOptions) -> tuple[Any, dict[str, bool]]:
-    """Create one embedding callable and the arguments required by Atlas."""
-    backend = AtlasEmbeddingBackend.for_model(modality=modality, model_path=model_path, options=options)
-    embedder_args = {"trust_remote_code": True} if options.trust_remote_code else {}
-    if backend.uses_qwen3_vl_adapter:
-        return create_qwen3_vl_sentence_transformer_embedder(modality, model_path, options), embedder_args
-    embedder = create_embedder(backend.name, modality=modality, model=str(model_path), embedder_args=embedder_args)
-    return embedder, embedder_args
 
 
 def embedding_items(projection_input: Any, input_column: str) -> list[Any]:

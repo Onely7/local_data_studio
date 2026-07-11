@@ -1,6 +1,5 @@
 """Tests for atlas behavior."""
 
-import asyncio
 import os
 import sys
 from base64 import b64decode
@@ -23,13 +22,9 @@ from local_data_studio.server.atlas import (
     ATLAS_PROJECTION_X,
     ATLAS_PROJECTION_Y,
     ATLAS_TRUNCATION_SUFFIX,
-    AtlasEmbeddingBackend,
     AtlasOptions,
-    _effective_embedder_for_modality,
     _embedding_atlas_env,
-    _is_qwen3_vl_embedding_model,
     _normalize_atlas_url,
-    _resolve_embedder_callable,
     _run_full_projection,
     atlas_dataset_cache_path,
     build_atlas_command,
@@ -80,127 +75,6 @@ class AtlasModelDiscoveryTests(TestCase):
                 with self.assertRaises(HTTPException):
                     resolve_embedder_model("../outside")
 
-    def test_detects_qwen3_vl_embedding_model_from_path_or_config(self) -> None:
-        """Verify that detects qwen3 vl embedding model from path or config."""
-        with TemporaryDirectory() as tmp:
-            root = Path(tmp)
-            named_model = root / "Qwen" / "Qwen3-VL-Embedding-2B"
-            config_model = root / "renamed-model"
-            named_model.mkdir(parents=True)
-            config_model.mkdir()
-            (config_model / "config.json").write_text(
-                '{"model_type":"qwen3_vl","architectures":["Qwen3VLEmbeddingModel"]}',
-                encoding="utf-8",
-            )
-
-            self.assertTrue(_is_qwen3_vl_embedding_model(named_model))
-            self.assertTrue(_is_qwen3_vl_embedding_model(config_model))
-            self.assertFalse(_is_qwen3_vl_embedding_model(root / "google" / "siglip2-base-patch16-224"))
-
-    def test_qwen3_vl_image_embedder_uses_sentence_transformer_inputs(self) -> None:
-        """Verify that qwen3 vl image embedder uses sentence transformer inputs."""
-
-        class FakeSentenceTransformer:
-            """Test fake sentence transformer behavior."""
-
-            def __init__(self) -> None:
-                self.inputs: list[Any] | None = None
-                self.batch_size: int | None = None
-
-            def encode(self, inputs, *, show_progress_bar, batch_size):  # noqa: ANN001
-                """Exercise encode behavior."""
-                if show_progress_bar:
-                    raise AssertionError("Qwen3-VL test embedder should disable progress bars")
-                self.inputs = inputs
-                self.batch_size = batch_size
-                return np.ones((len(inputs), 3), dtype=np.float32)
-
-        with TemporaryDirectory() as tmp:
-            model_path = Path(tmp) / "Qwen" / "Qwen3-VL-Embedding-2B"
-            model_path.mkdir(parents=True)
-            fake_model = FakeSentenceTransformer()
-            options = AtlasOptions(
-                sample=None,
-                host="127.0.0.1",
-                port=5055,
-                batch_size=None,
-                text_embedder=None,
-                image_embedder="transformers",
-                trust_remote_code=False,
-            )
-
-            with (
-                patch("local_data_studio.server.atlas_components.projection.load_sentence_transformer_model", return_value=fake_model),
-                patch("local_data_studio.server.atlas_components.projection.create_embedder") as create_embedder,
-            ):
-                embedder, embedder_args = _resolve_embedder_callable("image", model_path, options)
-                embeddings = asyncio.run(embedder([{"bytes": VALID_PNG_BYTES}], model=str(model_path), embedder_args=embedder_args))
-
-        create_embedder.assert_not_called()
-        self.assertEqual((1, 3), embeddings.shape)
-        self.assertEqual("sentence-transformers", _effective_embedder_for_modality("image", model_path, options))
-        self.assertIsNotNone(fake_model.inputs)
-        self.assertEqual(1, fake_model.batch_size)
-        self.assertIsInstance(fake_model.inputs[0], dict)
-        self.assertIn("image", fake_model.inputs[0])
-        self.assertEqual((1, 1), fake_model.inputs[0]["image"].size)
-
-    def test_embedding_backend_policy_is_resolved_once_per_model(self) -> None:
-        """Verify that embedding backend policy is resolved once per model."""
-        with TemporaryDirectory() as tmp:
-            qwen_model = Path(tmp) / "Qwen" / "Qwen3-VL-Embedding-2B"
-            regular_model = Path(tmp) / "google" / "siglip2-base-patch16-224"
-            qwen_model.mkdir(parents=True)
-            regular_model.mkdir(parents=True)
-            options = AtlasOptions(
-                sample=None,
-                host="127.0.0.1",
-                port=5055,
-                batch_size=None,
-                text_embedder=None,
-                image_embedder="transformers",
-                trust_remote_code=False,
-            )
-
-            qwen_backend = AtlasEmbeddingBackend.for_model(modality="image", model_path=qwen_model, options=options)
-            regular_backend = AtlasEmbeddingBackend.for_model(modality="image", model_path=regular_model, options=options)
-
-        self.assertEqual("sentence-transformers", qwen_backend.name)
-        self.assertTrue(qwen_backend.uses_qwen3_vl_adapter)
-        self.assertEqual("transformers", regular_backend.name)
-        self.assertFalse(regular_backend.uses_qwen3_vl_adapter)
-
-    def test_non_qwen_image_embedder_keeps_transformers_default(self) -> None:
-        """Verify that non qwen image embedder keeps transformers default."""
-        with TemporaryDirectory() as tmp:
-            model_path = Path(tmp) / "google" / "siglip2-base-patch16-224"
-            model_path.mkdir(parents=True)
-            options = AtlasOptions(
-                sample=None,
-                host="127.0.0.1",
-                port=5055,
-                batch_size=None,
-                text_embedder=None,
-                image_embedder=None,
-                trust_remote_code=False,
-            )
-
-            def fake_create_embedder(name, *, modality, model, embedder_args):  # noqa: ANN001
-                """Exercise fake create embedder behavior."""
-                self.assertEqual("transformers", name)
-                self.assertEqual("image", modality)
-
-                async def fake_embed(batch, *, model, embedder_args):  # noqa: ANN001
-                    """Exercise fake embed behavior."""
-                    return np.ones((len(batch), 3), dtype=np.float32)
-
-                return fake_embed
-
-            with patch("local_data_studio.server.atlas_components.projection.create_embedder", side_effect=fake_create_embedder) as create_embedder:
-                _resolve_embedder_callable("image", model_path, options)
-
-        create_embedder.assert_called_once()
-
     def test_normalizes_atlas_url_from_cli_output(self) -> None:
         """Verify that normalizes atlas url from cli output."""
         self.assertEqual("http://localhost:5055", _normalize_atlas_url("\x1b[32mhttp://localhost:5055\x1b[0m."))
@@ -208,22 +82,26 @@ class AtlasModelDiscoveryTests(TestCase):
 
     def test_atlas_command_loads_projection_cache_patch(self) -> None:
         """Verify that atlas command loads projection cache patch."""
-        command = build_atlas_command(
-            path=Path("data/example.jsonl"),
-            column="image",
-            modality="image",
-            sql=None,
-            model_path=Path("models/embedder/example"),
-            options=AtlasOptions(
-                sample=None,
-                host="127.0.0.1",
-                port=5055,
-                batch_size=None,
-                text_embedder=None,
-                image_embedder=None,
-                trust_remote_code=False,
-            ),
-        )
+        with patch(
+            "local_data_studio.server.atlas_components.process.effective_embedder_for_modality",
+            return_value="transformers",
+        ):
+            command = build_atlas_command(
+                path=Path("data/example.jsonl"),
+                column="image",
+                modality="image",
+                sql=None,
+                model_path=Path("models/embedder/example"),
+                options=AtlasOptions(
+                    sample=None,
+                    host="127.0.0.1",
+                    port=5055,
+                    batch_size=None,
+                    text_embedder=None,
+                    image_embedder=None,
+                    trust_remote_code=False,
+                ),
+            )
 
         self.assertIn("--with", command)
         self.assertIn("local_data_studio.server.atlas_cache_patch", command)
@@ -632,6 +510,7 @@ class AtlasModelDiscoveryTests(TestCase):
                 patch("local_data_studio.server.atlas_components.dataset.ATLAS_CACHE_ROOT", cache_root),
                 patch("local_data_studio.server.atlas_components.dataset.load_datasets", side_effect=fake_load_datasets),
                 patch("local_data_studio.server.atlas_components.dataset.project_atlas_frame", side_effect=fake_project_atlas_frame),
+                patch("local_data_studio.server.atlas_components.dataset.effective_embedder_for_modality", return_value="transformers"),
                 patch("local_data_studio.server.atlas_components.images.read_url_bytes", return_value=b"\xff\xd8\xfftest"),
             ):
                 prepared = prepare_atlas_dataset(
@@ -705,6 +584,7 @@ class AtlasModelDiscoveryTests(TestCase):
                 patch("local_data_studio.server.atlas_components.dataset.ATLAS_CACHE_ROOT", cache_root),
                 patch("local_data_studio.server.atlas_components.dataset.load_datasets", side_effect=fake_load_datasets),
                 patch("local_data_studio.server.atlas_components.dataset.project_atlas_frame", side_effect=fake_project_atlas_frame),
+                patch("local_data_studio.server.atlas_components.dataset.effective_embedder_for_modality", return_value="transformers"),
                 patch("local_data_studio.server.atlas_components.images.read_url_bytes", side_effect=fake_read_url_bytes),
             ):
                 prepared = prepare_atlas_dataset(
@@ -769,6 +649,7 @@ class AtlasModelDiscoveryTests(TestCase):
                 patch("local_data_studio.server.atlas_components.dataset.ATLAS_CACHE_ROOT", cache_root),
                 patch("local_data_studio.server.atlas_components.dataset.load_datasets", side_effect=fake_load_datasets),
                 patch("local_data_studio.server.atlas_components.dataset.project_atlas_frame", side_effect=fake_project_atlas_frame),
+                patch("local_data_studio.server.atlas_components.dataset.effective_embedder_for_modality", return_value="transformers"),
             ):
                 prepared = prepare_atlas_dataset(
                     path=data_path,
@@ -835,6 +716,7 @@ class AtlasModelDiscoveryTests(TestCase):
                 patch("local_data_studio.server.atlas_components.dataset.ATLAS_CACHE_ROOT", cache_root),
                 patch("local_data_studio.server.atlas_components.dataset.load_datasets", side_effect=fake_load_datasets),
                 patch("local_data_studio.server.atlas_components.dataset.project_atlas_frame", side_effect=fake_project_atlas_frame),
+                patch("local_data_studio.server.atlas_components.dataset.effective_embedder_for_modality", return_value="transformers"),
             ):
                 prepared = prepare_atlas_dataset(
                     path=data_path,
@@ -905,6 +787,7 @@ class AtlasModelDiscoveryTests(TestCase):
                 patch("local_data_studio.server.atlas_components.dataset.ATLAS_CACHE_ROOT", cache_root),
                 patch("local_data_studio.server.atlas_components.dataset.load_datasets", side_effect=fake_load_datasets),
                 patch("local_data_studio.server.atlas_components.dataset.project_atlas_frame", side_effect=fake_project_atlas_frame),
+                patch("local_data_studio.server.atlas_components.dataset.effective_embedder_for_modality", return_value="transformers"),
                 patch("local_data_studio.server.atlas_components.images.read_url_bytes", return_value=b"\xff\xd8\xfftest"),
             ):
                 prepared = prepare_atlas_dataset(

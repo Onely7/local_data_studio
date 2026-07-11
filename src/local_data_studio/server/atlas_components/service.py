@@ -5,7 +5,7 @@ from __future__ import annotations
 import threading
 from dataclasses import replace
 from pathlib import Path
-from typing import Any
+from typing import Any, cast
 
 from fastapi import HTTPException
 
@@ -13,6 +13,7 @@ from .. import embedder_models
 from ..config import ATLAS_PORT, EMBEDDER_MODELS_DIR
 from ..db import open_connection, quote_ident
 from ..deleted_rows import deleted_row_ids_for
+from ..embedder_capabilities import BackendName, ModelCapabilities, analyze_model_capabilities
 from ..jobs import JobContext
 from ..sql import configure_duckdb_limits, create_data_view, guard_select_sql_for_dataset
 from .contracts import AtlasModality, AtlasOptions
@@ -24,7 +25,7 @@ ATLAS_PORT_LOCK = threading.Lock()
 ATLAS_PORT_STATE = {"next": ATLAS_PORT}
 
 
-def discover_embedder_models() -> list[dict[str, str]]:
+def discover_embedder_models() -> list[dict[str, Any]]:
     """Return locally installed encoder models under models/embedder."""
     return embedder_models.discover_embedder_models(EMBEDDER_MODELS_DIR)
 
@@ -75,6 +76,8 @@ def run_atlas_visualization(
     path: Path,
     column: str,
     model: str,
+    backend: str | None = None,
+    prompt: str | None = None,
     sql: str | None,
     sample: int | None,
     context: JobContext,
@@ -84,11 +87,24 @@ def run_atlas_visualization(
     if not selected_column:
         raise HTTPException(status_code=400, detail="column is required")
     model_path = resolve_embedder_model(model)
+    capabilities = analyze_model_capabilities(model_path)
     guarded_sql = guard_select_sql_for_dataset(path, sql) if sql else None
     deleted_ids = deleted_row_ids_for(path)
     context.update(progress=0.02, message="Inspecting selected column")
     modality = infer_atlas_modality(path, selected_column, guarded_sql, deleted_ids)
-    options = reserve_atlas_start_port(AtlasOptions.from_request(sample=sample))
+    base_options = AtlasOptions.from_request(sample=sample)
+    selected_backend = _resolve_backend(backend, modality, capabilities, base_options)
+    normalized_prompt = prompt.strip() if prompt and prompt.strip() else None
+    if normalized_prompt and selected_backend != "sentence-transformers":
+        raise HTTPException(status_code=400, detail="prompt is supported only by the sentence-transformers backend")
+    options = reserve_atlas_start_port(
+        replace(
+            base_options,
+            backend=selected_backend,
+            prompt=normalized_prompt,
+            capability_fingerprint=capabilities.fingerprint,
+        )
+    )
     prepared = prepare_atlas_dataset(
         path=path,
         column=selected_column,
@@ -115,6 +131,8 @@ def run_atlas_visualization(
         "column": selected_column,
         "modality": modality,
         "model": model_label(model_path),
+        "backend": selected_backend,
+        "prompt_applied": normalized_prompt is not None,
         "source": source,
         "url": url,
         "pid": pid,
@@ -125,3 +143,23 @@ def run_atlas_visualization(
         "cache_hit": prepared.cache_hit,
         "cache_path": str(prepared.path),
     }
+
+
+def _resolve_backend(
+    requested: str | None,
+    modality: AtlasModality,
+    capabilities: ModelCapabilities,
+    options: AtlasOptions,
+) -> BackendName:
+    legacy = options.image_embedder if modality == "image" else options.text_embedder
+    selected = requested or legacy or capabilities.default_backend
+    if selected not in {"transformers", "sentence-transformers"}:
+        raise HTTPException(status_code=400, detail="no supported embedding backend is available for this model")
+    backend = cast(BackendName, selected)
+    capability = capabilities.backend(backend)
+    if not capability.available:
+        raise HTTPException(status_code=400, detail=f"{backend} is unavailable for this model: {capability.reason}")
+    if modality not in capability.modalities:
+        supported = ", ".join(capability.modalities) or "none"
+        raise HTTPException(status_code=400, detail=f"{backend} does not support {modality} input for this model; supported: {supported}")
+    return backend

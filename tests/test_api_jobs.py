@@ -181,6 +181,8 @@ class ApiJobTests(TestCase):
 
         with (
             patch("local_data_studio.server.atlas_components.service.resolve_embedder_model", return_value=model_path),
+            patch("local_data_studio.server.atlas_components.service._resolve_backend", return_value="transformers"),
+            patch("local_data_studio.server.atlas_components.service.analyze_model_capabilities") as analyze_capabilities,
             patch(
                 "local_data_studio.server.atlas_components.service.prepare_atlas_dataset",
                 return_value=AtlasPreparedDataset(
@@ -193,6 +195,7 @@ class ApiJobTests(TestCase):
             ),
             patch("local_data_studio.server.atlas_components.service.launch_embedding_atlas", side_effect=fake_launch),
         ):
+            analyze_capabilities.return_value.fingerprint = "test-capability"
             started = start_atlas_job(AtlasRequest(file="example.jsonl", column="image", model="test-image-model"))
             payload = self._wait_for_job(started["id"])
 

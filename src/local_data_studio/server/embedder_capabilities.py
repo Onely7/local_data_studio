@@ -22,6 +22,8 @@ CONFIG_FILES = (
     "preprocessor_config.json",
 )
 WEIGHT_FILES = ("model.safetensors", "pytorch_model.bin")
+MAX_CONFIG_BYTES = 2 * 1024 * 1024
+DEFAULT_PROMPT_PREVIEW_CHARS = 240
 
 
 @dataclass(frozen=True, slots=True)
@@ -68,9 +70,17 @@ class ModelCapabilities:
             },
             "default_backend": self.default_backend,
             "default_prompt_name": self.default_prompt_name,
-            "default_prompt": self.default_prompt,
+            "default_prompt_preview": (self.default_prompt[:DEFAULT_PROMPT_PREVIEW_CHARS] if self.default_prompt is not None else None),
             "capability_fingerprint": self.fingerprint,
         }
+
+
+@dataclass(frozen=True, slots=True)
+class TransformersPoolingSpec:
+    """Pooling and normalization steps reproduced by the Transformers adapter."""
+
+    modes: tuple[str, ...]
+    normalize: bool
 
 
 def library_versions() -> dict[str, str]:
@@ -90,10 +100,7 @@ def model_capability_fingerprint(path: Path) -> str:
     for relative in CONFIG_FILES:
         candidate = path / relative
         digest.update(relative.encode())
-        try:
-            digest.update(candidate.read_bytes())
-        except OSError:
-            digest.update(b"<missing>")
+        digest.update(_bounded_file_bytes(candidate))
     modules = _read_json(path / "modules.json")
     if isinstance(modules, list):
         for module in modules:
@@ -101,12 +108,12 @@ def model_capability_fingerprint(path: Path) -> str:
                 continue
             module_path = module["path"]
             if module_path:
-                config_path = path / module_path / "config.json"
-                digest.update(config_path.relative_to(path).as_posix().encode())
-                try:
-                    digest.update(config_path.read_bytes())
-                except OSError:
-                    digest.update(b"<missing>")
+                config_path = _model_file(path, str(Path(module_path) / "config.json"))
+                if config_path is None:
+                    digest.update(b"<outside-model-root>")
+                    continue
+                digest.update(config_path.relative_to(path.resolve()).as_posix().encode())
+                digest.update(_bounded_file_bytes(config_path))
     for relative in WEIGHT_FILES:
         candidate = path / relative
         try:
@@ -119,11 +126,31 @@ def model_capability_fingerprint(path: Path) -> str:
     return digest.hexdigest()
 
 
-def _read_json(path: Path) -> Any:
+def _bounded_file_bytes(path: Path) -> bytes:
     try:
-        return json.loads(path.read_text(encoding="utf-8"))
-    except (OSError, json.JSONDecodeError):
+        if path.stat().st_size > MAX_CONFIG_BYTES:
+            return b"<oversized>"
+        return path.read_bytes()
+    except OSError:
+        return b"<missing>"
+
+
+def _read_json(path: Path) -> Any:
+    raw = _bounded_file_bytes(path)
+    if raw in {b"<missing>", b"<oversized>"}:
         return None
+    try:
+        return json.loads(raw)
+    except (UnicodeDecodeError, json.JSONDecodeError):
+        return None
+
+
+def _model_file(root: Path, relative: str) -> Path | None:
+    resolved_root = root.resolve()
+    candidate = (resolved_root / relative).resolve()
+    if candidate != resolved_root and resolved_root not in candidate.parents:
+        return None
+    return candidate
 
 
 def _module_modalities(path: Path) -> tuple[str, ...]:
@@ -162,9 +189,11 @@ def _sentence_module_analysis(path: Path) -> tuple[str, bool, tuple[str, ...], s
             return "unknown", False, (), "modules.json has invalid indexes, types, or paths.", None
         if not module_type.startswith(BUILTIN_SENTENCE_PREFIXES):
             return "unknown", False, (), "A custom Sentence Transformers module requires explicit code trust.", None
-        if module_type.endswith("Pooling") and not (path / module_path / "config.json").is_file():
+        module_config = _model_file(path, str(Path(module_path) / "config.json"))
+        module_directory = _model_file(path, module_path)
+        if module_type.endswith("Pooling") and (module_config is None or not module_config.is_file()):
             return "unknown", False, (), "A Pooling module is missing its config.json.", None
-        if module_type.endswith("Dense") and not (path / module_path).is_dir():
+        if module_type.endswith("Dense") and (module_directory is None or not module_directory.is_dir()):
             return "unknown", False, (), "A Dense module directory is missing.", None
         normalized.append(normalized_module)
     return "native", True, _module_modalities(path), "modules.json defines a complete built-in Sentence Transformers pipeline.", normalized
@@ -174,7 +203,8 @@ def _pooling_modes(path: Path, modules: list[dict[str, Any]]) -> tuple[tuple[str
     pooling = [module for module in modules if str(module.get("type", "")).endswith("Pooling")]
     if len(pooling) != 1:
         return None
-    config = _read_json(path / str(pooling[0].get("path", "")) / "config.json")
+    config_path = _model_file(path, str(Path(str(pooling[0].get("path", ""))) / "config.json"))
+    config = _read_json(config_path) if config_path is not None else None
     if not isinstance(config, dict) or config.get("include_prompt", True) is False:
         return None
     if isinstance(config.get("pooling_mode"), str):
@@ -285,3 +315,13 @@ def analyze_model_capabilities(path: Path) -> ModelCapabilities:
     resolved = path.resolve()
     fingerprint = model_capability_fingerprint(resolved)
     return _analyze_cached(str(resolved), fingerprint)
+
+
+def transformers_pooling_spec(path: Path) -> TransformersPoolingSpec | None:
+    """Return the saved built-in pooling contract for a Transformers adapter."""
+    modules = _read_json(path / "modules.json")
+    if not isinstance(modules, list):
+        return None
+    normalized = [{str(key): value for key, value in module.items()} for module in modules if isinstance(module, dict)]
+    result = _pooling_modes(path, normalized)
+    return TransformersPoolingSpec(*result) if result is not None else None

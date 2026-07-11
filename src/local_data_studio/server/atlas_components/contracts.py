@@ -39,6 +39,9 @@ class AtlasOptions:
     embedding_dtype: str = "float32"
     projection_mode: str = "full"
     anchor_sample: int | None = None
+    backend: str | None = None
+    prompt: str | None = None
+    capability_fingerprint: str | None = None
 
     @classmethod
     def from_request(cls, sample: int | None = None) -> AtlasOptions:

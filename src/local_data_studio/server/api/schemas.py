@@ -1,8 +1,8 @@
 """Request schemas shared by Local Data Studio API routers."""
 
-from typing import Any
+from typing import Any, Literal
 
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 
 
 class QueryRequest(BaseModel):
@@ -45,6 +45,8 @@ class AtlasRequest(BaseModel):
     column: str
     model: str
     sample: int | None = None
+    backend: Literal["transformers", "sentence-transformers"] | None = None
+    prompt: str | None = Field(default=None, max_length=16_384)
 
 
 class AtlasQueryRequest(AtlasRequest):

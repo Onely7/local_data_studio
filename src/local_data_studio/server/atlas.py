@@ -1,7 +1,5 @@
 """Compatibility facade for Embedding Atlas runtime components."""
 
-from embedding_atlas.embedding import create_embedder
-
 from .atlas_components.contracts import (
     ATLAS_EMBED_INPUT_COLUMN,
     ATLAS_PROJECTION_NEIGHBORS,
@@ -12,9 +10,19 @@ from .atlas_components.contracts import (
     AtlasPreparedDataset,
 )
 from .atlas_components.dataset import atlas_dataset_cache_path, prepare_atlas_dataset
-from .atlas_components.images import (
-    ATLAS_TRUNCATION_SUFFIX,
+from .atlas_components.embedding_backends import (
+    AtlasEmbeddingBackend,
 )
+from .atlas_components.embedding_backends import (
+    effective_embedder_for_modality as _effective_embedder_for_modality,
+)
+from .atlas_components.embedding_backends import (
+    load_sentence_transformer_model as _load_sentence_transformer_model,
+)
+from .atlas_components.embedding_backends import (
+    resolve_embedder_callable as _resolve_embedder_callable,
+)
+from .atlas_components.images import ATLAS_TRUNCATION_SUFFIX
 from .atlas_components.images import (
     image_value_to_bytes as _image_value_to_bytes,
 )
@@ -30,10 +38,7 @@ from .atlas_components.images import (
 from .atlas_components.images import (
     read_url_bytes as _read_url_bytes,
 )
-from .atlas_components.process import (
-    build_atlas_command,
-    launch_embedding_atlas,
-)
+from .atlas_components.process import build_atlas_command, launch_embedding_atlas
 from .atlas_components.process import (
     embedding_atlas_env as _embedding_atlas_env,
 )
@@ -44,29 +49,16 @@ from .atlas_components.process import (
     spawn_embedding_atlas as _spawn_embedding_atlas,
 )
 from .atlas_components.projection import (
-    AtlasEmbeddingBackend,
-    project_atlas_frame,
-)
-from .atlas_components.projection import (
     compute_anchor_transform_projection as _compute_anchor_transform_projection,
 )
 from .atlas_components.projection import (
     compute_full_projection as _compute_full_projection,
 )
 from .atlas_components.projection import (
-    effective_embedder_for_modality as _effective_embedder_for_modality,
-)
-from .atlas_components.projection import (
     embed_items as _embed_items,
 )
 from .atlas_components.projection import (
-    is_qwen3_vl_embedding_model as _is_qwen3_vl_embedding_model,
-)
-from .atlas_components.projection import (
-    load_sentence_transformer_model as _load_sentence_transformer_model,
-)
-from .atlas_components.projection import (
-    resolve_embedder_callable as _resolve_embedder_callable,
+    project_atlas_frame,
 )
 from .atlas_components.projection import (
     run_full_projection as _run_full_projection,
