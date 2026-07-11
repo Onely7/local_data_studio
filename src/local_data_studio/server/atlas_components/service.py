@@ -10,7 +10,7 @@ from typing import Any, cast
 from fastapi import HTTPException
 
 from .. import embedder_models
-from ..config import ATLAS_PORT, EMBEDDER_MODELS_DIR
+from ..config import ATLAS_PORT, ATLAS_TRUST_REMOTE_CODE, EMBEDDER_MODELS_DIR
 from ..db import open_connection, quote_ident
 from ..deleted_rows import deleted_row_ids_for
 from ..embedder_capabilities import BackendName, ModelCapabilities, analyze_model_capabilities
@@ -27,7 +27,10 @@ ATLAS_PORT_STATE = {"next": ATLAS_PORT}
 
 def discover_embedder_models() -> list[dict[str, Any]]:
     """Return locally installed encoder models under models/embedder."""
-    return embedder_models.discover_embedder_models(EMBEDDER_MODELS_DIR)
+    return embedder_models.discover_embedder_models(
+        EMBEDDER_MODELS_DIR,
+        allow_remote_code=ATLAS_TRUST_REMOTE_CODE,
+    )
 
 
 def resolve_embedder_model(model: str) -> Path:
@@ -87,12 +90,15 @@ def run_atlas_visualization(
     if not selected_column:
         raise HTTPException(status_code=400, detail="column is required")
     model_path = resolve_embedder_model(model)
-    capabilities = analyze_model_capabilities(model_path)
+    base_options = AtlasOptions.from_request(sample=sample)
+    capabilities = analyze_model_capabilities(
+        model_path,
+        allow_remote_code=base_options.trust_remote_code,
+    )
     guarded_sql = guard_select_sql_for_dataset(path, sql) if sql else None
     deleted_ids = deleted_row_ids_for(path)
     context.update(progress=0.02, message="Inspecting selected column")
     modality = infer_atlas_modality(path, selected_column, guarded_sql, deleted_ids)
-    base_options = AtlasOptions.from_request(sample=sample)
     selected_backend = _resolve_backend(backend, modality, capabilities, base_options)
     normalized_prompt = prompt if prompt and prompt.strip() else None
     if normalized_prompt and selected_backend != "sentence-transformers":
