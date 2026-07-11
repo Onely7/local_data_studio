@@ -94,7 +94,7 @@ def run_atlas_visualization(
     modality = infer_atlas_modality(path, selected_column, guarded_sql, deleted_ids)
     base_options = AtlasOptions.from_request(sample=sample)
     selected_backend = _resolve_backend(backend, modality, capabilities, base_options)
-    normalized_prompt = prompt.strip() if prompt and prompt.strip() else None
+    normalized_prompt = prompt if prompt and prompt.strip() else None
     if normalized_prompt and selected_backend != "sentence-transformers":
         raise HTTPException(status_code=400, detail="prompt is supported only by the sentence-transformers backend")
     options = reserve_atlas_start_port(

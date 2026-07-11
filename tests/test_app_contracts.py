@@ -74,6 +74,14 @@ class ApplicationContractTests(TestCase):
         self.assertEqual("no-store, max-age=0", response.headers["cache-control"])
         self.assertIn("Data Studio", response.text)
 
+    def test_atlas_backend_and_prompt_controls_are_packaged(self) -> None:
+        """Keep backend selection and bounded prompt input in the shipped UI."""
+        response = TestClient(app).get("/")
+
+        self.assertIn('id="atlas-backend"', response.text)
+        self.assertIn('id="atlas-prompt"', response.text)
+        self.assertIn('maxlength="16384"', response.text)
+
     def test_blocking_routes_run_in_fastapi_threadpool(self) -> None:
         """Verify that blocking routes run in fastapi threadpool."""
         for endpoint in (get_schema, preview, run_query, start_atlas_job, get_job):
@@ -102,4 +110,10 @@ class ApplicationContractTests(TestCase):
         response = TestClient(app).get("/api/embedder_models")
 
         self.assertEqual(200, response.status_code)
-        self.assertIsInstance(response.json().get("models"), list)
+        payload = response.json()
+        self.assertIsInstance(payload.get("models"), list)
+        self.assertIn("libraries", payload)
+        for model in payload["models"]:
+            self.assertIn("backends", model)
+            self.assertIn("default_backend", model)
+            self.assertIn("capability_fingerprint", model)
