@@ -163,9 +163,9 @@ class ApiJobTests(TestCase):
             return "http://127.0.0.1:5055/", 12345
 
         with (
-            patch("local_data_studio.server.atlas.resolve_embedder_model", return_value=model_path),
+            patch("local_data_studio.server.atlas_components.service.resolve_embedder_model", return_value=model_path),
             patch(
-                "local_data_studio.server.atlas.prepare_atlas_dataset",
+                "local_data_studio.server.atlas_components.service.prepare_atlas_dataset",
                 return_value=AtlasPreparedDataset(
                     path=prepared_path,
                     x="x",
@@ -174,7 +174,7 @@ class ApiJobTests(TestCase):
                     cache_hit=True,
                 ),
             ),
-            patch("local_data_studio.server.atlas.launch_embedding_atlas", side_effect=fake_launch),
+            patch("local_data_studio.server.atlas_components.service.launch_embedding_atlas", side_effect=fake_launch),
         ):
             started = asyncio.run(start_atlas_job(AtlasRequest(file="example.jsonl", column="image", model="test-image-model")))
             payload = self._wait_for_job(started["id"])
@@ -197,9 +197,9 @@ class ApiJobTests(TestCase):
             return "http://127.0.0.1:5056/", 12346
 
         with (
-            patch("local_data_studio.server.atlas.resolve_embedder_model", return_value=model_path),
+            patch("local_data_studio.server.atlas_components.service.resolve_embedder_model", return_value=model_path),
             patch(
-                "local_data_studio.server.atlas.prepare_atlas_dataset",
+                "local_data_studio.server.atlas_components.service.prepare_atlas_dataset",
                 return_value=AtlasPreparedDataset(
                     path=prepared_path,
                     x="x",
@@ -208,7 +208,7 @@ class ApiJobTests(TestCase):
                     cache_hit=False,
                 ),
             ),
-            patch("local_data_studio.server.atlas.launch_embedding_atlas", side_effect=fake_launch),
+            patch("local_data_studio.server.atlas_components.service.launch_embedding_atlas", side_effect=fake_launch),
         ):
             started = asyncio.run(
                 start_atlas_query_job(

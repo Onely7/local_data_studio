@@ -55,7 +55,7 @@ class AtlasModelDiscoveryTests(TestCase):
             (model / "config.json").write_text("{}", encoding="utf-8")
             (nested / "config.json").write_text("{}", encoding="utf-8")
 
-            with patch("local_data_studio.server.atlas.EMBEDDER_MODELS_DIR", root):
+            with patch("local_data_studio.server.atlas_components.service.EMBEDDER_MODELS_DIR", root):
                 models = discover_embedder_models()
 
         self.assertEqual(
@@ -68,7 +68,7 @@ class AtlasModelDiscoveryTests(TestCase):
             root = Path(tmp) / "models"
             root.mkdir()
 
-            with patch("local_data_studio.server.atlas.EMBEDDER_MODELS_DIR", root):
+            with patch("local_data_studio.server.atlas_components.service.EMBEDDER_MODELS_DIR", root):
                 with self.assertRaises(HTTPException):
                     resolve_embedder_model("../outside")
 
@@ -116,8 +116,8 @@ class AtlasModelDiscoveryTests(TestCase):
             )
 
             with (
-                patch("local_data_studio.server.atlas._load_sentence_transformer_model", return_value=fake_model),
-                patch("local_data_studio.server.atlas.create_embedder") as create_embedder,
+                patch("local_data_studio.server.atlas_components.projection.load_sentence_transformer_model", return_value=fake_model),
+                patch("local_data_studio.server.atlas_components.projection.create_embedder") as create_embedder,
             ):
                 embedder, embedder_args = _resolve_embedder_callable("image", model_path, options)
                 embeddings = asyncio.run(embedder([{"bytes": VALID_PNG_BYTES}], model=str(model_path), embedder_args=embedder_args))
@@ -178,7 +178,7 @@ class AtlasModelDiscoveryTests(TestCase):
 
                 return fake_embed
 
-            with patch("local_data_studio.server.atlas.create_embedder", side_effect=fake_create_embedder) as create_embedder:
+            with patch("local_data_studio.server.atlas_components.projection.create_embedder", side_effect=fake_create_embedder) as create_embedder:
                 _resolve_embedder_callable("image", model_path, options)
 
         create_embedder.assert_called_once()
@@ -235,7 +235,7 @@ class AtlasModelDiscoveryTests(TestCase):
             def poll(self) -> None:
                 return None
 
-        with patch("local_data_studio.server.atlas.subprocess.Popen", return_value=FakeProcess()) as popen:
+        with patch("local_data_studio.server.atlas_components.process.subprocess.Popen", return_value=FakeProcess()) as popen:
             url, pid = launch_embedding_atlas(["/usr/bin/python3", "-m", "embedding_atlas.cli"], DummyContext())
 
         self.assertEqual("http://127.0.0.1:5055", url)
@@ -365,7 +365,7 @@ class AtlasModelDiscoveryTests(TestCase):
                 trust_remote_code=False,
             )
 
-            with patch("local_data_studio.server.atlas.EMBEDDER_MODELS_DIR", model_root):
+            with patch("local_data_studio.server.atlas_components.dataset.EMBEDDER_MODELS_DIR", model_root):
                 first = atlas_dataset_cache_path(
                     path=data_path,
                     column="text",
@@ -408,7 +408,6 @@ class AtlasModelDiscoveryTests(TestCase):
             model_path.mkdir(parents=True)
             (model_path / "config.json").write_text("{}", encoding="utf-8")
             data_cache = root / "cache" / "atlas" / "datasets"
-            projection_cache = root / "cache" / "atlas" / "projection"
             cache_root = root / "cache" / "atlas"
             options = AtlasOptions(
                 sample=None,
@@ -433,12 +432,11 @@ class AtlasModelDiscoveryTests(TestCase):
                 return data_frame
 
             with (
-                patch("local_data_studio.server.atlas.EMBEDDER_MODELS_DIR", model_root),
-                patch("local_data_studio.server.atlas.ATLAS_DATA_CACHE_DIR", data_cache),
-                patch("local_data_studio.server.atlas.ATLAS_CACHE_DIR", projection_cache),
-                patch("local_data_studio.server.atlas.ATLAS_CACHE_ROOT", cache_root),
-                patch("local_data_studio.server.atlas.load_datasets", side_effect=fake_load_datasets),
-                patch("local_data_studio.server.atlas.project_atlas_frame", side_effect=fake_project_atlas_frame),
+                patch("local_data_studio.server.atlas_components.dataset.EMBEDDER_MODELS_DIR", model_root),
+                patch("local_data_studio.server.atlas_components.dataset.ATLAS_DATA_CACHE_DIR", data_cache),
+                patch("local_data_studio.server.atlas_components.dataset.ATLAS_CACHE_ROOT", cache_root),
+                patch("local_data_studio.server.atlas_components.dataset.load_datasets", side_effect=fake_load_datasets),
+                patch("local_data_studio.server.atlas_components.dataset.project_atlas_frame", side_effect=fake_project_atlas_frame),
             ):
                 first = prepare_atlas_dataset(
                     path=data_path,
@@ -484,7 +482,6 @@ class AtlasModelDiscoveryTests(TestCase):
             model_path.mkdir(parents=True)
             (model_path / "preprocessor_config.json").write_text("{}", encoding="utf-8")
             data_cache = root / "cache" / "atlas" / "datasets"
-            projection_cache = root / "cache" / "atlas" / "projection"
             cache_root = root / "cache" / "atlas"
             options = AtlasOptions(
                 sample=None,
@@ -508,13 +505,12 @@ class AtlasModelDiscoveryTests(TestCase):
                 return data_frame
 
             with (
-                patch("local_data_studio.server.atlas.EMBEDDER_MODELS_DIR", model_root),
-                patch("local_data_studio.server.atlas.ATLAS_DATA_CACHE_DIR", data_cache),
-                patch("local_data_studio.server.atlas.ATLAS_CACHE_DIR", projection_cache),
-                patch("local_data_studio.server.atlas.ATLAS_CACHE_ROOT", cache_root),
-                patch("local_data_studio.server.atlas.load_datasets", side_effect=fake_load_datasets),
-                patch("local_data_studio.server.atlas.project_atlas_frame", side_effect=fake_project_atlas_frame),
-                patch("local_data_studio.server.atlas._read_url_bytes", return_value=b"\xff\xd8\xfftest"),
+                patch("local_data_studio.server.atlas_components.dataset.EMBEDDER_MODELS_DIR", model_root),
+                patch("local_data_studio.server.atlas_components.dataset.ATLAS_DATA_CACHE_DIR", data_cache),
+                patch("local_data_studio.server.atlas_components.dataset.ATLAS_CACHE_ROOT", cache_root),
+                patch("local_data_studio.server.atlas_components.dataset.load_datasets", side_effect=fake_load_datasets),
+                patch("local_data_studio.server.atlas_components.dataset.project_atlas_frame", side_effect=fake_project_atlas_frame),
+                patch("local_data_studio.server.atlas_components.images.read_url_bytes", return_value=b"\xff\xd8\xfftest"),
             ):
                 prepared = prepare_atlas_dataset(
                     path=data_path,
@@ -546,7 +542,6 @@ class AtlasModelDiscoveryTests(TestCase):
             model_path.mkdir(parents=True)
             (model_path / "preprocessor_config.json").write_text("{}", encoding="utf-8")
             data_cache = root / "cache" / "atlas" / "datasets"
-            projection_cache = root / "cache" / "atlas" / "projection"
             cache_root = root / "cache" / "atlas"
             options = AtlasOptions(
                 sample=None,
@@ -575,13 +570,12 @@ class AtlasModelDiscoveryTests(TestCase):
                 return b"\xff\xd8\xffgood"
 
             with (
-                patch("local_data_studio.server.atlas.EMBEDDER_MODELS_DIR", model_root),
-                patch("local_data_studio.server.atlas.ATLAS_DATA_CACHE_DIR", data_cache),
-                patch("local_data_studio.server.atlas.ATLAS_CACHE_DIR", projection_cache),
-                patch("local_data_studio.server.atlas.ATLAS_CACHE_ROOT", cache_root),
-                patch("local_data_studio.server.atlas.load_datasets", side_effect=fake_load_datasets),
-                patch("local_data_studio.server.atlas.project_atlas_frame", side_effect=fake_project_atlas_frame),
-                patch("local_data_studio.server.atlas._read_url_bytes", side_effect=fake_read_url_bytes),
+                patch("local_data_studio.server.atlas_components.dataset.EMBEDDER_MODELS_DIR", model_root),
+                patch("local_data_studio.server.atlas_components.dataset.ATLAS_DATA_CACHE_DIR", data_cache),
+                patch("local_data_studio.server.atlas_components.dataset.ATLAS_CACHE_ROOT", cache_root),
+                patch("local_data_studio.server.atlas_components.dataset.load_datasets", side_effect=fake_load_datasets),
+                patch("local_data_studio.server.atlas_components.dataset.project_atlas_frame", side_effect=fake_project_atlas_frame),
+                patch("local_data_studio.server.atlas_components.images.read_url_bytes", side_effect=fake_read_url_bytes),
             ):
                 prepared = prepare_atlas_dataset(
                     path=data_path,
@@ -611,7 +605,6 @@ class AtlasModelDiscoveryTests(TestCase):
             model_path.mkdir(parents=True)
             (model_path / "preprocessor_config.json").write_text("{}", encoding="utf-8")
             data_cache = root / "cache" / "atlas" / "datasets"
-            projection_cache = root / "cache" / "atlas" / "projection"
             cache_root = root / "cache" / "atlas"
             options = AtlasOptions(
                 sample=None,
@@ -634,12 +627,11 @@ class AtlasModelDiscoveryTests(TestCase):
                 return data_frame
 
             with (
-                patch("local_data_studio.server.atlas.EMBEDDER_MODELS_DIR", model_root),
-                patch("local_data_studio.server.atlas.ATLAS_DATA_CACHE_DIR", data_cache),
-                patch("local_data_studio.server.atlas.ATLAS_CACHE_DIR", projection_cache),
-                patch("local_data_studio.server.atlas.ATLAS_CACHE_ROOT", cache_root),
-                patch("local_data_studio.server.atlas.load_datasets", side_effect=fake_load_datasets),
-                patch("local_data_studio.server.atlas.project_atlas_frame", side_effect=fake_project_atlas_frame),
+                patch("local_data_studio.server.atlas_components.dataset.EMBEDDER_MODELS_DIR", model_root),
+                patch("local_data_studio.server.atlas_components.dataset.ATLAS_DATA_CACHE_DIR", data_cache),
+                patch("local_data_studio.server.atlas_components.dataset.ATLAS_CACHE_ROOT", cache_root),
+                patch("local_data_studio.server.atlas_components.dataset.load_datasets", side_effect=fake_load_datasets),
+                patch("local_data_studio.server.atlas_components.dataset.project_atlas_frame", side_effect=fake_project_atlas_frame),
             ):
                 prepared = prepare_atlas_dataset(
                     path=data_path,
@@ -670,7 +662,6 @@ class AtlasModelDiscoveryTests(TestCase):
             model_path.mkdir(parents=True)
             (model_path / "preprocessor_config.json").write_text("{}", encoding="utf-8")
             data_cache = root / "cache" / "atlas" / "datasets"
-            projection_cache = root / "cache" / "atlas" / "projection"
             cache_root = root / "cache" / "atlas"
             options = AtlasOptions(
                 sample=None,
@@ -695,12 +686,11 @@ class AtlasModelDiscoveryTests(TestCase):
                 return data_frame
 
             with (
-                patch("local_data_studio.server.atlas.EMBEDDER_MODELS_DIR", model_root),
-                patch("local_data_studio.server.atlas.ATLAS_DATA_CACHE_DIR", data_cache),
-                patch("local_data_studio.server.atlas.ATLAS_CACHE_DIR", projection_cache),
-                patch("local_data_studio.server.atlas.ATLAS_CACHE_ROOT", cache_root),
-                patch("local_data_studio.server.atlas.load_datasets", side_effect=fake_load_datasets),
-                patch("local_data_studio.server.atlas.project_atlas_frame", side_effect=fake_project_atlas_frame),
+                patch("local_data_studio.server.atlas_components.dataset.EMBEDDER_MODELS_DIR", model_root),
+                patch("local_data_studio.server.atlas_components.dataset.ATLAS_DATA_CACHE_DIR", data_cache),
+                patch("local_data_studio.server.atlas_components.dataset.ATLAS_CACHE_ROOT", cache_root),
+                patch("local_data_studio.server.atlas_components.dataset.load_datasets", side_effect=fake_load_datasets),
+                patch("local_data_studio.server.atlas_components.dataset.project_atlas_frame", side_effect=fake_project_atlas_frame),
             ):
                 prepared = prepare_atlas_dataset(
                     path=data_path,
@@ -731,7 +721,6 @@ class AtlasModelDiscoveryTests(TestCase):
             model_path.mkdir(parents=True)
             (model_path / "preprocessor_config.json").write_text("{}", encoding="utf-8")
             data_cache = root / "cache" / "atlas" / "datasets"
-            projection_cache = root / "cache" / "atlas" / "projection"
             cache_root = root / "cache" / "atlas"
             options = AtlasOptions(
                 sample=None,
@@ -760,13 +749,12 @@ class AtlasModelDiscoveryTests(TestCase):
                 return data_frame
 
             with (
-                patch("local_data_studio.server.atlas.EMBEDDER_MODELS_DIR", model_root),
-                patch("local_data_studio.server.atlas.ATLAS_DATA_CACHE_DIR", data_cache),
-                patch("local_data_studio.server.atlas.ATLAS_CACHE_DIR", projection_cache),
-                patch("local_data_studio.server.atlas.ATLAS_CACHE_ROOT", cache_root),
-                patch("local_data_studio.server.atlas.load_datasets", side_effect=fake_load_datasets),
-                patch("local_data_studio.server.atlas.project_atlas_frame", side_effect=fake_project_atlas_frame),
-                patch("local_data_studio.server.atlas._read_url_bytes", return_value=b"\xff\xd8\xfftest"),
+                patch("local_data_studio.server.atlas_components.dataset.EMBEDDER_MODELS_DIR", model_root),
+                patch("local_data_studio.server.atlas_components.dataset.ATLAS_DATA_CACHE_DIR", data_cache),
+                patch("local_data_studio.server.atlas_components.dataset.ATLAS_CACHE_ROOT", cache_root),
+                patch("local_data_studio.server.atlas_components.dataset.load_datasets", side_effect=fake_load_datasets),
+                patch("local_data_studio.server.atlas_components.dataset.project_atlas_frame", side_effect=fake_project_atlas_frame),
+                patch("local_data_studio.server.atlas_components.images.read_url_bytes", return_value=b"\xff\xd8\xfftest"),
             ):
                 prepared = prepare_atlas_dataset(
                     path=data_path,
@@ -799,7 +787,6 @@ class AtlasModelDiscoveryTests(TestCase):
             model_path.mkdir(parents=True)
             (model_path / "config.json").write_text("{}", encoding="utf-8")
             data_cache = root / "cache" / "atlas" / "datasets"
-            projection_cache = root / "cache" / "atlas" / "projection"
             cache_root = root / "cache" / "atlas"
             options = AtlasOptions(
                 sample=None,
@@ -823,13 +810,13 @@ class AtlasModelDiscoveryTests(TestCase):
                 return data_frame
 
             with (
-                patch("local_data_studio.server.atlas.EMBEDDER_MODELS_DIR", model_root),
-                patch("local_data_studio.server.atlas.ATLAS_DATA_CACHE_DIR", data_cache),
-                patch("local_data_studio.server.atlas.ATLAS_CACHE_DIR", projection_cache),
-                patch("local_data_studio.server.atlas.ATLAS_CACHE_ROOT", cache_root),
-                patch("local_data_studio.server.atlas.ATLAS_TEXT_MAX_CHARS", 8),
-                patch("local_data_studio.server.atlas.load_datasets", side_effect=fake_load_datasets),
-                patch("local_data_studio.server.atlas.project_atlas_frame", side_effect=fake_project_atlas_frame),
+                patch("local_data_studio.server.atlas_components.dataset.EMBEDDER_MODELS_DIR", model_root),
+                patch("local_data_studio.server.atlas_components.dataset.ATLAS_DATA_CACHE_DIR", data_cache),
+                patch("local_data_studio.server.atlas_components.dataset.ATLAS_CACHE_ROOT", cache_root),
+                patch("local_data_studio.server.atlas_components.dataset.ATLAS_TEXT_MAX_CHARS", 8),
+                patch("local_data_studio.server.atlas_components.images.ATLAS_TEXT_MAX_CHARS", 8),
+                patch("local_data_studio.server.atlas_components.dataset.load_datasets", side_effect=fake_load_datasets),
+                patch("local_data_studio.server.atlas_components.dataset.project_atlas_frame", side_effect=fake_project_atlas_frame),
             ):
                 prepared = prepare_atlas_dataset(
                     path=data_path,
@@ -870,7 +857,7 @@ class AtlasModelDiscoveryTests(TestCase):
                 knn_distances=np.zeros((2, 1), dtype=np.float32),
             )
 
-        with patch("local_data_studio.server.atlas._run_full_projection", side_effect=fake_run_full_projection):
+        with patch("local_data_studio.server.atlas_components.projection.run_full_projection", side_effect=fake_run_full_projection):
             projected = project_atlas_frame(
                 pd.DataFrame({"vector": [[1.0, 2.0], [3.0, 4.0]]}),
                 input_column="vector",
@@ -900,7 +887,7 @@ class AtlasModelDiscoveryTests(TestCase):
                 knn_distances=np.zeros((row_count, 0), dtype=np.float32),
             )
 
-        with patch("local_data_studio.server.atlas._run_umap", side_effect=fake_run_umap):
+        with patch("local_data_studio.server.atlas_components.projection._run_umap", side_effect=fake_run_umap):
             _run_full_projection(np.ones((3, 2), dtype=np.float32))
 
         self.assertIsNotNone(seen_args)
@@ -934,7 +921,7 @@ class AtlasModelDiscoveryTests(TestCase):
             return np.ones((len(items), 3), dtype=np.float32)
 
         with (
-            patch("local_data_studio.server.atlas._embed_items", side_effect=fake_embed_items),
+            patch("local_data_studio.server.atlas_components.projection.embed_items", side_effect=fake_embed_items),
             patch("umap.UMAP", return_value=FakeReducer()),
         ):
             projected = project_atlas_frame(
@@ -1004,7 +991,7 @@ class AtlasModelDiscoveryTests(TestCase):
             image_embedder=None,
             trust_remote_code=False,
         )
-        with patch("local_data_studio.server.atlas.ATLAS_PORT_STATE", {"next": 5055}):
+        with patch("local_data_studio.server.atlas_components.service.ATLAS_PORT_STATE", {"next": 5055}):
             first = reserve_atlas_start_port(options)
             second = reserve_atlas_start_port(options)
 
