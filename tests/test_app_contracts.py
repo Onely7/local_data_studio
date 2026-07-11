@@ -83,6 +83,21 @@ class ApplicationContractTests(TestCase):
         self.assertIn('maxlength="16384"', response.text)
         self.assertNotIn('id="atlas-prompt-controls" hidden', response.text)
 
+    def test_operation_statuses_share_typography_and_eda_rows_are_not_editable(self) -> None:
+        """Keep post-action feedback consistent and EDA row limits environment-owned."""
+        client = TestClient(app)
+        response = client.get("/")
+        script = client.get("/app.js").text
+        stylesheet = client.get("/styles.css").text
+
+        self.assertEqual(3, response.text.count('class="operation-status"'))
+        self.assertNotIn('id="eda-sample"', response.text)
+        self.assertIn("EDA_ROW_LIMIT", response.text)
+        self.assertNotIn("edaSampleRequest", script)
+        self.assertIn("const payload = { file: state.file };", script)
+        self.assertIn(".operation-status:not(:empty)", stylesheet)
+        self.assertIn("font-size: 12px", stylesheet)
+
     def test_blocking_routes_run_in_fastapi_threadpool(self) -> None:
         """Verify that blocking routes run in fastapi threadpool."""
         for endpoint in (get_schema, preview, run_query, start_atlas_job, get_job):
