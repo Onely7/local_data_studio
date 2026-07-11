@@ -1,5 +1,6 @@
 """Column-statistics inference and dataset sampling services."""
 
+from .accumulator import ColumnSampleAccumulator
 from .heuristics import (
     discrete_counts,
     format_axis,
@@ -18,6 +19,7 @@ from .service import compute_column_stats
 
 __all__ = [
     "compute_column_stats",
+    "ColumnSampleAccumulator",
     "discrete_counts",
     "format_axis",
     "format_number",

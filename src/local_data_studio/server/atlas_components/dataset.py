@@ -35,11 +35,9 @@ from .contracts import (
     AtlasPreparedDataset,
 )
 from .images import (
-    attach_projection_columns,
+    build_atlas_output_frame,
     image_like_columns,
-    normalize_image_display_columns,
     prepare_projection_input,
-    sanitize_atlas_output_frame,
 )
 from .projection import effective_embedder_for_modality, project_atlas_frame
 
@@ -163,10 +161,8 @@ def prepare_atlas_dataset(
                 model_path=model_path,
                 options=options,
             )
-            projected = attach_projection_columns(output_frame, coordinates)
             preserve_columns = image_like_columns(output_frame)
-            projected = normalize_image_display_columns(projected, preserve_columns)
-            projected = sanitize_atlas_output_frame(projected, preserve_columns=preserve_columns)
+            projected = build_atlas_output_frame(output_frame, coordinates, preserve_columns)
             cache_path.parent.mkdir(parents=True, exist_ok=True)
             tmp_path = cache_path.with_name(f".{cache_path.name}.{os.getpid()}.{threading.get_ident()}.tmp")
             projected.to_parquet(tmp_path)

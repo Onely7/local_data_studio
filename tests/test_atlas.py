@@ -1086,12 +1086,38 @@ class AtlasModelDiscoveryTests(TestCase):
                 calls.append(len(items))
                 return np.ones((len(items), 3), dtype=np.float32)
 
+        class _Indexer:
+            def __init__(self, values: list[str]) -> None:
+                self.values = values
+
+            def __getitem__(self, index: int) -> str:
+                return self.values[index]
+
+        class _Column:
+            def __init__(self, values: list[str]) -> None:
+                self.values = values
+                self.iloc = _Indexer(values)
+
+            def __len__(self) -> int:
+                return len(self.values)
+
+            def tolist(self) -> list[str]:
+                raise AssertionError("anchor transform must not materialize the full column")
+
+        class _Frame:
+            def __init__(self, values: list[str]) -> None:
+                self.column = _Column(values)
+
+            def __getitem__(self, column: str) -> _Column:
+                self.requested_column = column
+                return self.column
+
         with (
             patch("local_data_studio.server.atlas_components.projection.create_embedding_session", return_value=FakeSession()) as factory,
             patch("umap.UMAP", return_value=FakeReducer()),
         ):
             projected = project_atlas_frame(
-                pd.DataFrame({"text": ["a", "b", "c", "d"]}),
+                _Frame(["a", "b", "c", "d"]),
                 input_column="text",
                 modality="text",
                 model_path=Path("models/embedder/example"),
