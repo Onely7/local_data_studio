@@ -1,9 +1,18 @@
+from importlib.metadata import requires
 from pathlib import Path
 from unittest.mock import patch
 
 import pandas as pd
 
 from local_data_studio.server.eda import build_eda_report, eda_cache_key, sanitize_eda_dataframe
+
+
+def test_runtime_dependencies_keep_pkg_resources_available_for_eda() -> None:
+    project_requirements = requires("local-data-studio") or []
+    setuptools_requirement = next(requirement for requirement in project_requirements if requirement.lower().startswith("setuptools"))
+
+    assert ">=80" in setuptools_requirement
+    assert "<81" in setuptools_requirement
 
 
 def test_sanitize_eda_dataframe_normalizes_nested_and_binary_values() -> None:
