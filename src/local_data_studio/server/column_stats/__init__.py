@@ -1,7 +1,6 @@
-"""Backward-compatible facade for column-statistics services."""
+"""Column-statistics inference and dataset sampling services."""
 
-from .column_stats import (
-    compute_column_stats,
+from .heuristics import (
     discrete_counts,
     format_axis,
     format_number,
@@ -15,6 +14,7 @@ from .column_stats import (
     number_type_label,
     numeric_histogram,
 )
+from .service import compute_column_stats
 
 __all__ = [
     "compute_column_stats",
