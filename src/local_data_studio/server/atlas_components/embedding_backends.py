@@ -34,7 +34,7 @@ class AtlasEmbeddingBackend:
         options: AtlasOptions,
     ) -> AtlasEmbeddingBackend:
         """Resolve an available backend without model-name special cases."""
-        capabilities = analyze_model_capabilities(model_path)
+        capabilities = analyze_model_capabilities(model_path, allow_remote_code=options.trust_remote_code)
         legacy = options.image_embedder if modality == "image" else options.text_embedder
         selected = options.backend or legacy or capabilities.default_backend
         if selected not in {"transformers", "sentence-transformers"}:
@@ -164,7 +164,7 @@ def create_transformers_pooling_embedder(
     spec = transformers_pooling_spec(model_path)
     if spec is None:
         raise ValueError("saved pooling configuration is unavailable")
-    capabilities = analyze_model_capabilities(model_path)
+    capabilities = analyze_model_capabilities(model_path, allow_remote_code=options.trust_remote_code)
     transformer_model, processor, device = load_transformers_components(
         model_path,
         multimodal=multimodal,

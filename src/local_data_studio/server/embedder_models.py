@@ -29,7 +29,7 @@ def model_label(path: Path, root: Path) -> str:
     return path.relative_to(root).as_posix()
 
 
-def discover_embedder_models(root: Path) -> list[dict[str, Any]]:
+def discover_embedder_models(root: Path, *, allow_remote_code: bool = False) -> list[dict[str, Any]]:
     """Return locally installed encoder models without importing the ML stack."""
     root.mkdir(parents=True, exist_ok=True)
     models: list[dict[str, Any]] = []
@@ -45,7 +45,14 @@ def discover_embedder_models(root: Path) -> list[dict[str, Any]]:
             continue
         discovered_roots.append(path)
         label = model_label(path, root)
-        models.append({"name": label, "value": label, "path": str(path), **analyze_model_capabilities(path).to_response()})
+        models.append(
+            {
+                "name": label,
+                "value": label,
+                "path": str(path),
+                **analyze_model_capabilities(path, allow_remote_code=allow_remote_code).to_response(),
+            }
+        )
     return models
 
 

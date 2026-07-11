@@ -103,9 +103,13 @@ class EmbedderCapabilityTests(TestCase):
             )
 
             capabilities = analyze_model_capabilities(model)
+            trusted_capabilities = analyze_model_capabilities(model, allow_remote_code=True)
 
         self.assertEqual("remote_code", capabilities.transformers.status)
         self.assertFalse(capabilities.transformers.available)
+        self.assertFalse(capabilities.sentence_transformers.available)
+        self.assertTrue(trusted_capabilities.transformers.available)
+        self.assertTrue(trusted_capabilities.sentence_transformers.available)
 
     def test_multimodal_auto_mapping_is_detected_without_model_name_rules(self) -> None:
         """Resolve a renamed Qwen3-VL config through AutoClass and module metadata."""

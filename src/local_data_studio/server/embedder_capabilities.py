@@ -257,12 +257,25 @@ def _transformers_analysis(
     sentence_status: str,
     sentence_modalities: tuple[str, ...],
     modules: list[dict[str, Any]] | None,
+    allow_remote_code: bool,
 ) -> BackendCapability:
     config, remote_code = _resolve_auto_config(path)
     if config is None:
         status = "remote_code" if remote_code else "unknown"
-        reason = "Model configuration requires remote code." if remote_code else "AutoConfig cannot resolve the local model."
-        return BackendCapability(status, False, (), reason)
+        if remote_code:
+            reason = (
+                "Model configuration requires remote code and explicit trust is enabled."
+                if allow_remote_code
+                else "Model configuration requires remote code; enable explicit trust to use it."
+            )
+            return BackendCapability(
+                status,
+                allow_remote_code,
+                _fallback_modalities(path),
+                reason,
+                "pipeline" if allow_remote_code else None,
+            )
+        return BackendCapability(status, False, (), "AutoConfig cannot resolve the local model.")
     direct, multimodal = _has_auto_model(config)
     if not direct:
         return BackendCapability("unsupported", False, (), "No installed Transformers AutoModel mapping accepts this config.")
@@ -296,11 +309,23 @@ def _prompt_metadata(path: Path) -> tuple[str | None, str | None]:
 
 
 @lru_cache(maxsize=256)
-def _analyze_cached(path_text: str, fingerprint: str) -> ModelCapabilities:
+def _analyze_cached(path_text: str, fingerprint: str, allow_remote_code: bool) -> ModelCapabilities:
     path = Path(path_text)
     sentence_status, sentence_available, modalities, sentence_reason, modules = _sentence_module_analysis(path)
     sentence = BackendCapability(sentence_status, sentence_available, modalities, sentence_reason, "sentence-transformers" if sentence_available else None)
-    transformers = _transformers_analysis(path, sentence_status, modalities, modules)
+    transformers = _transformers_analysis(path, sentence_status, modalities, modules, allow_remote_code)
+    if transformers.status == "remote_code" and sentence.status in {"native", "generic_fallback"}:
+        sentence = BackendCapability(
+            sentence.status,
+            allow_remote_code,
+            sentence.modalities,
+            (
+                "Sentence Transformers requires explicitly trusted repository code for this model."
+                if allow_remote_code
+                else "Sentence Transformers requires repository code; enable explicit trust to use it."
+            ),
+            "sentence-transformers" if allow_remote_code else None,
+        )
     default_backend: BackendName | None = None
     if sentence.available:
         default_backend = "sentence-transformers"
@@ -310,11 +335,11 @@ def _analyze_cached(path_text: str, fingerprint: str) -> ModelCapabilities:
     return ModelCapabilities(fingerprint, sentence, transformers, default_backend, default_prompt_name, default_prompt)
 
 
-def analyze_model_capabilities(path: Path) -> ModelCapabilities:
+def analyze_model_capabilities(path: Path, *, allow_remote_code: bool = False) -> ModelCapabilities:
     """Inspect a local model without loading weights or repository Python code."""
     resolved = path.resolve()
     fingerprint = model_capability_fingerprint(resolved)
-    return _analyze_cached(str(resolved), fingerprint)
+    return _analyze_cached(str(resolved), fingerprint, allow_remote_code)
 
 
 def transformers_pooling_spec(path: Path) -> TransformersPoolingSpec | None:
