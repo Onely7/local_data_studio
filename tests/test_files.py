@@ -81,3 +81,25 @@ class RawImageFileResolutionTests(TestCase):
                 resolve_raw_image_file(str(outside_image), [allowed_root])
 
             self.assertEqual(403, raised.exception.status_code)
+
+    def test_resolve_raw_image_file_rejects_similarly_prefixed_directory(self) -> None:
+        with TemporaryDirectory() as tmpdir:
+            base = Path(tmpdir).resolve()
+            allowed_root = base / "images"
+            similarly_prefixed_root = base / "images-private"
+            allowed_root.mkdir()
+            similarly_prefixed_root.mkdir()
+            outside_image = similarly_prefixed_root / "outside.jpg"
+            outside_image.write_bytes(b"image")
+
+            with self.assertRaises(HTTPException) as raised:
+                resolve_raw_image_file(str(outside_image), [allowed_root])
+
+            self.assertEqual(403, raised.exception.status_code)
+
+    def test_resolve_raw_image_file_rejects_invalid_path(self) -> None:
+        with TemporaryDirectory() as tmpdir:
+            with self.assertRaises(HTTPException) as raised:
+                resolve_raw_image_file("\x00invalid.jpg", [Path(tmpdir)])
+
+            self.assertEqual(403, raised.exception.status_code)

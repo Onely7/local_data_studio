@@ -68,6 +68,9 @@ dev = [
   "ty",
 ]
 
+[tool.uv]
+cache-dir = ".uv-cache"
+
 [tool.hatch.build.targets.wheel]
 packages = ["src/local_data_studio"]
 
