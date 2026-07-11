@@ -9,6 +9,7 @@ from local_data_studio.app import app
 from local_data_studio.server.api.analysis import run_query
 from local_data_studio.server.api.datasets import get_schema, preview, upload_files
 from local_data_studio.server.api.jobs import get_job, start_atlas_job
+from local_data_studio.server.api.schemas import AtlasQueryRequest, AtlasRequest
 
 EXPECTED_API_OPERATIONS = {
     ("/api/column_sample", "get"),
@@ -82,3 +83,23 @@ class ApplicationContractTests(TestCase):
     def test_streaming_upload_route_remains_async(self) -> None:
         """Verify that streaming upload route remains async."""
         self.assertTrue(inspect.iscoroutinefunction(upload_files))
+
+    def test_legacy_atlas_requests_remain_valid_without_backend_options(self) -> None:
+        """Keep backend and prompt additions backward compatible for API clients."""
+        dataset_request = AtlasRequest(file="example.jsonl", column="image", model="example-model")
+        query_request = AtlasQueryRequest(
+            file="example.jsonl",
+            column="text",
+            model="example-model",
+            sql="SELECT text FROM data",
+        )
+
+        self.assertEqual("example-model", dataset_request.model)
+        self.assertEqual("SELECT text FROM data", query_request.sql)
+
+    def test_embedder_model_endpoint_keeps_models_collection(self) -> None:
+        """Keep the model collection key while individual metadata is extended."""
+        response = TestClient(app).get("/api/embedder_models")
+
+        self.assertEqual(200, response.status_code)
+        self.assertIsInstance(response.json().get("models"), list)
