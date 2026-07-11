@@ -55,8 +55,24 @@ class EmbedderCapabilityTests(TestCase):
             capabilities = analyze_model_capabilities(model)
 
         self.assertEqual("generic_fallback", capabilities.sentence_transformers.status)
-        self.assertEqual("direct", capabilities.transformers.status)
+        self.assertEqual("backbone_only", capabilities.transformers.status)
         self.assertEqual("sentence-transformers", capabilities.default_backend)
+
+    def test_image_only_transformers_model_disables_sentence_fallback(self) -> None:
+        """Do not advertise an unverified Sentence Transformers image pipeline."""
+        with TemporaryDirectory() as tmp:
+            model = Path(tmp) / "renamed-image-model"
+            _write_json(model / "config.json", {"model_type": "dinov3_vit"})
+            _write_json(model / "preprocessor_config.json", {"image_processor_type": "DINOv3ViTImageProcessorFast"})
+
+            capabilities = analyze_model_capabilities(model)
+
+        self.assertEqual("unsupported", capabilities.sentence_transformers.status)
+        self.assertFalse(capabilities.sentence_transformers.available)
+        self.assertEqual("direct", capabilities.transformers.status)
+        self.assertEqual("auto-image-pooler", capabilities.transformers.adapter)
+        self.assertTrue(capabilities.transformers.available)
+        self.assertEqual("transformers", capabilities.default_backend)
 
     def test_dense_pipeline_is_transformers_backbone_only(self) -> None:
         """Disable Transformers when saved post-processing cannot be reproduced."""
@@ -109,7 +125,7 @@ class EmbedderCapabilityTests(TestCase):
         self.assertFalse(capabilities.transformers.available)
         self.assertFalse(capabilities.sentence_transformers.available)
         self.assertTrue(trusted_capabilities.transformers.available)
-        self.assertTrue(trusted_capabilities.sentence_transformers.available)
+        self.assertFalse(trusted_capabilities.sentence_transformers.available)
 
     def test_multimodal_auto_mapping_is_detected_without_model_name_rules(self) -> None:
         """Resolve a renamed Qwen3-VL config through AutoClass and module metadata."""

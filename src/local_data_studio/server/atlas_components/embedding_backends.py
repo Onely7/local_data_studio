@@ -116,6 +116,19 @@ def load_transformers_components(model_path: Path, *, multimodal: bool, trust_re
     return model, processor, device
 
 
+def load_transformers_image_components(model_path: Path, *, trust_remote_code: bool) -> tuple[Any, Any, Any]:
+    """Load a local image AutoModel and matching image processor."""
+    import torch  # noqa: PLC0415
+    from transformers import AutoImageProcessor, AutoModel  # noqa: PLC0415
+
+    kwargs = {"local_files_only": True, "trust_remote_code": trust_remote_code}
+    processor = AutoImageProcessor.from_pretrained(model_path, **kwargs)
+    model = AutoModel.from_pretrained(model_path, **kwargs)
+    device = torch.device("cuda" if torch.cuda.is_available() else "mps" if torch.backends.mps.is_available() else "cpu")
+    model.to(device).eval()
+    return model, processor, device
+
+
 def _pil_image(value: Any) -> Image.Image:
     if isinstance(value, dict) and isinstance(value.get("bytes"), bytes | bytearray):
         return Image.open(BytesIO(bytes(value["bytes"]))).convert("RGB")
@@ -208,6 +221,31 @@ def create_transformers_pooling_embedder(
     return embed
 
 
+def create_transformers_image_pooler_embedder(model_path: Path, options: AtlasOptions) -> Any:
+    """Create an image adapter that uses the model's declared pooled output."""
+    import torch  # noqa: PLC0415
+
+    transformer_model, processor, device = load_transformers_image_components(
+        model_path,
+        trust_remote_code=options.trust_remote_code,
+    )
+
+    async def embed(batch: list[Any], *, model: str | None, embedder_args: dict) -> np.ndarray:  # noqa: ARG001
+        """Process one image batch and return the model-owned pooled vectors."""
+        values = [item.value if isinstance(item, PromptedEmbeddingValue) else item for item in batch]
+        images = [_pil_image(value) for value in values]
+        inputs = processor(images=images, return_tensors="pt")
+        inputs = {key: value.to(device) for key, value in inputs.items()}
+        with torch.no_grad():
+            outputs = transformer_model(**inputs)
+        pooled = getattr(outputs, "pooler_output", None)
+        if pooled is None:
+            raise ValueError("Transformers image model did not return the verified pooler_output")
+        return pooled.detach().cpu().float().numpy()
+
+    return embed
+
+
 def resolve_embedder_callable(modality: AtlasModality, model_path: Path, options: AtlasOptions) -> tuple[Any, dict[str, bool]]:
     """Create one capability-selected encoder callable for an Atlas job."""
     backend = AtlasEmbeddingBackend.for_model(modality=modality, model_path=model_path, options=options)
@@ -218,4 +256,6 @@ def resolve_embedder_callable(modality: AtlasModality, model_path: Path, options
         return create_transformers_pooling_embedder(modality, model_path, options, multimodal=False), embedder_args
     if backend.adapter == "auto-pooling-multimodal":
         return create_transformers_pooling_embedder(modality, model_path, options, multimodal=True), embedder_args
+    if backend.adapter == "auto-image-pooler":
+        return create_transformers_image_pooler_embedder(model_path, options), embedder_args
     return create_embedder("transformers", modality=modality, model=str(model_path), embedder_args=embedder_args), embedder_args

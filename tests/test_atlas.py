@@ -272,6 +272,7 @@ class AtlasModelDiscoveryTests(TestCase):
             model_path = model_root / "text-model"
             model_path.mkdir(parents=True)
             (model_path / "config.json").write_text("{}", encoding="utf-8")
+            (model_path / "tokenizer_config.json").write_text("{}", encoding="utf-8")
             options = AtlasOptions(
                 sample=100,
                 host="127.0.0.1",
@@ -329,6 +330,7 @@ class AtlasModelDiscoveryTests(TestCase):
             model_path = model_root / "text-model"
             model_path.mkdir(parents=True)
             (model_path / "config.json").write_text("{}", encoding="utf-8")
+            (model_path / "tokenizer_config.json").write_text("{}", encoding="utf-8")
             data_cache = root / "cache" / "atlas" / "datasets"
             cache_root = root / "cache" / "atlas"
             options = AtlasOptions(
@@ -410,6 +412,7 @@ class AtlasModelDiscoveryTests(TestCase):
             model_path = model_root / "text-model"
             model_path.mkdir(parents=True)
             (model_path / "config.json").write_text("{}", encoding="utf-8")
+            (model_path / "tokenizer_config.json").write_text("{}", encoding="utf-8")
             data_cache = root / "cache" / "atlas" / "datasets"
             cache_root = root / "cache" / "atlas"
             options = AtlasOptions(None, "127.0.0.1", 5055, None, None, None, False)
@@ -825,6 +828,7 @@ class AtlasModelDiscoveryTests(TestCase):
             model_path = model_root / "text-model"
             model_path.mkdir(parents=True)
             (model_path / "config.json").write_text("{}", encoding="utf-8")
+            (model_path / "tokenizer_config.json").write_text("{}", encoding="utf-8")
             data_cache = root / "cache" / "atlas" / "datasets"
             cache_root = root / "cache" / "atlas"
             options = AtlasOptions(

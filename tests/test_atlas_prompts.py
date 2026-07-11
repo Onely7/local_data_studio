@@ -21,6 +21,7 @@ from local_data_studio.server.atlas_components.contracts import AtlasOptions
 from local_data_studio.server.atlas_components.dataset import atlas_dataset_cache_path, prepare_atlas_dataset
 from local_data_studio.server.atlas_components.embedding_backends import (
     create_sentence_transformer_embedder,
+    create_transformers_image_pooler_embedder,
     create_transformers_pooling_embedder,
 )
 from local_data_studio.server.atlas_components.images import prepare_projection_input
@@ -246,6 +247,36 @@ class TransformersAdapterTests(TestCase):
         self.assertIsNotNone(processor.messages)
         messages = cast(list[list[dict[str, Any]]], processor.messages)
         self.assertEqual("image", messages[0][1]["content"][0]["type"])
+
+    def test_image_adapter_uses_pooler_output(self) -> None:
+        """Return the author-defined pooled image vector instead of averaging tokens."""
+
+        class FakeProcessor:
+            """Return a minimal image tensor batch."""
+
+            def __call__(self, **kwargs: object) -> dict[str, torch.Tensor]:
+                """Create one processor output tensor."""
+                return {"pixel_values": torch.ones((1, 3, 1, 1))}
+
+        class FakeModel:
+            """Expose distinct pooled and token outputs."""
+
+            def __call__(self, **inputs: torch.Tensor) -> SimpleNamespace:
+                """Return a deterministic pooled vector."""
+                return SimpleNamespace(
+                    pooler_output=torch.tensor([[5.0, 6.0]]),
+                    last_hidden_state=torch.tensor([[[100.0, 200.0]]]),
+                )
+
+        with patch(
+            "local_data_studio.server.atlas_components.embedding_backends.load_transformers_image_components",
+            return_value=(FakeModel(), FakeProcessor(), torch.device("cpu")),
+        ) as loader:
+            embed = create_transformers_image_pooler_embedder(Path("model"), _options(backend="transformers"))
+            result = asyncio.run(embed([Image.new("RGB", (1, 1))], model=None, embedder_args={}))
+
+        loader.assert_called_once()
+        np.testing.assert_array_equal([[5.0, 6.0]], result)
 
 
 class PromptCacheContractTests(TestCase):
