@@ -1,5 +1,7 @@
 import asyncio
+import json
 from pathlib import Path
+from tempfile import TemporaryDirectory
 from time import sleep
 from unittest import TestCase
 from unittest.mock import patch
@@ -12,10 +14,12 @@ from local_data_studio.app import (
     EdaRequest,
     IndexJobRequest,
     QueryRequest,
+    RawRowRequest,
     SearchJobRequest,
     StatsJobRequest,
     get_job,
     preview,
+    raw_row,
     start_atlas_job,
     start_atlas_query_job,
     start_count_job,
@@ -31,6 +35,26 @@ from local_data_studio.server.sql import load_query_dataframe_guarded
 
 
 class ApiJobTests(TestCase):
+    def test_raw_row_endpoint_returns_full_values(self) -> None:
+        with self.subTest("dataset row"):
+            long_text = "x" * 2_500
+            with TemporaryDirectory() as tmpdir:
+                path = Path(tmpdir) / "data.jsonl"
+                path.write_text(json.dumps({"text": long_text, "items": list(range(40))}) + "\n", encoding="utf-8")
+                with patch("local_data_studio.app.resolve_data_file", return_value=path) as resolve_data_file:
+                    payload = asyncio.run(raw_row(RawRowRequest(file="example.jsonl", row_id=1)))
+
+            self.assertEqual(long_text, payload["row"][0])
+            self.assertEqual(list(range(40)), payload["row"][1])
+            resolve_data_file.assert_called_once_with("example.jsonl")
+
+        with self.subTest("query result"):
+            long_text = "x" * 2_500
+            with patch("local_data_studio.app.fetch_raw_query_row_guarded", return_value=(["text"], [long_text])):
+                payload = asyncio.run(raw_row(RawRowRequest(file="example.jsonl", sql="SELECT text FROM data", offset=0)))
+
+            self.assertEqual(long_text, payload["row"][0])
+
     def test_preview_returns_page_token(self) -> None:
         payload = asyncio.run(preview(file="example.jsonl", limit=2, offset=0, page_token=None))
 

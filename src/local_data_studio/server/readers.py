@@ -6,9 +6,11 @@ import base64
 import binascii
 import csv
 import json
+import sys
 from collections.abc import Callable
 from dataclasses import dataclass
 from pathlib import Path
+from threading import Lock
 from typing import Any, Protocol
 
 from fastapi import HTTPException
@@ -31,6 +33,7 @@ LINE_DATASET_EXTENSIONS = {".jsonl", ".csv", ".tsv"}
 PARQUET_EXTENSION = ".parquet"
 TB_SAFE_EXTENSIONS = {".jsonl", ".csv", ".tsv", ".parquet"}
 JSON_NOT_TB_SAFE_WARNING = "JSON array/object files are not TB-friendly. Convert large datasets to JSONL or Parquet for bounded preview."
+CSV_FIELD_SIZE_LOCK = Lock()
 
 
 class ScanControl(Protocol):
@@ -269,9 +272,20 @@ def _read_delimited_header(path: Path, delimiter: str) -> tuple[list[str], int]:
     if not header_bytes:
         return [], 0
     header_text = header_bytes.decode("utf-8-sig", "replace").rstrip("\r\n")
-    header = next(csv.reader([header_text], delimiter=delimiter), [])
+    header = _parse_delimited_record(header_text, delimiter)
     columns = [name or f"column_{index + 1}" for index, name in enumerate(header)]
     return columns, header_end
+
+
+def _parse_delimited_record(text: str, delimiter: str) -> list[str]:
+    """Parse one CSV/TSV record without the stdlib's small default field cap."""
+    with CSV_FIELD_SIZE_LOCK:
+        previous_limit = csv.field_size_limit()
+        try:
+            csv.field_size_limit(min(len(text), sys.maxsize))
+            return next(csv.reader([text], delimiter=delimiter), [])
+        finally:
+            csv.field_size_limit(previous_limit)
 
 
 def _load_delimited_metadata(path: Path, delimiter: str) -> DatasetMetadata:
@@ -437,6 +451,107 @@ def _json_preview(file_name: str, path: Path, limit: int) -> dict[str, Any]:
         }
     )
     return response
+
+
+def _raw_row_values(value: Any) -> tuple[list[str], list[Any]]:
+    if isinstance(value, dict):
+        columns = [str(key) for key in value]
+        return columns, [value[key] for key in value]
+    return ["value"], [value]
+
+
+def _raw_line_value(path: Path, row_id: int, *, first_data_offset: int = 0) -> bytes:
+    index = LineOffsetIndex(path)
+    indexed = index.nearest_before(row_id)
+    byte_offset = max(first_data_offset, indexed.byte_offset) if indexed else first_data_offset
+    row_number = indexed.line_number if indexed else 1
+
+    with path.open("rb") as file:
+        file.seek(byte_offset)
+        while True:
+            line_start = file.tell()
+            line = file.readline()
+            if not line:
+                break
+            if not line.strip():
+                continue
+            index.record(row_number, line_start)
+            if row_number == row_id:
+                return line
+            row_number += 1
+    raise HTTPException(status_code=404, detail="row not found")
+
+
+def _raw_jsonl_row(path: Path, row_id: int) -> tuple[list[str], list[Any]]:
+    line = _raw_line_value(path, row_id)
+    try:
+        value = json.loads(line)
+    except json.JSONDecodeError as exc:
+        raise HTTPException(status_code=400, detail="invalid jsonl format") from exc
+    return _raw_row_values(value)
+
+
+def _raw_delimited_row(path: Path, row_id: int, delimiter: str) -> tuple[list[str], list[Any]]:
+    columns, first_data_offset = _read_delimited_header(path, delimiter)
+    line = _raw_line_value(path, row_id, first_data_offset=first_data_offset)
+    text = line.decode("utf-8-sig", "replace").rstrip("\r\n")
+    values = _parse_delimited_record(text, delimiter)
+    return columns, values + [None] * max(0, len(columns) - len(values))
+
+
+def _raw_parquet_row(path: Path, row_id: int) -> tuple[list[str], list[Any]]:
+    import pyarrow.parquet as pq  # noqa: PLC0415
+
+    parquet_file = pq.ParquetFile(path)
+    columns = parquet_file.schema_arrow.names
+    target_offset = row_id - 1
+    for row_group in range(parquet_file.num_row_groups):
+        group_rows = parquet_file.metadata.row_group(row_group).num_rows
+        if target_offset >= group_rows:
+            target_offset -= group_rows
+            continue
+        for batch in parquet_file.iter_batches(batch_size=1, row_groups=[row_group], columns=columns):
+            if target_offset:
+                target_offset -= batch.num_rows
+                continue
+            record = batch.to_pylist()[0]
+            return columns, [record.get(column) for column in columns]
+    raise HTTPException(status_code=404, detail="row not found")
+
+
+def _raw_json_row(path: Path, row_id: int) -> tuple[list[str], list[Any]]:
+    if path.stat().st_size > MAX_JSON_PREVIEW_BYTES:
+        raise HTTPException(status_code=400, detail=JSON_NOT_TB_SAFE_WARNING)
+    try:
+        with path.open("r", encoding="utf-8") as file:
+            payload = json.load(file)
+    except json.JSONDecodeError as exc:
+        raise HTTPException(status_code=400, detail="invalid json format") from exc
+    if isinstance(payload, list):
+        if row_id > len(payload):
+            raise HTTPException(status_code=404, detail="row not found")
+        return _raw_row_values(payload[row_id - 1])
+    if row_id != 1:
+        raise HTTPException(status_code=404, detail="row not found")
+    return _raw_row_values(payload)
+
+
+def fetch_raw_row(path: Path, row_id: int) -> tuple[list[str], list[Any]]:
+    """Read one user-selected row without Preview response truncation."""
+    if row_id < 1:
+        raise HTTPException(status_code=400, detail="row_id must be positive")
+    suffix = path.suffix.lower()
+    if suffix == ".jsonl":
+        return _raw_jsonl_row(path, row_id)
+    if suffix == ".csv":
+        return _raw_delimited_row(path, row_id, ",")
+    if suffix == ".tsv":
+        return _raw_delimited_row(path, row_id, "\t")
+    if suffix == ".parquet":
+        return _raw_parquet_row(path, row_id)
+    if suffix == ".json":
+        return _raw_json_row(path, row_id)
+    raise HTTPException(status_code=400, detail="raw row retrieval is not supported for this file format")
 
 
 def _jsonl_preview(file_name: str, path: Path, limit: int, offset: int, page_token: str | None, deleted_ids: set[int]) -> dict[str, Any]:
@@ -791,15 +906,18 @@ def _search_jsonl(
     row_number = 0
     size = max(path.stat().st_size, 1)
     columns_truncated = False
+    index = LineOffsetIndex(path)
     with path.open("rb") as file:
         while len(rows) < limit:
             control.check_cancelled()
+            line_start = file.tell()
             line = file.readline()
             if not line:
                 return columns, rows, row_ids, False, _merge_warnings(metadata.warning, COLUMN_LIMIT_WARNING if columns_truncated else None)
             if not line.strip():
                 continue
             row_number += 1
+            index.record(row_number, line_start)
             if row_number in deleted_ids:
                 continue
             text = line.decode("utf-8", "replace")
@@ -832,16 +950,19 @@ def _search_delimited(
     lowered = query.lower()
     row_number = 0
     size = max(path.stat().st_size, 1)
+    index = LineOffsetIndex(path)
     with path.open("rb") as file:
         file.seek(first_data_offset)
         while len(rows) < limit:
             control.check_cancelled()
+            line_start = file.tell()
             line = file.readline()
             if not line:
                 return columns, rows, row_ids, False, warning
             if not line.strip():
                 continue
             row_number += 1
+            index.record(row_number, line_start)
             if row_number in deleted_ids:
                 continue
             text = line.decode("utf-8-sig", "replace").rstrip("\r\n")

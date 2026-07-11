@@ -108,6 +108,26 @@ def _execute_query_worker(
     return build_table_response(file_name, columns, rows, limit_value, offset_value, [])
 
 
+def _fetch_raw_query_row_worker(
+    *,
+    path: Path,
+    sql: str,
+    offset: int,
+    deleted_ids: list[int],
+    connection_holder: dict[str, Any],
+) -> tuple[list[str], list[Any]]:
+    with open_connection() as connection:
+        connection_holder["connection"] = connection
+        configure_duckdb_limits(connection)
+        create_data_view(connection, path, deleted_ids)
+        result = connection.execute(f"SELECT * FROM ({sql}) AS q LIMIT 1 OFFSET {offset}")
+        row = result.fetchone()
+        if row is None:
+            raise HTTPException(status_code=404, detail="row not found")
+        columns = [description[0] for description in result.description or []]
+    return columns, list(row)
+
+
 def _wait_for_duckdb_result(
     *,
     future: Future[Any],
@@ -173,6 +193,33 @@ def execute_query_guarded(
             warning = "SQL Console used timeout, memory, and scan-risk guards for this large dataset."
             response["warning"] = f"{existing} {warning}" if isinstance(existing, str) and existing else warning
         return response
+    finally:
+        executor.shutdown(wait=False, cancel_futures=True)
+
+
+def fetch_raw_query_row_guarded(*, path: Path, sql: str, offset: int) -> tuple[list[str], list[Any]]:
+    """Read one SQL Console result row with the same timeout and memory guards."""
+    if offset < 0:
+        raise HTTPException(status_code=400, detail="offset must not be negative")
+    guarded_sql = guard_select_sql_for_dataset(path, sql)
+    deleted_ids = deleted_row_ids_for(path)
+    connection_holder: dict[str, Any] = {}
+    executor = ThreadPoolExecutor(max_workers=1, thread_name_prefix="local-data-studio-raw-query")
+    future = executor.submit(
+        _fetch_raw_query_row_worker,
+        path=path,
+        sql=guarded_sql,
+        offset=offset,
+        deleted_ids=deleted_ids,
+        connection_holder=connection_holder,
+    )
+    try:
+        return _wait_for_duckdb_result(
+            future=future,
+            connection_holder=connection_holder,
+            context=None,
+            progress_message="Loading raw query row",
+        )
     finally:
         executor.shutdown(wait=False, cancel_futures=True)
 

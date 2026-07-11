@@ -1,7 +1,7 @@
 from unittest import TestCase
 
 from local_data_studio.server.config import MAX_CELL_CHARS, MAX_SEQ_ITEMS
-from local_data_studio.server.serialization import serialize_value
+from local_data_studio.server.serialization import serialize_raw_value, serialize_value
 
 
 class SerializationTests(TestCase):
@@ -55,3 +55,19 @@ class SerializationTests(TestCase):
         serialized = serialize_value(value)
 
         self.assertIn("truncated", serialized)
+
+    def test_serialize_raw_value_never_uses_preview_limits(self) -> None:
+        long_text = "x" * (MAX_CELL_CHARS + 1)
+        value = {
+            "text": long_text,
+            "items": list(range(MAX_SEQ_ITEMS + 2)),
+            "payload": {f"key_{index}": index for index in range(MAX_SEQ_ITEMS + 2)},
+            "bytes": b"x" * (MAX_CELL_CHARS + 1),
+        }
+
+        serialized = serialize_raw_value(value)
+
+        self.assertEqual(long_text, serialized["text"])
+        self.assertEqual(value["items"], serialized["items"])
+        self.assertEqual(value["payload"], serialized["payload"])
+        self.assertEqual(value["bytes"].hex(), serialized["bytes"])

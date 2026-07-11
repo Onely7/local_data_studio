@@ -57,11 +57,12 @@ from .server.readers import (
     build_line_index_with_progress,
     count_rows_with_progress,
     fetch_preview_page,
+    fetch_raw_row,
     load_dataset_metadata,
     search_dataset,
 )
-from .server.serialization import serialize_value
-from .server.sql import execute_query_guarded, is_large_dataset
+from .server.serialization import serialize_raw_value, serialize_value
+from .server.sql import execute_query_guarded, fetch_raw_query_row_guarded, is_large_dataset
 from .server.stats import compute_column_stats
 
 app = FastAPI(title="Data Viewer")
@@ -96,6 +97,13 @@ class QueryRequest(BaseModel):
     file: str
     sql: str
     limit: int | None = None
+    offset: int | None = None
+
+
+class RawRowRequest(BaseModel):
+    file: str
+    row_id: int | None = None
+    sql: str | None = None
     offset: int | None = None
 
 
@@ -525,6 +533,26 @@ async def preview(
     path = resolve_data_file(file)
     deleted_ids = deleted_row_ids_for(path)
     return fetch_preview_page(file, path, limit=limit, offset=offset, page_token=page_token, deleted_ids=deleted_ids)
+
+
+@app.post("/api/raw_row")
+async def raw_row(payload: RawRowRequest) -> dict[str, Any]:
+    """Return one explicitly requested row without Preview cell truncation."""
+    path = resolve_data_file(payload.file)
+    if payload.row_id is not None:
+        columns, values = fetch_raw_row(path, payload.row_id)
+        row_id = payload.row_id
+    elif payload.sql:
+        columns, values = fetch_raw_query_row_guarded(path=path, sql=payload.sql, offset=max(0, payload.offset or 0))
+        row_id = None
+    else:
+        raise HTTPException(status_code=400, detail="row_id or sql is required")
+    return {
+        "file": payload.file,
+        "row_id": row_id,
+        "columns": columns,
+        "row": [serialize_raw_value(value) for value in values],
+    }
 
 
 @app.get("/api/count")
