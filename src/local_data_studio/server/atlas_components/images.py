@@ -24,6 +24,7 @@ from .contracts import (
     AtlasModality,
     AtlasProjectionCoordinates,
 )
+from .prompts import CompiledPromptTemplate, PromptedEmbeddingValue
 
 IMAGE_REFERENCE_PATTERN = re.compile(r"\.(png|jpg|jpeg|gif|webp|svg)(?:\?.*)?$", re.IGNORECASE)
 IMAGE_HEX_PREFIXES = ("89504e47", "ffd8ff", "47494638", "52494646")
@@ -308,7 +309,13 @@ def image_like_columns(data_frame: Any, *, sample_size: int = 50) -> set[str]:
     return columns
 
 
-def prepare_image_projection_input(data_frame: Any, *, column: str, dataset_path: Path) -> tuple[Any, Any]:
+def prepare_image_projection_input(
+    data_frame: Any,
+    *,
+    column: str,
+    dataset_path: Path,
+    prompt_template: CompiledPromptTemplate | None = None,
+) -> tuple[Any, Any]:
     """Build encoder-only image bytes while preserving original display values.
 
     Rows that cannot be decoded are excluded from both returned frames so
@@ -319,7 +326,7 @@ def prepare_image_projection_input(data_frame: Any, *, column: str, dataset_path
     except Exception as exc:
         raise ValueError(f"failed to read image column {column}: {exc}") from exc
     kept_indices: list[int] = []
-    embedding_items: list[dict[str, bytes]] = []
+    embedding_items: list[Any] = []
     first_error: str | None = None
     for index, value in enumerate(values):
         try:
@@ -329,7 +336,11 @@ def prepare_image_projection_input(data_frame: Any, *, column: str, dataset_path
                 first_error = f"row {index + 1}: {exc}"
             continue
         kept_indices.append(index)
-        embedding_items.append({"bytes": image_bytes})
+        embedding_value: Any = {"bytes": image_bytes}
+        if prompt_template is not None:
+            prompt = prompt_template.render(data_frame.iloc[index].to_dict())
+            embedding_value = PromptedEmbeddingValue(embedding_value, prompt)
+        embedding_items.append(embedding_value)
     if not kept_indices:
         raise ValueError(f"no readable images in column {column}; first error: {first_error or 'no image values found'}")
     output_frame = data_frame.iloc[kept_indices].copy().reset_index(drop=True)
@@ -342,14 +353,30 @@ def prepare_projection_input(
     column: str,
     modality: AtlasModality,
     dataset_path: Path,
+    prompt_template: CompiledPromptTemplate | None = None,
 ) -> tuple[Any, str, Any]:
     """Separate encoder input from an Atlas display frame with aligned rows."""
     if modality == "text":
-        frame = pd.DataFrame({ATLAS_EMBED_INPUT_COLUMN: data_frame[column].map(text_for_embedding)})
+        if prompt_template is None:
+            values = data_frame[column].map(text_for_embedding)
+        elif prompt_template.has_placeholders:
+            values = data_frame.apply(
+                lambda row: PromptedEmbeddingValue(prompt_template.render(row.to_dict()), ""),
+                axis=1,
+            )
+        else:
+            prompt = prompt_template.render({})
+            values = data_frame[column].map(lambda value: PromptedEmbeddingValue(text_for_embedding(value), prompt))
+        frame = pd.DataFrame({ATLAS_EMBED_INPUT_COLUMN: values})
         return frame, ATLAS_EMBED_INPUT_COLUMN, data_frame
     if modality != "image":
         return data_frame, column, data_frame
-    frame, output = prepare_image_projection_input(data_frame, column=column, dataset_path=dataset_path)
+    frame, output = prepare_image_projection_input(
+        data_frame,
+        column=column,
+        dataset_path=dataset_path,
+        prompt_template=prompt_template,
+    )
     return frame, ATLAS_EMBED_INPUT_COLUMN, output
 
 

@@ -40,6 +40,7 @@ from .images import (
     prepare_projection_input,
 )
 from .projection import effective_embedder_for_modality, project_atlas_frame
+from .prompts import PromptTemplateError, compile_prompt_template
 
 ATLAS_DATASET_CACHE_VERSION = 10
 
@@ -101,6 +102,8 @@ def atlas_dataset_cache_path(
         "modality": modality,
         "model": _model_cache_identity(model_path),
         "embedder": effective_embedder_for_modality(modality, model_path, options),
+        "prompt": options.prompt,
+        "capability_fingerprint": options.capability_fingerprint,
         "sample": options.sample,
         "batch_size": options.batch_size,
         "text_max_chars": ATLAS_TEXT_MAX_CHARS,
@@ -148,11 +151,17 @@ def prepare_atlas_dataset(
         prune_cache_dir(ATLAS_CACHE_ROOT, ATLAS_CACHE_MAX_BYTES)
         try:
             data_frame = load_datasets([str(path)], query=sql, sample=options.sample)
+            prompt_template = (
+                compile_prompt_template(options.prompt, [str(column_name) for column_name in data_frame.columns], ATLAS_TEXT_MAX_CHARS)
+                if options.prompt
+                else None
+            )
             projection_input, input_column, output_frame = prepare_projection_input(
                 data_frame,
                 column=column,
                 modality=modality,
                 dataset_path=path,
+                prompt_template=prompt_template,
             )
             coordinates = project_atlas_frame(
                 projection_input,
@@ -169,6 +178,8 @@ def prepare_atlas_dataset(
             tmp_path.replace(cache_path)
         except HTTPException:
             raise
+        except PromptTemplateError as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
         except Exception as exc:
             raise HTTPException(status_code=500, detail=f"Atlas dataset cache generation failed: {exc}") from exc
         finally:
