@@ -3,12 +3,13 @@
 from __future__ import annotations
 
 import hashlib
+import inspect
 import json
 from dataclasses import dataclass
 from functools import lru_cache
 from importlib.metadata import PackageNotFoundError, version
 from pathlib import Path
-from typing import Any, Literal
+from typing import Any, Literal, cast
 
 BackendName = Literal["sentence-transformers", "transformers"]
 SUPPORTED_POOLING_MODES = {"cls", "max", "mean", "mean_sqrt_len_tokens", "weightedmean", "lasttoken"}
@@ -24,6 +25,7 @@ CONFIG_FILES = (
 WEIGHT_FILES = ("model.safetensors", "pytorch_model.bin")
 MAX_CONFIG_BYTES = 2 * 1024 * 1024
 DEFAULT_PROMPT_PREVIEW_CHARS = 240
+CAPABILITY_SCHEMA_VERSION = 2
 
 
 @dataclass(frozen=True, slots=True)
@@ -97,6 +99,7 @@ def library_versions() -> dict[str, str]:
 def model_capability_fingerprint(path: Path) -> str:
     """Fingerprint relevant configuration contents and weight file metadata."""
     digest = hashlib.sha256()
+    digest.update(f"capability-schema:{CAPABILITY_SCHEMA_VERSION}".encode())
     for relative in CONFIG_FILES:
         candidate = path / relative
         digest.update(relative.encode())
@@ -177,7 +180,23 @@ def _sentence_module_analysis(path: Path) -> tuple[str, bool, tuple[str, ...], s
     if not isinstance(modules, list) or not modules:
         if (path / "config_sentence_transformers.json").exists():
             return "metadata_only", False, (), "Sentence Transformers metadata exists without modules.json.", None
-        return "generic_fallback", True, _fallback_modalities(path), "Sentence Transformers can add default pooling to this Transformers model.", None
+        has_tokenizer = (path / "tokenizer_config.json").is_file()
+        has_image_processor = (path / "preprocessor_config.json").is_file()
+        if has_tokenizer and not has_image_processor:
+            return (
+                "generic_fallback",
+                True,
+                ("text",),
+                "Sentence Transformers can wrap this tokenizer-backed text model with default pooling.",
+                None,
+            )
+        return (
+            "unsupported",
+            False,
+            (),
+            "No native modules.json defines a Sentence Transformers pipeline for this non-text or unknown model.",
+            None,
+        )
     normalized: list[dict[str, Any]] = []
     for expected_index, module in enumerate(modules):
         if not isinstance(module, dict):
@@ -236,20 +255,25 @@ def _resolve_auto_config(path: Path) -> tuple[Any | None, bool]:
         return None, remote_code
 
 
-def _has_auto_model(config: Any) -> tuple[bool, bool]:
+def _has_auto_model(config: Any) -> tuple[bool, bool, bool]:
     try:
         from transformers import AutoModel, AutoModelForMultimodalLM  # noqa: PLC0415
 
-        AutoModel._model_mapping[type(config)]
+        model_class = cast(Any, AutoModel._model_mapping[type(config)])
         direct = True
+        try:
+            output_annotation = inspect.signature(model_class.forward).return_annotation
+            pooled_output = "WithPooling" in str(output_annotation)
+        except (AttributeError, TypeError, ValueError):
+            pooled_output = False
         try:
             AutoModelForMultimodalLM._model_mapping[type(config)]
             multimodal = True
         except KeyError:
             multimodal = False
-        return direct, multimodal
+        return direct, multimodal, pooled_output
     except (ImportError, KeyError):
-        return False, False
+        return False, False, False
 
 
 def _transformers_analysis(
@@ -276,12 +300,20 @@ def _transformers_analysis(
                 "pipeline" if allow_remote_code else None,
             )
         return BackendCapability(status, False, (), "AutoConfig cannot resolve the local model.")
-    direct, multimodal = _has_auto_model(config)
+    direct, multimodal, pooled_output = _has_auto_model(config)
     if not direct:
         return BackendCapability("unsupported", False, (), "No installed Transformers AutoModel mapping accepts this config.")
     modalities = sentence_modalities if sentence_status == "native" else _fallback_modalities(path)
     if modules is None:
-        adapter = "pipeline"
+        if modalities == ("image",) and pooled_output:
+            adapter = "auto-image-pooler"
+        else:
+            return BackendCapability(
+                "backbone_only",
+                False,
+                modalities,
+                "AutoModel can load the backbone, but no verified embedding pooling contract is available.",
+            )
     else:
         unsupported_modules = [module for module in modules if not str(module.get("type", "")).endswith(("Transformer", "Pooling", "Normalize"))]
         pooling = _pooling_modes(path, modules)
