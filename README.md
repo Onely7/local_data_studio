@@ -107,7 +107,7 @@ Path precedence is: CLI option, OS environment variable, config file, `.env`, wo
     OPENAI_MODEL=gpt-5.2
 
     # EDA Settings
-    EDA_ROW_LIMIT=10000000
+    EDA_ROW_LIMIT=50000
     EDA_PROFILE_MODE=minimal
     EDA_CELL_MAX_CHARS=5000
     EDA_NESTED_POLICY=stringify
@@ -141,7 +141,7 @@ Path precedence is: CLI option, OS environment variable, config file, `.env`, wo
    - `OPENAI_API_KEY`: API key to enable LLM-based SQL generation.
    - `OPENAI_BASE_URL`: Endpoint for an OpenAI-compatible API.
    - `OPENAI_MODEL`: OpenAI model name to use.
-   - `EDA_ROW_LIMIT`: Maximum number of rows to load when generating an EDA report.
+   - `EDA_ROW_LIMIT`: Server-side row limit for dataset and query-result EDA reports. Configure it through the environment or `.env`; the UI does not override it. Values are bounded to 100-50,000 rows.
    - `EDA_PROFILE_MODE`: Either `minimal` or `maximal`. `minimal` generates a lightweight report, while `maximal` includes more detailed statistics but takes longer.
    - `EDA_CELL_MAX_CHARS`: Maximum number of characters to display for long strings in EDA. Excess text is truncated as `... (truncated)`.
    - `EDA_NESTED_POLICY`: How to handle nested types (list/struct/object/binary, etc.). `stringify` keeps them as strings, and `drop` removes the corresponding columns.
@@ -203,7 +203,7 @@ Open [http://127.0.0.1:8000](http://127.0.0.1:8000) to view the Local Data Studi
 4. **EDA Report**
    Run EDA to generate and cache a report for the dataset sample. Use **Run EDA on Query Results** to profile the current SQL Console query results instead.  
    Dataset reports are cached under `./cache/eda` based on {file fingerprint, number of samples, `EDA_PROFILE_MODE`}. Query-result reports are cached separately based on {file fingerprint, SQL, number of samples, `EDA_PROFILE_MODE`}. The combined EDA cache defaults to 1 GiB and removes the oldest reports first when it exceeds `EDA_CACHE_MAX_BYTES`.
-   You can adjust the sample count with `EDA_ROW_LIMIT` and UI-side settings.  
+   Configure the row limit with `EDA_ROW_LIMIT` in the environment or `.env`. The UI does not override this server-side setting.
    <img src="images/local_data_studio_05.png" alt="local data studio 05" width=45%> <img src="images/local_data_studio_06.png" alt="local data studio 06" width=45%>
 
 5. **Visualize Embedding**
@@ -227,6 +227,7 @@ Open [http://127.0.0.1:8000](http://127.0.0.1:8000) to view the Local Data Studi
 - Local encoder model files under `models/embedder` or a configured models directory are intentionally not bundled. Only the directory placeholder files are tracked; download or place model files locally on each machine.
 - Cache files are separated under `./cache/metadata`, `./cache/index`, `./cache/stats`, `./cache/count`, `./cache/search`, and `./cache/eda`. EDA reports have a configurable combined capacity (`EDA_CACHE_MAX_BYTES`) and are pruned oldest-first; fingerprint-based caches are invalidated by file path, size, and modification time where applicable.
 - `Run EDA on Query Results` excludes helper columns such as `rn` and `__rowid` from the generated report.
+- Feedback shown after Count Rows, EDA, and Atlas actions uses one compact status style so results remain distinguishable without overpowering the surrounding controls.
 - TB-scale `.json` arrays are not recommended. Prefer JSONL or Parquet for responsive preview.
 - `Delete from file` modifies the actual file, so make backups as needed.
 - If `ALLOW_DELETE_DATA=false`, only session-level hiding is allowed (the actual file will not be modified).
