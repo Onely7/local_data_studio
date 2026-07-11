@@ -64,10 +64,11 @@ class AtlasModelDiscoveryTests(TestCase):
             with patch("local_data_studio.server.atlas_components.service.EMBEDDER_MODELS_DIR", root):
                 models = discover_embedder_models()
 
-        self.assertEqual(
-            [{"name": "Qwen/Qwen3-Embedding-0.6B", "value": "Qwen/Qwen3-Embedding-0.6B", "path": str(model)}],
-            models,
-        )
+        self.assertEqual(1, len(models))
+        self.assertEqual("Qwen/Qwen3-Embedding-0.6B", models[0]["name"])
+        self.assertEqual(str(model), models[0]["path"])
+        self.assertIn("backends", models[0])
+        self.assertIn("capability_fingerprint", models[0])
 
     def test_resolve_rejects_paths_outside_model_root(self) -> None:
         """Verify that resolve rejects paths outside model root."""

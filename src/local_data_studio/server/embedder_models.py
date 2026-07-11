@@ -1,8 +1,11 @@
 """Lightweight discovery helpers for locally installed embedder models."""
 
 from pathlib import Path
+from typing import Any
 
 from fastapi import HTTPException
+
+from .embedder_capabilities import analyze_model_capabilities
 
 MODEL_MARKER_FILES = (
     "config.json",
@@ -26,10 +29,10 @@ def model_label(path: Path, root: Path) -> str:
     return path.relative_to(root).as_posix()
 
 
-def discover_embedder_models(root: Path) -> list[dict[str, str]]:
+def discover_embedder_models(root: Path) -> list[dict[str, Any]]:
     """Return locally installed encoder models without importing the ML stack."""
     root.mkdir(parents=True, exist_ok=True)
-    models: list[dict[str, str]] = []
+    models: list[dict[str, Any]] = []
     discovered_roots: list[Path] = []
     paths = sorted(
         root.rglob("*"),
@@ -42,13 +45,7 @@ def discover_embedder_models(root: Path) -> list[dict[str, str]]:
             continue
         discovered_roots.append(path)
         label = model_label(path, root)
-        models.append(
-            {
-                "name": label,
-                "value": label,
-                "path": str(path),
-            }
-        )
+        models.append({"name": label, "value": label, "path": str(path), **analyze_model_capabilities(path).to_response()})
     return models
 
 
