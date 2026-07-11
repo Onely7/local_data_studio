@@ -1,0 +1,76 @@
+"""Immutable contracts shared by Atlas runtime components."""
+
+from __future__ import annotations
+
+from dataclasses import dataclass
+from pathlib import Path
+
+from ..config import (
+    ATLAS_ANCHOR_SAMPLE,
+    ATLAS_BATCH_SIZE,
+    ATLAS_EMBEDDING_DTYPE,
+    ATLAS_HOST,
+    ATLAS_IMAGE_EMBEDDER,
+    ATLAS_PORT,
+    ATLAS_PROJECTION_MODE,
+    ATLAS_SAMPLE,
+    ATLAS_TEXT_EMBEDDER,
+    ATLAS_TRUST_REMOTE_CODE,
+)
+
+AtlasModality = str
+ATLAS_PROJECTION_X = "__local_data_studio_atlas_x"
+ATLAS_PROJECTION_Y = "__local_data_studio_atlas_y"
+ATLAS_PROJECTION_NEIGHBORS = "__local_data_studio_atlas_neighbors"
+ATLAS_EMBED_INPUT_COLUMN = "__local_data_studio_atlas_embed_input"
+
+
+@dataclass(frozen=True, slots=True)
+class AtlasOptions:
+    """Resolved options for launching Embedding Atlas."""
+
+    sample: int | None
+    host: str
+    port: int
+    batch_size: int | None
+    text_embedder: str | None
+    image_embedder: str | None
+    trust_remote_code: bool
+    embedding_dtype: str = "float32"
+    projection_mode: str = "full"
+    anchor_sample: int | None = None
+
+    @classmethod
+    def from_request(cls, sample: int | None = None) -> AtlasOptions:
+        requested_sample = sample if sample is not None else ATLAS_SAMPLE
+        anchor_sample = ATLAS_ANCHOR_SAMPLE if ATLAS_ANCHOR_SAMPLE > 0 else None
+        return cls(
+            sample=requested_sample if requested_sample and requested_sample > 0 else None,
+            host=ATLAS_HOST,
+            port=ATLAS_PORT,
+            batch_size=ATLAS_BATCH_SIZE if ATLAS_BATCH_SIZE > 0 else None,
+            text_embedder=ATLAS_TEXT_EMBEDDER,
+            image_embedder=ATLAS_IMAGE_EMBEDDER,
+            trust_remote_code=ATLAS_TRUST_REMOTE_CODE,
+            embedding_dtype=ATLAS_EMBEDDING_DTYPE,
+            projection_mode=ATLAS_PROJECTION_MODE,
+            anchor_sample=anchor_sample,
+        )
+
+
+@dataclass(frozen=True, slots=True)
+class AtlasPreparedDataset:
+    """Materialized Atlas input with precomputed projection columns."""
+
+    path: Path
+    x: str
+    y: str
+    neighbors: str | None
+    cache_hit: bool
+
+
+@dataclass(frozen=True, slots=True)
+class AtlasProjectionCoordinates:
+    """Two-dimensional coordinates produced by an Atlas projection."""
+
+    values: object

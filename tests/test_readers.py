@@ -1,13 +1,17 @@
 import json
+from io import BytesIO
 from pathlib import Path
 from tempfile import TemporaryDirectory
 from unittest import TestCase
+from unittest.mock import patch
 
 import pyarrow as pa
 import pyarrow.parquet as pq
 from fastapi import HTTPException
 
 from local_data_studio.server.config import MAX_COLUMNS, MAX_JSON_PREVIEW_BYTES, MAX_OFFSET_FALLBACK
+from local_data_studio.server.dataset_readers import line as line_reader
+from local_data_studio.server.dataset_readers import parquet as parquet_reader
 from local_data_studio.server.readers import count_rows_with_progress, fetch_preview_page, fetch_raw_row, load_dataset_metadata, search_dataset
 
 
@@ -20,6 +24,118 @@ class _NoCancelControl:
 
 
 class ReaderPreviewTests(TestCase):
+    def test_jsonl_schema_stops_at_byte_budget_when_rows_are_invalid(self) -> None:
+        class TrackingBytesIO(BytesIO):
+            def close(self) -> None:
+                return None
+
+        invalid_line = b"x" * 1023 + b"\n"
+        stream = TrackingBytesIO(invalid_line * (line_reader.JSONL_SCHEMA_MAX_BYTES // len(invalid_line) + 2))
+
+        with patch.object(Path, "open", return_value=stream):
+            metadata = line_reader._create_jsonl_metadata(Path("unused.jsonl"))
+
+        self.assertEqual([], metadata.columns)
+        self.assertLessEqual(stream.tell(), line_reader.JSONL_SCHEMA_MAX_BYTES + len(invalid_line))
+
+    def test_delimited_reader_supports_fields_larger_than_128_kib(self) -> None:
+        with TemporaryDirectory() as tmpdir:
+            path = Path(tmpdir) / "large.csv"
+            long_text = "x" * (129 * 1024)
+            path.write_text(f"name,description\nAda,{long_text}\n", encoding="utf-8")
+
+            metadata = load_dataset_metadata(path, use_cache=False)
+            preview = fetch_preview_page("large.csv", path, limit=1)
+            columns, raw = fetch_raw_row(path, 1)
+            search = search_dataset("large.csv", path, query="xxx", limit=1, control=_NoCancelControl())
+
+            self.assertEqual(["name", "description"], [column["name"] for column in metadata.columns])
+            self.assertIn("truncated", preview["rows"][0][1])
+            self.assertEqual(["name", "description"], columns)
+            self.assertEqual(long_text, raw[1])
+            self.assertEqual([1], search["row_ids"])
+
+    def test_completed_line_index_is_reused_without_reading_dataset(self) -> None:
+        with TemporaryDirectory() as tmpdir:
+            path = Path(tmpdir) / "data.jsonl"
+            path.write_text('{"id": 1}\n{"id": 2}\n', encoding="utf-8")
+            first = line_reader.build_line_index_with_progress(path, _NoCancelControl())
+
+            with patch.object(Path, "open", side_effect=AssertionError("dataset should not be scanned")):
+                second = line_reader.build_line_index_with_progress(path, _NoCancelControl())
+
+            self.assertEqual(first["row_count"], second["row_count"])
+            self.assertTrue(second["index"]["complete"])
+
+    def test_line_index_checkpoints_are_saved_as_a_batch(self) -> None:
+        class FakeIndex:
+            stride = 2
+
+            def __init__(self) -> None:
+                self.batches: list[list[tuple[int, int]]] = []
+
+            def status(self) -> dict[str, int | bool | None]:
+                return {"complete": False, "row_count": None, "byte_count": None, "max_indexed_line": None, "max_indexed_byte": None}
+
+            def record_checkpoints(self, checkpoints: list[tuple[int, int]]) -> None:
+                self.batches.append(list(checkpoints))
+
+            def mark_complete(self, *, row_count: int, byte_count: int) -> None:
+                return None
+
+        with TemporaryDirectory() as tmpdir:
+            path = Path(tmpdir) / "data.jsonl"
+            path.write_text("".join(f'{{"id": {index}}}\n' for index in range(10)), encoding="utf-8")
+            fake_index = FakeIndex()
+            with patch.object(line_reader, "LineOffsetIndex", return_value=fake_index):
+                result = line_reader.build_line_index_with_progress(path, _NoCancelControl())
+
+            self.assertEqual(10, result["row_count"])
+            self.assertEqual(1, len(fake_index.batches))
+            self.assertEqual([2, 4, 6, 8, 10], [line_number for line_number, _ in fake_index.batches[0]])
+
+    def test_parquet_raw_row_uses_bounded_record_batches(self) -> None:
+        class FakeMetadata:
+            def row_group(self, row_group: int):  # noqa: ANN001, ARG002
+                return type("Group", (), {"num_rows": 100})()
+
+        class FakeParquet:
+            num_row_groups = 1
+            metadata = FakeMetadata()
+            schema_arrow = type("Schema", (), {"names": ["id"]})()
+
+            def __init__(self) -> None:
+                self.batch_sizes: list[int] = []
+
+            def iter_batches(self, *, batch_size: int, row_groups: list[int], columns: list[str]):  # noqa: ANN001, ARG002
+                self.batch_sizes.append(batch_size)
+                yield pa.RecordBatch.from_pylist([{"id": index} for index in range(100)])
+
+        fake = FakeParquet()
+        with patch("pyarrow.parquet.ParquetFile", return_value=fake):
+            columns, values = parquet_reader.raw_row(Path("data.parquet"), 75)
+
+        self.assertEqual(["id"], columns)
+        self.assertEqual([74], values)
+        self.assertGreater(fake.batch_sizes[0], 1)
+
+    def test_parquet_offset_cursor_uses_metadata_and_binary_search(self) -> None:
+        class FakeMetadata:
+            def __init__(self) -> None:
+                self.calls = 0
+
+            def row_group(self, row_group: int):  # noqa: ANN001, ARG002
+                self.calls += 1
+                return type("Group", (), {"num_rows": 100_000})()
+
+        metadata = FakeMetadata()
+        fake = type("Parquet", (), {"num_row_groups": 10, "metadata": metadata})()
+
+        row_group, row_offset, absolute_row = parquet_reader._cursor_for_offset(fake, 750_000, {2, 500_000})
+
+        self.assertEqual((7, 50_002, 750_003), (row_group, row_offset, absolute_row))
+        self.assertEqual(10, metadata.calls)
+
     def test_raw_jsonl_row_is_not_limited_like_preview(self) -> None:
         with TemporaryDirectory() as tmpdir:
             path = Path(tmpdir) / "data.jsonl"
