@@ -142,21 +142,39 @@ def is_path_within_roots(path: Path, roots: Sequence[Path]) -> bool:
     return any(_is_path_within(path, root) for root in resolved_roots)
 
 
+def _resolved_path_within_allowed_root(requested_path: str, allowed_roots: Sequence[Path]) -> Path | None:
+    """Normalize a requested path and return it only when it is below an allowed root."""
+    try:
+        resolved_path = os.path.realpath(os.path.expanduser(requested_path))
+    except (OSError, ValueError):
+        return None
+    for root in allowed_roots:
+        try:
+            resolved_root = os.path.realpath(os.fspath(root))
+        except (OSError, ValueError):
+            continue
+        if not resolved_path.startswith(resolved_root):
+            continue
+        relative_path = resolved_path[len(resolved_root) :]
+        if not relative_path or relative_path.startswith(os.sep):
+            return Path(resolved_path)
+    return None
+
+
 def resolve_raw_image_file(raw_path: str | None, allowed_roots: Sequence[Path]) -> Path:
     """Resolve a local image path that may be safely served by /api/raw."""
     requested_path = _strip_file_url_scheme((raw_path or "").strip())
     if not requested_path:
         raise HTTPException(status_code=400, detail="path is required")
 
-    resolved = _resolve_path_best_effort(Path(requested_path))
+    resolved = _resolved_path_within_allowed_root(requested_path, allowed_roots)
+    if resolved is None:
+        raise HTTPException(status_code=403, detail="path is outside allowed roots")
 
     if not resolved.exists() or not resolved.is_file():
         raise HTTPException(status_code=404, detail="file not found")
 
     if resolved.suffix.lower() not in IMAGE_PREVIEW_EXTENSIONS:
         raise HTTPException(status_code=400, detail="unsupported file type")
-
-    if not is_path_within_roots(resolved, allowed_roots):
-        raise HTTPException(status_code=403, detail="path is outside allowed roots")
 
     return resolved
