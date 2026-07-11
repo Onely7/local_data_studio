@@ -34,6 +34,7 @@ from fastapi import HTTPException
 from PIL import Image
 from sentence_transformers import SentenceTransformer
 
+from . import embedder_models
 from .atlas_cache import prune_cache_dir
 from .cache import DatasetFingerprint
 from .config import (
@@ -87,14 +88,6 @@ ATLAS_IMAGE_MAX_BYTES = 50 * 1024 * 1024
 ATLAS_TRUNCATION_SUFFIX = "... (truncated for Atlas)"
 ATLAS_PORT_LOCK = threading.Lock()
 ATLAS_PORT_STATE = {"next": ATLAS_PORT}
-MODEL_MARKER_FILES = (
-    "config.json",
-    "modules.json",
-    "tokenizer_config.json",
-    "preprocessor_config.json",
-    "model.safetensors",
-    "pytorch_model.bin",
-)
 
 
 @dataclass(frozen=True, slots=True)
@@ -161,54 +154,21 @@ def _embedding_atlas_executable() -> list[str]:
 
 
 def _is_model_directory(path: Path) -> bool:
-    if not path.is_dir() or path.name.startswith("."):
-        return False
-    return any((path / marker).exists() for marker in MODEL_MARKER_FILES)
+    return embedder_models.is_model_directory(path)
 
 
 def _model_label(path: Path) -> str:
-    relative = path.relative_to(EMBEDDER_MODELS_DIR)
-    return relative.as_posix()
+    return embedder_models.model_label(path, EMBEDDER_MODELS_DIR)
 
 
 def discover_embedder_models() -> list[dict[str, str]]:
     """Return locally installed encoder models under models/embedder."""
-    EMBEDDER_MODELS_DIR.mkdir(parents=True, exist_ok=True)
-    models: list[dict[str, str]] = []
-    discovered_roots: list[Path] = []
-    paths = sorted(
-        EMBEDDER_MODELS_DIR.rglob("*"),
-        key=lambda item: (len(item.relative_to(EMBEDDER_MODELS_DIR).parts), item.as_posix()),
-    )
-    for path in paths:
-        if any(root == path or root in path.parents for root in discovered_roots):
-            continue
-        if not _is_model_directory(path):
-            continue
-        discovered_roots.append(path)
-        label = _model_label(path)
-        models.append(
-            {
-                "name": label,
-                "value": label,
-                "path": str(path),
-            }
-        )
-    return models
+    return embedder_models.discover_embedder_models(EMBEDDER_MODELS_DIR)
 
 
 def resolve_embedder_model(model: str) -> Path:
     """Resolve a model dropdown value to a local model directory."""
-    model_name = model.strip()
-    if not model_name:
-        raise HTTPException(status_code=400, detail="model is required")
-    candidate = (EMBEDDER_MODELS_DIR / model_name).resolve()
-    root = EMBEDDER_MODELS_DIR.resolve()
-    if root != candidate and root not in candidate.parents:
-        raise HTTPException(status_code=400, detail="invalid model path")
-    if not _is_model_directory(candidate):
-        raise HTTPException(status_code=404, detail="model not found under models/embedder")
-    return candidate
+    return embedder_models.resolve_embedder_model(model, EMBEDDER_MODELS_DIR)
 
 
 def _normalize_model_identity(value: str) -> str:

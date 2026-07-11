@@ -1,4 +1,6 @@
 import os
+import subprocess
+import sys
 import tempfile
 from pathlib import Path
 from unittest import TestCase
@@ -104,3 +106,25 @@ cache_dir = "config-cache"
 
             self.assertEqual(str(workspace.resolve()), os.environ["LOCAL_DATA_STUDIO_WORKSPACE_DIR"])
             self.assertEqual("data", os.environ["DATA_DIR"])
+
+    def test_importing_app_defers_heavy_feature_modules(self) -> None:
+        repository_root = Path(__file__).resolve().parents[1]
+        env = os.environ.copy()
+        env["PYTHONPATH"] = str(repository_root / "src")
+        result = subprocess.run(
+            [
+                sys.executable,
+                "-c",
+                (
+                    "import sys; import local_data_studio.app; "
+                    "assert 'local_data_studio.server.atlas' not in sys.modules; "
+                    "assert 'local_data_studio.server.eda_reports' not in sys.modules"
+                ),
+            ],
+            cwd=repository_root,
+            env=env,
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+        self.assertEqual(0, result.returncode, result.stderr)

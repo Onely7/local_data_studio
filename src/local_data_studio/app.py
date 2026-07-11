@@ -9,7 +9,6 @@ from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 
-from .server.atlas import discover_embedder_models, run_atlas_visualization
 from .server.cache import count_cache_path, search_cache_path, stats_cache_path
 from .server.config import (
     ALLOW_DELETE_DATA,
@@ -18,6 +17,7 @@ from .server.config import (
     DATA_SERVE_ROOT,
     DEFAULT_LIMIT,
     DEFAULT_SAMPLE,
+    EMBEDDER_MODELS_DIR,
     FILE_SERVE_ROOTS,
     HARD_DELETE_MAX_BYTES,
     PACKAGE_DIR,
@@ -44,7 +44,7 @@ from .server.deleted_rows import (
     clear_deleted_row_ids,
     deleted_row_ids_for,
 )
-from .server.eda_reports import generate_dataset_eda_report, generate_query_eda_report
+from .server.embedder_models import discover_embedder_models
 from .server.files import (
     refresh_dataset_file_catalog,
     resolve_data_file,
@@ -66,6 +66,23 @@ from .server.stats import compute_column_stats
 
 app = FastAPI(title="Data Viewer")
 UPLOAD_FILES = File(...)
+
+
+def _atlas_service():
+    # Atlas imports the ML stack; defer it until an Atlas job is requested.
+    from .server import atlas  # noqa: PLC0415
+
+    return atlas
+
+
+def _eda_reports_service():
+    # Profiling imports are expensive and are not needed for normal browsing.
+    try:
+        from .server import eda_reports  # noqa: PLC0415
+    except ImportError as exc:
+        raise HTTPException(status_code=500, detail=f"EDA dependencies could not be loaded: {exc}") from exc
+
+    return eda_reports
 
 
 class NoCacheStaticFiles(StaticFiles):
@@ -204,7 +221,7 @@ async def get_config() -> dict[str, Any]:
 
 @app.get("/api/embedder_models")
 async def embedder_models() -> dict[str, Any]:
-    return {"models": discover_embedder_models()}
+    return {"models": discover_embedder_models(EMBEDDER_MODELS_DIR)}
 
 
 @app.get("/api/raw")
@@ -301,7 +318,7 @@ def _compute_cached_column_stats(file_name: str, path: Path, sample: int | None,
 @app.post("/api/eda")
 async def run_eda(payload: EdaRequest) -> dict[str, Any]:
     path = resolve_data_file(payload.file)
-    return generate_dataset_eda_report(
+    return _eda_reports_service().generate_dataset_eda_report(
         file_name=payload.file,
         path=path,
         sample=payload.sample,
@@ -395,9 +412,10 @@ async def start_stats_job(payload: StatsJobRequest) -> dict[str, Any]:
 @app.post("/api/jobs/eda")
 async def start_eda_job(payload: EdaRequest) -> dict[str, Any]:
     path = resolve_data_file(payload.file)
+    reports_service = _eda_reports_service()
 
     def work(context: JobContext) -> dict[str, Any]:
-        return generate_dataset_eda_report(
+        return reports_service.generate_dataset_eda_report(
             file_name=payload.file,
             path=path,
             sample=payload.sample,
@@ -412,9 +430,10 @@ async def start_eda_job(payload: EdaRequest) -> dict[str, Any]:
 @app.post("/api/jobs/eda_query")
 async def start_eda_query_job(payload: EdaQueryRequest) -> dict[str, Any]:
     path = resolve_data_file(payload.file)
+    reports_service = _eda_reports_service()
 
     def work(context: JobContext) -> dict[str, Any]:
-        return generate_query_eda_report(
+        return reports_service.generate_query_eda_report(
             file_name=payload.file,
             path=path,
             sql=payload.sql,
@@ -430,9 +449,10 @@ async def start_eda_query_job(payload: EdaQueryRequest) -> dict[str, Any]:
 @app.post("/api/jobs/atlas")
 async def start_atlas_job(payload: AtlasRequest) -> dict[str, Any]:
     path = resolve_data_file(payload.file)
+    atlas_service = _atlas_service()
 
     def work(context: JobContext) -> dict[str, Any]:
-        return run_atlas_visualization(
+        return atlas_service.run_atlas_visualization(
             file_name=payload.file,
             path=path,
             column=payload.column,
@@ -448,9 +468,10 @@ async def start_atlas_job(payload: AtlasRequest) -> dict[str, Any]:
 @app.post("/api/jobs/atlas_query")
 async def start_atlas_query_job(payload: AtlasQueryRequest) -> dict[str, Any]:
     path = resolve_data_file(payload.file)
+    atlas_service = _atlas_service()
 
     def work(context: JobContext) -> dict[str, Any]:
-        return run_atlas_visualization(
+        return atlas_service.run_atlas_visualization(
             file_name=payload.file,
             path=path,
             column=payload.column,
