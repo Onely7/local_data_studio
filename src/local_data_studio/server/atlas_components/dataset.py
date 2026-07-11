@@ -7,6 +7,7 @@ import json
 import os
 import re
 import threading
+from functools import lru_cache
 from importlib.metadata import PackageNotFoundError, version
 from pathlib import Path
 from typing import Any
@@ -43,6 +44,12 @@ from .images import (
 from .projection import effective_embedder_for_modality, project_atlas_frame
 
 ATLAS_DATASET_CACHE_VERSION = 10
+
+
+@lru_cache(maxsize=256)
+def _cache_generation_lock(cache_path: str) -> threading.Lock:
+    """Return a bounded, process-local single-flight lock for one cache key."""
+    return threading.Lock()
 
 
 def model_label(path: Path) -> str:
@@ -132,40 +139,41 @@ def prepare_atlas_dataset(
         model_path=model_path,
         options=options,
     )
-    if cache_path.exists():
-        prune_cache_dir(ATLAS_CACHE_ROOT, ATLAS_CACHE_MAX_BYTES, preserve=(cache_path,))
-        context.update(progress=0.08, message="Using cached Atlas dataset")
-        return AtlasPreparedDataset(cache_path, ATLAS_PROJECTION_X, ATLAS_PROJECTION_Y, None, True)
+    with _cache_generation_lock(str(cache_path)):
+        if cache_path.exists():
+            prune_cache_dir(ATLAS_CACHE_ROOT, ATLAS_CACHE_MAX_BYTES, preserve=(cache_path,))
+            context.update(progress=0.08, message="Using cached Atlas dataset")
+            return AtlasPreparedDataset(cache_path, ATLAS_PROJECTION_X, ATLAS_PROJECTION_Y, None, True)
 
-    context.update(progress=0.08, message="Building Atlas dataset cache")
-    prune_cache_dir(ATLAS_CACHE_ROOT, ATLAS_CACHE_MAX_BYTES)
-    try:
-        data_frame = load_datasets([str(path)], query=sql, sample=options.sample)
-        projection_input, input_column, output_frame = prepare_projection_input(
-            data_frame,
-            column=column,
-            modality=modality,
-            dataset_path=path,
-        )
-        projected = project_atlas_frame(
-            projection_input,
-            input_column=input_column,
-            modality=modality,
-            model_path=model_path,
-            options=options,
-        )
-        projected = attach_projection_columns(output_frame, projected)
-        preserve_columns = image_like_columns(output_frame)
-        projected = normalize_image_display_columns(projected, preserve_columns)
-        projected = sanitize_atlas_output_frame(projected, preserve_columns=preserve_columns)
-        cache_path.parent.mkdir(parents=True, exist_ok=True)
-        tmp_path = cache_path.with_name(f".{cache_path.name}.{os.getpid()}.{threading.get_ident()}.tmp")
-        projected.to_parquet(tmp_path)
-        tmp_path.replace(cache_path)
-    except HTTPException:
-        raise
-    except Exception as exc:
-        raise HTTPException(status_code=500, detail=f"Atlas dataset cache generation failed: {exc}") from exc
-    finally:
-        prune_cache_dir(ATLAS_CACHE_ROOT, ATLAS_CACHE_MAX_BYTES, preserve=(cache_path,))
-    return AtlasPreparedDataset(cache_path, ATLAS_PROJECTION_X, ATLAS_PROJECTION_Y, None, False)
+        context.update(progress=0.08, message="Building Atlas dataset cache")
+        prune_cache_dir(ATLAS_CACHE_ROOT, ATLAS_CACHE_MAX_BYTES)
+        try:
+            data_frame = load_datasets([str(path)], query=sql, sample=options.sample)
+            projection_input, input_column, output_frame = prepare_projection_input(
+                data_frame,
+                column=column,
+                modality=modality,
+                dataset_path=path,
+            )
+            coordinates = project_atlas_frame(
+                projection_input,
+                input_column=input_column,
+                modality=modality,
+                model_path=model_path,
+                options=options,
+            )
+            projected = attach_projection_columns(output_frame, coordinates)
+            preserve_columns = image_like_columns(output_frame)
+            projected = normalize_image_display_columns(projected, preserve_columns)
+            projected = sanitize_atlas_output_frame(projected, preserve_columns=preserve_columns)
+            cache_path.parent.mkdir(parents=True, exist_ok=True)
+            tmp_path = cache_path.with_name(f".{cache_path.name}.{os.getpid()}.{threading.get_ident()}.tmp")
+            projected.to_parquet(tmp_path)
+            tmp_path.replace(cache_path)
+        except HTTPException:
+            raise
+        except Exception as exc:
+            raise HTTPException(status_code=500, detail=f"Atlas dataset cache generation failed: {exc}") from exc
+        finally:
+            prune_cache_dir(ATLAS_CACHE_ROOT, ATLAS_CACHE_MAX_BYTES, preserve=(cache_path,))
+        return AtlasPreparedDataset(cache_path, ATLAS_PROJECTION_X, ATLAS_PROJECTION_Y, None, False)

@@ -22,6 +22,7 @@ from .contracts import (
     ATLAS_PROJECTION_X,
     ATLAS_PROJECTION_Y,
     AtlasModality,
+    AtlasProjectionCoordinates,
 )
 
 IMAGE_REFERENCE_PATTERN = re.compile(r"\.(png|jpg|jpeg|gif|webp|svg)(?:\?.*)?$", re.IGNORECASE)
@@ -283,7 +284,7 @@ def image_like_columns(data_frame: Any, *, sample_size: int = 50) -> set[str]:
 
 def prepare_image_projection_input(data_frame: Any, *, column: str, dataset_path: Path) -> tuple[Any, Any]:
     try:
-        values = data_frame[column].tolist()
+        values = data_frame[column]
     except Exception as exc:
         raise ValueError(f"failed to read image column {column}: {exc}") from exc
     kept_indices: list[int] = []
@@ -323,6 +324,10 @@ def prepare_projection_input(
 
 def attach_projection_columns(base_frame: Any, projected_frame: Any) -> Any:
     output = base_frame.copy()
+    if isinstance(projected_frame, AtlasProjectionCoordinates):
+        output[ATLAS_PROJECTION_X] = projected_frame.values[:, 0]
+        output[ATLAS_PROJECTION_Y] = projected_frame.values[:, 1]
+        return output
     for column in (ATLAS_PROJECTION_X, ATLAS_PROJECTION_Y):
         if column in projected_frame.columns:
             output[column] = projected_frame[column].to_list()

@@ -16,13 +16,7 @@ from embedding_atlas.projection import Projection, _run_embedding, _run_umap
 from PIL import Image
 from sentence_transformers import SentenceTransformer
 
-from .contracts import (
-    ATLAS_PROJECTION_NEIGHBORS,
-    ATLAS_PROJECTION_X,
-    ATLAS_PROJECTION_Y,
-    AtlasModality,
-    AtlasOptions,
-)
+from .contracts import AtlasModality, AtlasOptions, AtlasProjectionCoordinates
 
 QWEN3_VL_EMBEDDING_MARKER = "qwen3-vl-embedding"
 ATLAS_UMAP_RANDOM_STATE = 42
@@ -142,23 +136,44 @@ def cast_embeddings(embeddings: np.ndarray, options: AtlasOptions) -> np.ndarray
     return np.asarray(embeddings, dtype=projection_dtype(options))
 
 
-def embed_items(items: list[Any], *, modality: AtlasModality, model_path: Path, options: AtlasOptions) -> np.ndarray:
-    if not items:
-        return np.empty((0, 0), dtype=projection_dtype(options))
-    if modality == "vector":
-        return cast_embeddings(np.asarray(items), options)
-    embedder, embedder_args = resolve_embedder_callable(modality, model_path, options)
-    embeddings = asyncio.run(
-        _run_embedding(
-            embedder,
-            items,
-            model=str(model_path),
-            embedder_args=embedder_args,
-            batch_size=options.batch_size,
-            max_concurrency=1,
+@dataclass(slots=True)
+class AtlasEmbeddingSession:
+    """One reusable encoder instance for all batches in an Atlas job."""
+
+    modality: AtlasModality
+    model_path: Path
+    options: AtlasOptions
+    embedder: Any = None
+    embedder_args: dict[str, bool] | None = None
+
+    def embed(self, items: list[Any]) -> np.ndarray:
+        if not items:
+            return np.empty((0, 0), dtype=projection_dtype(self.options))
+        if self.modality == "vector":
+            return cast_embeddings(np.asarray(items), self.options)
+        embeddings = asyncio.run(
+            _run_embedding(
+                self.embedder,
+                items,
+                model=str(self.model_path),
+                embedder_args=self.embedder_args or {},
+                batch_size=self.options.batch_size,
+                max_concurrency=1,
+            )
         )
-    )
-    return cast_embeddings(embeddings, options)
+        return cast_embeddings(embeddings, self.options)
+
+
+def create_embedding_session(modality: AtlasModality, model_path: Path, options: AtlasOptions) -> AtlasEmbeddingSession:
+    if modality == "vector":
+        return AtlasEmbeddingSession(modality, model_path, options)
+    embedder, embedder_args = resolve_embedder_callable(modality, model_path, options)
+    return AtlasEmbeddingSession(modality, model_path, options, embedder, embedder_args)
+
+
+def embed_items(items: list[Any], *, modality: AtlasModality, model_path: Path, options: AtlasOptions) -> np.ndarray:
+    """Compatibility helper for callers embedding a single batch."""
+    return create_embedding_session(modality, model_path, options).embed(items)
 
 
 def zero_projection(row_count: int) -> Projection:
@@ -191,22 +206,11 @@ def compute_full_projection(
     modality: AtlasModality,
     model_path: Path,
     options: AtlasOptions,
-) -> Any:
-    embeddings = embed_items(
-        embedding_items(projection_input, input_column),
-        modality=modality,
-        model_path=model_path,
-        options=options,
-    )
+    session: AtlasEmbeddingSession,
+) -> AtlasProjectionCoordinates:
+    embeddings = session.embed(embedding_items(projection_input, input_column))
     result = run_full_projection(embeddings)
-    output = projection_input.copy()
-    output[ATLAS_PROJECTION_X] = result.projection[:, 0].tolist()
-    output[ATLAS_PROJECTION_Y] = result.projection[:, 1].tolist()
-    output[ATLAS_PROJECTION_NEIGHBORS] = [
-        {"ids": np.asarray(ids, dtype=np.int64).tolist(), "distances": np.asarray(distances, dtype=float).tolist()}
-        for ids, distances in zip(result.knn_indices, result.knn_distances)
-    ]
-    return output
+    return AtlasProjectionCoordinates(np.asarray(result.projection, dtype=np.float32))
 
 
 def anchor_indices(row_count: int, anchor_sample: int | None) -> np.ndarray:
@@ -223,22 +227,15 @@ def compute_anchor_transform_projection(
     modality: AtlasModality,
     model_path: Path,
     options: AtlasOptions,
-) -> Any:
+    session: AtlasEmbeddingSession,
+) -> AtlasProjectionCoordinates:
     items = embedding_items(projection_input, input_column)
     row_count = len(items)
     if row_count <= 1:
-        output = projection_input.copy()
-        output[ATLAS_PROJECTION_X] = [0.0] * row_count
-        output[ATLAS_PROJECTION_Y] = [0.0] * row_count
-        return output
+        return AtlasProjectionCoordinates(np.zeros((row_count, 2), dtype=np.float32))
     selected = anchor_indices(row_count, options.anchor_sample)
     selected_set = set(selected.tolist())
-    anchor_embeddings = embed_items(
-        [items[index] for index in selected],
-        modality=modality,
-        model_path=model_path,
-        options=options,
-    )
+    anchor_embeddings = session.embed([items[index] for index in selected])
     reducer = umap.UMAP(
         metric="cosine",
         n_neighbors=min(15, max(2, len(selected) - 1)),
@@ -248,20 +245,20 @@ def compute_anchor_transform_projection(
     values = np.empty((row_count, 2), dtype=np.float32)
     values[selected] = np.asarray(reducer.fit_transform(anchor_embeddings), dtype=np.float32)
     transform_batch_size = max(options.batch_size or 256, 1)
-    remaining = [index for index in range(row_count) if index not in selected_set]
-    for start in range(0, len(remaining), transform_batch_size):
-        batch_indices = remaining[start : start + transform_batch_size]
-        batch_embeddings = embed_items(
-            [items[index] for index in batch_indices],
-            modality=modality,
-            model_path=model_path,
-            options=options,
-        )
+    batch_indices: list[int] = []
+    for index in range(row_count):
+        if index in selected_set:
+            continue
+        batch_indices.append(index)
+        if len(batch_indices) < transform_batch_size:
+            continue
+        batch_embeddings = session.embed([items[item_index] for item_index in batch_indices])
         values[batch_indices] = np.asarray(reducer.transform(batch_embeddings), dtype=np.float32)
-    output = projection_input.copy()
-    output[ATLAS_PROJECTION_X] = values[:, 0].tolist()
-    output[ATLAS_PROJECTION_Y] = values[:, 1].tolist()
-    return output
+        batch_indices = []
+    if batch_indices:
+        batch_embeddings = session.embed([items[item_index] for item_index in batch_indices])
+        values[batch_indices] = np.asarray(reducer.transform(batch_embeddings), dtype=np.float32)
+    return AtlasProjectionCoordinates(values)
 
 
 def project_atlas_frame(
@@ -271,7 +268,8 @@ def project_atlas_frame(
     modality: AtlasModality,
     model_path: Path,
     options: AtlasOptions,
-) -> Any:
+) -> AtlasProjectionCoordinates:
+    session = create_embedding_session(modality, model_path, options)
     project = compute_anchor_transform_projection if options.projection_mode == "anchor_transform" else compute_full_projection
     return project(
         projection_input,
@@ -279,4 +277,5 @@ def project_atlas_frame(
         modality=modality,
         model_path=model_path,
         options=options,
+        session=session,
     )
