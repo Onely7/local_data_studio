@@ -18,7 +18,7 @@ It provides fast preview, DuckDB SQL execution (with optional LLM-assisted SQL g
 
 - Fast bounded preview and cursor-style paging for large-scale datasets
 - DuckDB SQL console (read-only) with timeout, memory, and large-scan guards
-- EDA report generation for the whole dataset or SQL query results (cached under `./cache`)
+- EDA report generation for the whole dataset or SQL query results (cached under `./cache/eda`)
 - Embedding Atlas visualization for selected text/image columns, including SQL query results
 - Row Inspector (copy, delete, highlight)
 - Image rendering from URLs, local paths, and `{bytes, path}` image dictionaries
@@ -111,6 +111,7 @@ Path precedence is: CLI option, OS environment variable, config file, `.env`, wo
     EDA_PROFILE_MODE=minimal
     EDA_CELL_MAX_CHARS=5000
     EDA_NESTED_POLICY=stringify
+    EDA_CACHE_MAX_BYTES=1073741824
 
     # Embedding Atlas Settings
     EMBEDDER_MODELS_DIR=models/embedder
@@ -144,6 +145,7 @@ Path precedence is: CLI option, OS environment variable, config file, `.env`, wo
    - `EDA_PROFILE_MODE`: Either `minimal` or `maximal`. `minimal` generates a lightweight report, while `maximal` includes more detailed statistics but takes longer.
    - `EDA_CELL_MAX_CHARS`: Maximum number of characters to display for long strings in EDA. Excess text is truncated as `... (truncated)`.
    - `EDA_NESTED_POLICY`: How to handle nested types (list/struct/object/binary, etc.). `stringify` keeps them as strings, and `drop` removes the corresponding columns.
+   - `EDA_CACHE_MAX_BYTES`: Maximum combined size of EDA reports stored under `./cache/eda`. The default is 1 GiB; when the limit is exceeded, the oldest reports are removed first.
    - `EMBEDDER_MODELS_DIR`: Directory containing local HuggingFace encoder model directories. Defaults to `models/embedder` under the workspace/current directory.
    - `ATLAS_HOST` / `ATLAS_PORT`: Host and starting port for local Embedding Atlas pages. `embedding-atlas` may choose another port if the port is already in use.
    - `ATLAS_SAMPLE`: Optional random sample size passed to Embedding Atlas. Leave unset or `0` to use all rows.
@@ -200,7 +202,7 @@ Open [http://127.0.0.1:8000](http://127.0.0.1:8000) to view the Local Data Studi
 
 4. **EDA Report**
    Run EDA to generate and cache a report for the dataset sample. Use **Run EDA on Query Results** to profile the current SQL Console query results instead.  
-   Dataset reports are cached under `./cache` based on {file fingerprint, number of samples, `EDA_PROFILE_MODE`}. Query-result reports are cached separately based on {file fingerprint, SQL, number of samples, `EDA_PROFILE_MODE`}.  
+   Dataset reports are cached under `./cache/eda` based on {file fingerprint, number of samples, `EDA_PROFILE_MODE`}. Query-result reports are cached separately based on {file fingerprint, SQL, number of samples, `EDA_PROFILE_MODE`}. The combined EDA cache defaults to 1 GiB and removes the oldest reports first when it exceeds `EDA_CACHE_MAX_BYTES`.
    You can adjust the sample count with `EDA_ROW_LIMIT` and UI-side settings.  
    <img src="images/local_data_studio_05.png" alt="local data studio 05" width=45%> <img src="images/local_data_studio_06.png" alt="local data studio 06" width=45%>
 
@@ -223,7 +225,7 @@ Open [http://127.0.0.1:8000](http://127.0.0.1:8000) to view the Local Data Studi
 - Embedding Atlas jobs use the selected local encoder model and compute embeddings/projections locally. Projected parquet inputs are cached under `./cache/atlas/datasets`; repeated runs reuse the projected parquet only when the dataset fingerprint, SQL, column, model, backend, prompt template, capability fingerprint, and projection settings match. Image display columns are kept in their original URL/path/`{bytes, path}` shape while a hidden embedding input column is used only for encoder input conversion. Use `ATLAS_SAMPLE` for faster exploratory runs on large datasets, `ATLAS_TEXT_MAX_CHARS` to bound very long text cells and expanded prompt values, `ATLAS_EMBEDDING_DTYPE=float16` to reduce embedding memory, `ATLAS_PROJECTION_MODE=anchor_transform` to fit UMAP on anchors and transform the remainder, and `ATLAS_CACHE_MAX_BYTES` to cap the combined Atlas cache size.
 - Backend support is derived from bounded parsing of local `modules.json`, `config.json`, tokenizer/processor, pooling, and normalization metadata rather than model-name rules. Sentence Transformers reports `native`, `generic_fallback`, `metadata_only`, `unsupported`, or `unknown`; Transformers reports `direct`, `remote_code`, `backbone_only`, `unsupported`, or `unknown`. Sentence Transformers generic fallback is selectable only for tokenizer-backed, text-only Transformers models; image or multimodal models require a native `modules.json`. For example, the image-only DINOv3 checkpoints expose only Transformers and use their declared `pooler_output`, while Qwen3-VL-Embedding exposes both backends through its native Sentence Transformers pipeline. Only capabilities with a verified runnable adapter are selectable, and `remote_code` remains disabled unless `ATLAS_TRUST_REMOTE_CODE=true` explicitly permits repository code at execution time. Built-in Transformer/Pooling/Normalize pipelines can be reproduced by the Transformers adapter without importing Python files from the model repository.
 - Local encoder model files under `models/embedder` or a configured models directory are intentionally not bundled. Only the directory placeholder files are tracked; download or place model files locally on each machine.
-- Cache files are separated under `./cache/metadata`, `./cache/index`, `./cache/stats`, `./cache/count`, `./cache/search`, and EDA report files, and are invalidated by file path, size, and modification time where applicable.
+- Cache files are separated under `./cache/metadata`, `./cache/index`, `./cache/stats`, `./cache/count`, `./cache/search`, and `./cache/eda`. EDA reports have a configurable combined capacity (`EDA_CACHE_MAX_BYTES`) and are pruned oldest-first; fingerprint-based caches are invalidated by file path, size, and modification time where applicable.
 - `Run EDA on Query Results` excludes helper columns such as `rn` and `__rowid` from the generated report.
 - TB-scale `.json` arrays are not recommended. Prefer JSONL or Parquet for responsive preview.
 - `Delete from file` modifies the actual file, so make backups as needed.
@@ -236,7 +238,7 @@ Open [http://127.0.0.1:8000](http://127.0.0.1:8000) to view the Local Data Studi
 - `src/local_data_studio/server/readers.py` remains the compatibility facade for implementations under `src/local_data_studio/server/dataset_readers`. JSONL metadata inference stops at fixed row and byte budgets, and JSONL/CSV/TSV preview uses byte/page tokens with a fingerprinted sparse line index. Completed indexes are reused and checkpoints are saved in batch transactions. CSV/TSV use the same large-field parser for schema, preview, search, and raw rows. Parquet schema reads footer metadata, previews and raw rows use bounded record batches, and compatible offsets are resolved from row-group metadata without row-by-row scans.
 - `src/local_data_studio/server/stats.py` remains the compatibility facade for `src/local_data_studio/server/column_stats`, which separates value inference, per-column accumulation, and DuckDB orchestration. Sample rows are fetched in fixed-size batches and transferred directly into column accumulators instead of retaining both a complete row matrix and column copies.
 - SQL execution is centralized in `src/local_data_studio/server/sql.py`, which validates read-only SQL, applies DuckDB resource limits, and supports cooperative cancellation for background jobs.
-- EDA report orchestration lives in `src/local_data_studio/server/eda_reports.py`; low-level profiling setup and DataFrame sanitization live in `src/local_data_studio/server/eda.py`.
+- EDA report orchestration lives in `src/local_data_studio/server/eda_reports.py`; low-level profiling setup and DataFrame sanitization live in `src/local_data_studio/server/eda.py`. Reports are isolated under `./cache/eda` and use the shared oldest-first capacity pruner.
 - `src/local_data_studio/server/atlas.py` remains the compatibility facade for `src/local_data_studio/server/atlas_components`, which separates contracts, capability-driven embedding adapters, safe prompt templates, image conversion, projection, dataset caching, subprocess control, and orchestration. `server/embedder_capabilities.py` performs bounded metadata-only model inspection and fingerprints the relevant configuration. An encoder is created once per Atlas job and reused across anchor/transform batches. Anchor-transform reads only the anchor and current transform batch instead of converting the complete input column to a Python list. Final display sanitization and projection-column attachment share one owned DataFrame copy, while concurrent misses for the same fingerprint/query/column/model/backend/prompt/settings key share one cache generation.
 - Atlas UMAP projection uses a fixed random seed for reproducible cache artifacts and explicitly sets `n_jobs=1`, matching UMAP's seeded execution mode without emitting thread override warnings.
 - On macOS, Atlas subprocess launch is kept compatible with Python's `posix_spawn` path to avoid child-side fork `SIGSEGV (-11)` failures. Keep Atlas commands on absolute paths, do not pass `cwd` to `Popen`, and keep `close_fds=False`.
