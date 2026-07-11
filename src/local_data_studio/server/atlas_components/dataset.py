@@ -53,6 +53,7 @@ def _cache_generation_lock(cache_path: str) -> threading.Lock:
 
 
 def model_label(path: Path) -> str:
+    """Return a stable model label relative to the configured model root."""
     return embedder_models.model_label(path, EMBEDDER_MODELS_DIR)
 
 

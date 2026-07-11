@@ -1,3 +1,5 @@
+"""Tests for api jobs behavior."""
+
 import json
 from pathlib import Path
 from tempfile import TemporaryDirectory
@@ -34,7 +36,10 @@ from local_data_studio.server.sql import load_query_dataframe_guarded
 
 
 class ApiJobTests(TestCase):
+    """Test api job behavior."""
+
     def test_raw_row_endpoint_returns_full_values(self) -> None:
+        """Verify that raw row endpoint returns full values."""
         with self.subTest("dataset row"):
             long_text = "x" * 2_500
             with TemporaryDirectory() as tmpdir:
@@ -55,12 +60,14 @@ class ApiJobTests(TestCase):
             self.assertEqual(long_text, payload["row"][0])
 
     def test_preview_returns_page_token(self) -> None:
+        """Verify that preview returns page token."""
         payload = preview(file="example.jsonl", limit=2, offset=0, page_token=None)
 
         self.assertEqual(2, len(payload["rows"]))
         self.assertIn("next_page_token", payload)
 
     def test_count_job_completes(self) -> None:
+        """Verify that count job completes."""
         started = start_count_job(CountJobRequest(file="example.jsonl"))
         payload = self._wait_for_job(started["id"])
 
@@ -69,6 +76,7 @@ class ApiJobTests(TestCase):
         self.assertIn("cached", payload["result"])
 
     def test_search_job_returns_matching_rows(self) -> None:
+        """Verify that search job returns matching rows."""
         started = start_search_job(SearchJobRequest(file="example.jsonl", query="horse", limit=5))
         payload = self._wait_for_job(started["id"])
 
@@ -77,6 +85,7 @@ class ApiJobTests(TestCase):
         self.assertIn("cached", payload["result"])
 
     def test_index_job_builds_line_index(self) -> None:
+        """Verify that index job builds line index."""
         started = start_index_job(IndexJobRequest(file="example.jsonl"))
         payload = self._wait_for_job(started["id"])
 
@@ -85,6 +94,7 @@ class ApiJobTests(TestCase):
         self.assertTrue(payload["result"]["index"]["complete"])
 
     def test_query_job_returns_limited_rows(self) -> None:
+        """Verify that query job returns limited rows."""
         started = start_query_job(QueryRequest(file="example.jsonl", sql="SELECT * FROM data", limit=3))
         payload = self._wait_for_job(started["id"])
 
@@ -93,6 +103,7 @@ class ApiJobTests(TestCase):
         self.assertIn("columns", payload["result"])
 
     def test_stats_job_completes(self) -> None:
+        """Verify that stats job completes."""
         started = start_stats_job(StatsJobRequest(file="example.jsonl", sample=50))
         payload = self._wait_for_job(started["id"])
 
@@ -100,14 +111,19 @@ class ApiJobTests(TestCase):
         self.assertIn("columns", payload["result"])
 
     def test_eda_query_job_completes_for_filtered_results(self) -> None:
+        """Verify that eda query job completes for filtered results."""
         report_columns: list[str] = []
 
         class FakeReport:
+            """Test fake report behavior."""
+
             def to_file(self, path: str) -> None:
+                """Exercise to file behavior."""
                 with open(path, "w", encoding="utf-8") as handle:
                     handle.write("<html>query eda</html>")
 
         def fake_build_report(df, title: str, minimal: bool):  # noqa: ANN001, ARG001
+            """Exercise fake build report behavior."""
             report_columns.extend(df.columns)
             return FakeReport()
 
@@ -129,6 +145,7 @@ class ApiJobTests(TestCase):
         self.assertIn("object", report_columns)
 
     def test_query_eda_loader_returns_pandas_dataframe(self) -> None:
+        """Verify that query eda loader returns pandas dataframe."""
         dataframe = load_query_dataframe_guarded(
             path=Path.cwd() / "data" / "example.jsonl",
             sql="SELECT object, final_rating FROM data WHERE object = 'horse'",
@@ -140,6 +157,7 @@ class ApiJobTests(TestCase):
         self.assertFalse(dataframe.empty)
 
     def test_eda_job_completes_for_dataset_sample(self) -> None:
+        """Verify that eda job completes for dataset sample."""
         started = start_eda_job(EdaRequest(file="example.jsonl", sample=100, force=True, mode="minimal"))
         payload = self._wait_for_job(started["id"], attempts=80)
 
@@ -148,10 +166,12 @@ class ApiJobTests(TestCase):
         self.assertEqual(100, payload["result"]["sample"])
 
     def test_atlas_job_launches_for_selected_image_column(self) -> None:
+        """Verify that atlas job launches for selected image column."""
         model_path = (Path.cwd() / "models" / "embedder" / "test-image-model").resolve()
         prepared_path = (Path.cwd() / "cache" / "atlas" / "datasets" / "prepared.parquet").resolve()
 
         def fake_launch(command, context):  # noqa: ANN001
+            """Exercise fake launch behavior."""
             self.assertIn("--image", command)
             self.assertIn("image", command)
             self.assertIn("--disable-projection", command)
@@ -184,11 +204,13 @@ class ApiJobTests(TestCase):
         self.assertTrue(payload["result"]["cache_hit"])
 
     def test_atlas_query_job_passes_guarded_sql(self) -> None:
+        """Verify that atlas query job passes guarded sql."""
         model_path = (Path.cwd() / "models" / "embedder" / "test-text-model").resolve()
         prepared_path = (Path.cwd() / "cache" / "atlas" / "datasets" / "prepared-query.parquet").resolve()
         captured_command: list[str] = []
 
         def fake_launch(command, context):  # noqa: ANN001
+            """Exercise fake launch behavior."""
             captured_command.extend(command)
             context.update(progress=1.0, message="ready")
             return "http://127.0.0.1:5056/", 12346

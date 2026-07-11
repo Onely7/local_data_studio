@@ -1,3 +1,5 @@
+"""Tests for app contracts behavior."""
+
 import inspect
 from unittest import TestCase
 
@@ -41,13 +43,17 @@ EXPECTED_API_OPERATIONS = {
 
 
 class ApplicationContractTests(TestCase):
+    """Test application contract behavior."""
+
     def test_openapi_operations_remain_stable(self) -> None:
+        """Verify that openapi operations remain stable."""
         schema = app.openapi()
         operations = {(path, method) for path, methods in schema["paths"].items() for method in methods if method in {"get", "post", "put", "patch", "delete"}}
 
         self.assertEqual(EXPECTED_API_OPERATIONS, operations)
 
     def test_static_mounts_follow_api_routes(self) -> None:
+        """Verify that static mounts follow api routes."""
         paths = [getattr(route, "path", None) for route in app.routes]
         data_index = paths.index("/data")
         cache_index = paths.index("/cache")
@@ -60,6 +66,7 @@ class ApplicationContractTests(TestCase):
         self.assertLess(cache_index, static_index)
 
     def test_packaged_static_response_disables_browser_cache(self) -> None:
+        """Verify that packaged static response disables browser cache."""
         response = TestClient(app).get("/")
 
         self.assertEqual(200, response.status_code)
@@ -67,9 +74,11 @@ class ApplicationContractTests(TestCase):
         self.assertIn("Data Studio", response.text)
 
     def test_blocking_routes_run_in_fastapi_threadpool(self) -> None:
+        """Verify that blocking routes run in fastapi threadpool."""
         for endpoint in (get_schema, preview, run_query, start_atlas_job, get_job):
             with self.subTest(endpoint=endpoint.__name__):
                 self.assertFalse(inspect.iscoroutinefunction(endpoint))
 
     def test_streaming_upload_route_remains_async(self) -> None:
+        """Verify that streaming upload route remains async."""
         self.assertTrue(inspect.iscoroutinefunction(upload_files))

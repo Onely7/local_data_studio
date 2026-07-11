@@ -96,6 +96,7 @@ def parse_delimited_record(text: str, delimiter: str) -> list[str]:
 
 
 def read_delimited_header(path: Path, delimiter: str) -> tuple[list[str], int]:
+    """Return CSV/TSV columns and the byte offset immediately after the header."""
     with path.open("rb") as file:
         header_bytes = file.readline()
         header_end = file.tell()
@@ -115,6 +116,7 @@ def _create_delimited_metadata(path: Path, delimiter: str) -> DatasetMetadata:
 
 
 def load_delimited_metadata(path: Path, delimiter: str, *, use_cache: bool = True) -> DatasetMetadata:
+    """Return header-only metadata for a CSV or TSV file."""
     return load_or_create_metadata(path, lambda source: _create_delimited_metadata(source, delimiter), use_cache=use_cache)
 
 
@@ -150,6 +152,7 @@ def _create_jsonl_metadata(path: Path, sample_rows: int = JSONL_SCHEMA_SAMPLE_RO
 
 
 def load_jsonl_metadata(path: Path, *, use_cache: bool = True) -> DatasetMetadata:
+    """Infer JSONL metadata within configured row and byte budgets."""
     return load_or_create_metadata(path, _create_jsonl_metadata, use_cache=use_cache)
 
 
@@ -175,6 +178,7 @@ def _raw_line_value(path: Path, row_id: int, *, first_data_offset: int = 0) -> b
 
 
 def raw_jsonl_row(path: Path, row_id: int) -> tuple[list[str], list[Any]]:
+    """Return one one-based JSONL row using the nearest sparse checkpoint."""
     try:
         value = json.loads(_raw_line_value(path, row_id))
     except json.JSONDecodeError as exc:
@@ -183,6 +187,7 @@ def raw_jsonl_row(path: Path, row_id: int) -> tuple[list[str], list[Any]]:
 
 
 def raw_delimited_row(path: Path, row_id: int, delimiter: str) -> tuple[list[str], list[Any]]:
+    """Return one one-based CSV/TSV row using the nearest sparse checkpoint."""
     columns, first_data_offset = read_delimited_header(path, delimiter)
     line = _raw_line_value(path, row_id, first_data_offset=first_data_offset)
     values = parse_delimited_record(line.decode("utf-8-sig", "replace").rstrip("\r\n"), delimiter)
@@ -197,6 +202,7 @@ def preview_jsonl(
     page_token: str | None,
     deleted_ids: set[int],
 ) -> dict[str, Any]:
+    """Return a bounded JSONL page and byte-offset cursor for the next page."""
     token = decode_page_token_for(page_token, "jsonl")
     if page_token:
         byte_offset = token_int(token, "byte_offset", 0)
@@ -255,6 +261,7 @@ def preview_delimited(
     page_token: str | None,
     deleted_ids: set[int],
 ) -> dict[str, Any]:
+    """Return a bounded CSV/TSV page and byte-offset cursor for the next page."""
     source_columns, first_data_offset = read_delimited_header(path, delimiter)
     columns = source_columns[:MAX_COLUMNS]
     columns_truncated = len(source_columns) > MAX_COLUMNS
@@ -354,6 +361,7 @@ def search_jsonl(
     deleted_ids: set[int],
     control: ScanControl,
 ) -> tuple[list[str], list[list[Any]], list[int], bool, str | None]:
+    """Scan JSONL incrementally for at most ``limit`` matching visible rows."""
     metadata = load_jsonl_metadata(path)
     columns = [column["name"] for column in metadata.columns]
     rows: list[list[Any]] = []
@@ -399,6 +407,7 @@ def search_delimited(
     deleted_ids: set[int],
     control: ScanControl,
 ) -> tuple[list[str], list[list[Any]], list[int], bool, str | None]:
+    """Scan CSV/TSV incrementally for at most ``limit`` matching visible rows."""
     source_columns, first_data_offset = read_delimited_header(path, delimiter)
     columns = source_columns[:MAX_COLUMNS]
     warning = COLUMN_LIMIT_WARNING if len(source_columns) > MAX_COLUMNS else None

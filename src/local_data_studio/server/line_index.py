@@ -23,6 +23,11 @@ class LineOffsetIndex:
     """SQLite-backed sparse index for jumping through large text datasets."""
 
     def __init__(self, dataset_path: Path, *, stride: int = INDEX_STRIDE) -> None:
+        """Open a fingerprinted SQLite sidecar and initialize its schema.
+
+        The instance owns no persistent connection; each operation opens a short
+        transaction so background builders and preview readers can share the index.
+        """
         self.dataset_path = dataset_path
         self.stride = stride
         self.path = index_cache_path(dataset_path)

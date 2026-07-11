@@ -12,6 +12,8 @@ from ..config import CACHE_DIR, DATA_SERVE_ROOT, PACKAGE_DIR
 
 
 class NoCacheStaticFiles(StaticFiles):
+    """Static file handler that prevents stale packaged UI assets."""
+
     def file_response(
         self,
         full_path: str | PathLike[str],
@@ -19,6 +21,7 @@ class NoCacheStaticFiles(StaticFiles):
         scope: Scope,
         status_code: int = 200,
     ) -> Response:
+        """Build a response and force browser revalidation on every request."""
         response = super().file_response(full_path, stat_result, scope, status_code)
         response.headers["Cache-Control"] = "no-store, max-age=0"
         return response

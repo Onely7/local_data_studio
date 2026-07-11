@@ -32,10 +32,12 @@ def _create_metadata(path: Path) -> DatasetMetadata:
 
 
 def load_metadata(path: Path, *, use_cache: bool = True) -> DatasetMetadata:
+    """Return bounded JSON metadata with the large-array compatibility warning."""
     return load_or_create_metadata(path, _create_metadata, use_cache=use_cache)
 
 
 def preview(file_name: str, path: Path, limit: int) -> dict[str, Any]:
+    """Return only the leading rows of a non-TB-safe JSON document."""
     if path.stat().st_size > MAX_JSON_PREVIEW_BYTES:
         response = build_table_response(file_name, ["value"], [], limit, 0, [])
         response.update({"next_page_token": None, "has_next": False, "warning": JSON_NOT_TB_SAFE_WARNING})
@@ -67,6 +69,7 @@ def preview(file_name: str, path: Path, limit: int) -> dict[str, Any]:
 
 
 def raw_row(path: Path, row_id: int) -> tuple[list[str], list[Any]]:
+    """Return one one-based JSON row without API response truncation."""
     if path.stat().st_size > MAX_JSON_PREVIEW_BYTES:
         raise HTTPException(status_code=400, detail=JSON_NOT_TB_SAFE_WARNING)
     try:

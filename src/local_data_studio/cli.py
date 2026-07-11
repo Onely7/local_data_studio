@@ -82,6 +82,18 @@ def _apply_config_environment(config: Mapping[str, Any], workspace_dir: Path) ->
 
 
 def configure_runtime_environment(args: argparse.Namespace) -> tuple[str, int, bool]:
+    """Resolve CLI, environment, and TOML settings before importing the app.
+
+    Explicit CLI paths take precedence over environment and config values. Relative
+    config paths are resolved from the config file; other defaults use the workspace.
+
+    Returns:
+        The host, port, and reload values passed to Uvicorn.
+
+    Raises:
+        OSError: The requested config file cannot be read.
+        tomllib.TOMLDecodeError: The config file is not valid TOML.
+    """
     config, config_path = _read_config(args.config)
     workspace_dir = _workspace_from(args, config, config_path)
     _apply_config_environment(config, workspace_dir)
@@ -116,6 +128,7 @@ def _coerce_bool(value: Any, default: bool = False) -> bool:
 
 
 def build_parser() -> argparse.ArgumentParser:
+    """Build the command-line parser without reading runtime configuration."""
     parser = argparse.ArgumentParser(description="Run the Local Data Studio web app.")
     parser.add_argument("--config", help="Path to a Local Data Studio TOML config file.")
     parser.add_argument("--workspace-dir", help="Base directory for .env, data, cache, and models/embedder defaults.")
@@ -134,6 +147,11 @@ def build_parser() -> argparse.ArgumentParser:
 
 
 def main(argv: Sequence[str] | None = None) -> None:
+    """Configure the workspace and run the Uvicorn web server.
+
+    Args:
+        argv: Arguments without the executable name. ``None`` reads ``sys.argv``.
+    """
     args = build_parser().parse_args(argv)
     host, port, reload = configure_runtime_environment(args)
 
