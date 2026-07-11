@@ -5,7 +5,7 @@ build-backend = "hatchling.build"
 [project]
 name = "local-data-studio"
 version = "0.1.0"
-description = "Local web viewer for jsonl/json/csv/tsv/parquet files"
+description = "Local data studio for JSONL/JSON/CSV/TSV/Parquet with scalable previews, image inspection, DuckDB SQL, EDA, and Embedding Atlas"
 readme = "README.md"
 requires-python = ">=3.12,<3.13"
 license = "MIT"
@@ -13,7 +13,7 @@ license-files = ["LICENSE"]
 authors = [
   { name = "Daiki Shiono" },
 ]
-keywords = ["data-viewer", "jsonl", "parquet", "duckdb", "eda", "embedding-atlas"]
+keywords = ["data-viewer", "dataset-viewer", "data-exploration", "jsonl", "parquet", "duckdb", "eda", "embedding-atlas", "image-datasets"]
 classifiers = [
   "Development Status :: 3 - Alpha",
   "Framework :: FastAPI",
