@@ -142,6 +142,19 @@ def embedding_items(projection_input: Any, input_column: str) -> list[Any]:
         raise ValueError(f"failed to read Atlas embedding input: {exc}") from exc
 
 
+def _embedding_sequence(projection_input: Any, input_column: str) -> Any:
+    try:
+        return projection_input[input_column]
+    except Exception as exc:
+        raise ValueError(f"failed to read Atlas embedding input: {exc}") from exc
+
+
+def _embedding_batch(items: Any, indices: Any) -> list[Any]:
+    if hasattr(items, "iloc"):
+        return [items.iloc[int(index)] for index in indices]
+    return [items[int(index)] for index in indices]
+
+
 def projection_dtype(options: AtlasOptions) -> Any:
     """Return the NumPy dtype selected for intermediate embeddings."""
     return np.float16 if options.embedding_dtype == "float16" else np.float32
@@ -252,13 +265,13 @@ def compute_anchor_transform_projection(
     session: AtlasEmbeddingSession,
 ) -> AtlasProjectionCoordinates:
     """Fit UMAP on anchors and transform remaining rows into the same space."""
-    items = embedding_items(projection_input, input_column)
+    items = _embedding_sequence(projection_input, input_column)
     row_count = len(items)
     if row_count <= 1:
         return AtlasProjectionCoordinates(np.zeros((row_count, 2), dtype=np.float32))
     selected = anchor_indices(row_count, options.anchor_sample)
     selected_set = set(selected.tolist())
-    anchor_embeddings = session.embed([items[index] for index in selected])
+    anchor_embeddings = session.embed(_embedding_batch(items, selected))
     reducer = umap.UMAP(
         metric="cosine",
         n_neighbors=min(15, max(2, len(selected) - 1)),
@@ -275,11 +288,11 @@ def compute_anchor_transform_projection(
         batch_indices.append(index)
         if len(batch_indices) < transform_batch_size:
             continue
-        batch_embeddings = session.embed([items[item_index] for item_index in batch_indices])
+        batch_embeddings = session.embed(_embedding_batch(items, batch_indices))
         values[batch_indices] = np.asarray(reducer.transform(batch_embeddings), dtype=np.float32)
         batch_indices = []
     if batch_indices:
-        batch_embeddings = session.embed([items[item_index] for item_index in batch_indices])
+        batch_embeddings = session.embed(_embedding_batch(items, batch_indices))
         values[batch_indices] = np.asarray(reducer.transform(batch_embeddings), dtype=np.float32)
     return AtlasProjectionCoordinates(values)
 

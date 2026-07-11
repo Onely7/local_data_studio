@@ -345,8 +345,7 @@ def prepare_projection_input(
 ) -> tuple[Any, str, Any]:
     """Separate encoder input from an Atlas display frame with aligned rows."""
     if modality == "text":
-        values = data_frame[column].tolist()
-        frame = pd.DataFrame({ATLAS_EMBED_INPUT_COLUMN: [text_for_embedding(value) for value in values]})
+        frame = pd.DataFrame({ATLAS_EMBED_INPUT_COLUMN: data_frame[column].map(text_for_embedding)})
         return frame, ATLAS_EMBED_INPUT_COLUMN, data_frame
     if modality != "image":
         return data_frame, column, data_frame
@@ -364,4 +363,31 @@ def attach_projection_columns(base_frame: Any, projected_frame: Any) -> Any:
     for column in (ATLAS_PROJECTION_X, ATLAS_PROJECTION_Y):
         if column in projected_frame.columns:
             output[column] = projected_frame[column].to_list()
+    return output
+
+
+def build_atlas_output_frame(base_frame: Any, coordinates: Any, preserve_columns: set[str]) -> Any:
+    """Build the final Atlas frame with one owned DataFrame copy.
+
+    Image columns retain their object structure and binary payloads. Other display
+    cells are bounded for Parquet and browser safety. ``base_frame`` is not mutated.
+    """
+    if ATLAS_EMBED_INPUT_COLUMN in base_frame.columns:
+        output = base_frame.drop(columns=[ATLAS_EMBED_INPUT_COLUMN])
+    else:
+        output = base_frame.copy()
+    if isinstance(coordinates, AtlasProjectionCoordinates):
+        output[ATLAS_PROJECTION_X] = coordinates.values[:, 0]
+        output[ATLAS_PROJECTION_Y] = coordinates.values[:, 1]
+    else:
+        output[ATLAS_PROJECTION_X] = coordinates[ATLAS_PROJECTION_X].to_list()
+        output[ATLAS_PROJECTION_Y] = coordinates[ATLAS_PROJECTION_Y].to_list()
+    projection_columns = {ATLAS_PROJECTION_X, ATLAS_PROJECTION_Y, ATLAS_PROJECTION_NEIGHBORS}
+    for column in output.columns:
+        if column in projection_columns:
+            continue
+        if str(column) in preserve_columns:
+            output[column] = output[column].map(normalize_image_display_value)
+        else:
+            output[column] = output[column].map(sanitize_atlas_cell)
     return output

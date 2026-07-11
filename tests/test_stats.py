@@ -6,6 +6,7 @@ import json
 from pathlib import Path
 from tempfile import TemporaryDirectory
 from unittest import TestCase
+from unittest.mock import patch
 
 from local_data_studio.server.stats import (
     compute_column_stats,
@@ -119,3 +120,48 @@ class ColumnStatisticsContractTests(TestCase):
             },
             result,
         )
+
+    def test_statistics_fetch_rows_in_bounded_batches(self) -> None:
+        """Verify that statistics avoid materializing DuckDB's complete row matrix."""
+
+        class _FakeResult:
+            description = [("value",)]
+
+            def __init__(self) -> None:
+                self.fetch_sizes: list[int] = []
+                self.batches = [[(1,)], [(2,)], []]
+
+            def fetchmany(self, size: int) -> list[tuple[int]]:
+                self.fetch_sizes.append(size)
+                return self.batches.pop(0)
+
+        class _FakeConnection:
+            def __init__(self, result: _FakeResult) -> None:
+                self.result = result
+
+            def __enter__(self) -> _FakeConnection:
+                return self
+
+            def __exit__(self, *args: object) -> None:
+                return None
+
+            def execute(self, query: str, params: list[str]) -> _FakeResult:
+                self.query = query
+                self.params = params
+                return self.result
+
+        cursor = _FakeResult()
+        connection = _FakeConnection(cursor)
+        with (
+            patch("local_data_studio.server.column_stats.service.relation_sql", return_value=("relation", ["dataset"])),
+            patch("local_data_studio.server.column_stats.service.open_connection", return_value=connection),
+            patch(
+                "local_data_studio.server.column_stats.service.describe_relation",
+                return_value=[{"name": "value", "type": "BIGINT"}],
+            ),
+        ):
+            result = compute_column_stats("sample.jsonl", Path("sample.jsonl"), sample=50)
+
+        self.assertEqual([1_024, 1_024, 1_024], cursor.fetch_sizes)
+        self.assertEqual(2, result["sample"])
+        self.assertEqual([1, 1], result["columns"][0]["bins"])
