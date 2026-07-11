@@ -107,7 +107,7 @@ local-data-studio --config /path/to/local_data_studio.toml
    OPENAI_MODEL=gpt-5.2
 
    # EDA Settings
-   EDA_ROW_LIMIT=10000000
+   EDA_ROW_LIMIT=50000
    EDA_PROFILE_MODE=minimal
    EDA_CELL_MAX_CHARS=5000
    EDA_NESTED_POLICY=stringify
@@ -140,7 +140,7 @@ local-data-studio --config /path/to/local_data_studio.toml
    - `OPENAI_API_KEY`: LLM による SQL 生成を有効化するための API Key です。
    - `OPENAI_BASE_URL`: OpenAI 互換 API のエンドポイントです。
    - `OPENAI_MODEL`: 使用する OpenAI モデル名です。
-   - `EDA_ROW_LIMIT`: EDA レポート生成時に読み込む最大行数です。
+   - `EDA_ROW_LIMIT`: データセット全体と SQL クエリ結果の EDA レポートに使うサーバー側の行数上限です。環境変数または `.env` で指定し、UI からは上書きしません。値は 100～50,000 行の範囲に制限されます。
    - `EDA_PROFILE_MODE`: `minimal` または `maximal` を指定できます。`minimal` は軽量なレポート、`maximal` は詳細な統計を含む代わりに時間がかかります。
    - `EDA_CELL_MAX_CHARS`: EDA で文字列が長い場合の最大表示文字数です。超過分は `... (truncated)` として省略されます。
    - `EDA_NESTED_POLICY`: ネスト型（list/struct/object/binary など）の扱い方です。`stringify` は文字列化して残し、`drop` は該当列を除外します。
@@ -202,7 +202,7 @@ INFO:     Application startup complete.
 4. **EDA レポート**  
    Run EDA を実行するとデータセットのサンプルを対象にしたレポートが生成され、キャッシュされます。**Run EDA on Query Results** を使うと、SQL Console の現在のクエリ結果を対象にした EDA レポートを生成できます。  
    データセット全体のレポートは `./cache/eda` に {ファイル fingerprint, サンプル数, `EDA_PROFILE_MODE`} に基づいてキャッシュされます。クエリ結果のレポートは {ファイル fingerprint, SQL, サンプル数, `EDA_PROFILE_MODE`} に基づいて別キャッシュされます。EDA cache 全体は既定で 1 GiB に制限され、`EDA_CACHE_MAX_BYTES` を超えると古いレポートから削除されます。
-   `EDA_ROW_LIMIT` と UI 側の設定でサンプル数を調整できます。  
+   行数上限は環境変数または `.env` の `EDA_ROW_LIMIT` で指定します。UI からこのサーバー設定を上書きすることはできません。
    <img src="../images/local_data_studio_05.png" alt="local data studio 05" width=45%> <img src="../images/local_data_studio_06.png" alt="local data studio 06" width=45%>
 
 5. **Embedding 可視化**  
@@ -226,6 +226,7 @@ INFO:     Application startup complete.
 - `models/embedder` または設定した models directory 配下のローカル encoder model 実体は配布物に含めません。リポジトリにはディレクトリ用の placeholder のみを含め、モデルファイルは各環境で配置してください。
 - キャッシュは `./cache/metadata`, `./cache/index`, `./cache/stats`, `./cache/count`, `./cache/search`, `./cache/eda` に分離されます。EDA レポートは `EDA_CACHE_MAX_BYTES` で全体容量を制限し、超過時は古いものから削除します。fingerprint を使う cache は該当するファイルパス・サイズ・更新時刻に基づいて無効化されます。
 - `Run EDA on Query Results` では、`rn` や `__rowid` のような補助カラムはレポートから除外されます。
+- Count Rows、EDA、Atlas の実行後に表示するフィードバックは、周囲の操作より目立ちすぎない共通のコンパクトな status style に統一しています。
 - TB 級の `.json` 配列は推奨しません。高速な閲覧には JSONL または Parquet を推奨します。
 - `Delete from file` は実ファイルを書き換えるため、必要に応じてバックアップを推奨します。
 - `ALLOW_DELETE_DATA=false` の場合は、セッション内の非表示のみ可能です。（実ファイルは書き換わらない）
