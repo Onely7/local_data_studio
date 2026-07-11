@@ -32,6 +32,8 @@ Local Data Studio は、Huggingface Datasets の [Data Studio](https://huggingfa
 
 パッケージ公開後は pip でインストールできます。
 
+Local Data Studio は Python 3.11、3.12、3.13 に対応しています。
+
 ```bash
 python -m pip install local-data-studio
 ```

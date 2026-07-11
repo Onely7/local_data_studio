@@ -32,6 +32,8 @@ It provides fast preview, DuckDB SQL execution (with optional LLM-assisted SQL g
 
 After the package is published, install it with pip:
 
+Local Data Studio supports Python 3.11, 3.12, and 3.13.
+
 ```bash
 python -m pip install local-data-studio
 ```
