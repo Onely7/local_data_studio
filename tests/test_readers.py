@@ -3,10 +3,12 @@ from pathlib import Path
 from tempfile import TemporaryDirectory
 from unittest import TestCase
 
+import pyarrow as pa
+import pyarrow.parquet as pq
 from fastapi import HTTPException
 
 from local_data_studio.server.config import MAX_COLUMNS, MAX_JSON_PREVIEW_BYTES, MAX_OFFSET_FALLBACK
-from local_data_studio.server.readers import count_rows_with_progress, fetch_preview_page, load_dataset_metadata, search_dataset
+from local_data_studio.server.readers import count_rows_with_progress, fetch_preview_page, fetch_raw_row, load_dataset_metadata, search_dataset
 
 
 class _NoCancelControl:
@@ -18,6 +20,44 @@ class _NoCancelControl:
 
 
 class ReaderPreviewTests(TestCase):
+    def test_raw_jsonl_row_is_not_limited_like_preview(self) -> None:
+        with TemporaryDirectory() as tmpdir:
+            path = Path(tmpdir) / "data.jsonl"
+            long_text = "x" * (MAX_JSON_PREVIEW_BYTES // 64)
+            payload = {"text": long_text, "items": list(range(MAX_COLUMNS + 2))}
+            path.write_text(f"{json.dumps(payload)}\n", encoding="utf-8")
+
+            preview = fetch_preview_page("data.jsonl", path, limit=1)
+            columns, values = fetch_raw_row(path, 1)
+
+            self.assertIn("truncated", preview["rows"][0][0])
+            self.assertEqual(["text", "items"], columns)
+            self.assertEqual(long_text, values[0])
+            self.assertEqual(payload["items"], values[1])
+
+    def test_raw_csv_row_is_not_limited_like_preview(self) -> None:
+        with TemporaryDirectory() as tmpdir:
+            path = Path(tmpdir) / "data.csv"
+            long_text = "x" * (MAX_JSON_PREVIEW_BYTES // 64)
+            path.write_text(f"name,description\nAda,{long_text}\n", encoding="utf-8")
+
+            columns, values = fetch_raw_row(path, 1)
+
+            self.assertEqual(["name", "description"], columns)
+            self.assertEqual(["Ada", long_text], values)
+
+    def test_raw_parquet_row_reads_one_full_record(self) -> None:
+        with TemporaryDirectory() as tmpdir:
+            path = Path(tmpdir) / "data.parquet"
+            long_text = "x" * (MAX_JSON_PREVIEW_BYTES // 64)
+            table = pa.Table.from_pylist([{"id": 1, "text": long_text}, {"id": 2, "text": "second"}])
+            pq.write_table(table, path, row_group_size=1)
+
+            columns, values = fetch_raw_row(path, 1)
+
+            self.assertEqual(["id", "text"], columns)
+            self.assertEqual([1, long_text], values)
+
     def test_jsonl_preview_uses_next_page_token(self) -> None:
         with TemporaryDirectory() as tmpdir:
             path = Path(tmpdir) / "data.jsonl"

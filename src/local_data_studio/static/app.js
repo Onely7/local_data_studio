@@ -25,6 +25,10 @@ const state = {
   selectedRowIndex: null,
   selectedRowId: null,
   rowInspectorRaw: false,
+  rowInspectorRawColumns: [],
+  rowInspectorRawValues: null,
+  rowInspectorRawLoading: false,
+  rowInspectorRawRequest: 0,
   pendingDeleteRowId: null,
   pendingDeleteColumn: null,
   allowDeleteData: true,
@@ -169,6 +173,14 @@ function isInspectorValueTruncated(value) {
   } catch (err) {
     return String(value).length > ROW_INSPECTOR_VALUE_MAX;
   }
+}
+
+function resetRowInspectorRaw() {
+  state.rowInspectorRaw = false;
+  state.rowInspectorRawColumns = [];
+  state.rowInspectorRawValues = null;
+  state.rowInspectorRawLoading = false;
+  state.rowInspectorRawRequest += 1;
 }
 
 function isImageUrl(text) {
@@ -990,12 +1002,16 @@ function renderRowInspector(rowIndex) {
     elements.rowInspector.textContent = "Select a row to inspect";
     state.selectedRowIndex = null;
     state.selectedRowId = null;
+    resetRowInspectorRaw();
     if (elements.rowInspectorRaw) {
       elements.rowInspectorRaw.disabled = true;
       elements.rowInspectorRaw.textContent = "Raw";
     }
     updateRowActions();
     return;
+  }
+  if (state.selectedRowIndex !== rowIndex && state.rowInspectorRaw) {
+    resetRowInspectorRaw();
   }
   state.selectedRowIndex = rowIndex;
   state.selectedRowId =
@@ -1004,28 +1020,88 @@ function renderRowInspector(rowIndex) {
       : null;
   const row = state.rows[rowIndex];
   const rowObj = {};
-  state.columns.forEach((col, idx) => {
-    if (state.hiddenTableColumns.has(col)) {
-      return;
-    }
-    rowObj[col] = state.rowInspectorRaw ? row[idx] : compactInspectorValue(row[idx]);
-  });
-  if (elements.rowInspectorRaw) {
-    elements.rowInspectorRaw.disabled = false;
-    elements.rowInspectorRaw.textContent = state.rowInspectorRaw ? "Compact" : "Raw";
+  if (state.rowInspectorRaw && Array.isArray(state.rowInspectorRawValues)) {
+    state.rowInspectorRawColumns.forEach((col, idx) => {
+      rowObj[col] = state.rowInspectorRawValues[idx];
+    });
+  } else if (!state.rowInspectorRawLoading) {
+    state.columns.forEach((col, idx) => {
+      if (state.hiddenTableColumns.has(col)) {
+        return;
+      }
+      rowObj[col] = compactInspectorValue(row[idx]);
+    });
   }
-  elements.rowInspector.textContent = Object.keys(rowObj).length
-    ? JSON.stringify(rowObj, null, 2)
-    : "No visible columns";
+  if (elements.rowInspectorRaw) {
+    elements.rowInspectorRaw.disabled = state.rowInspectorRawLoading;
+    elements.rowInspectorRaw.textContent = state.rowInspectorRawLoading
+      ? "Loading..."
+      : state.rowInspectorRaw
+        ? "Compact"
+        : "Raw";
+  }
+  elements.rowInspector.textContent = state.rowInspectorRawLoading
+    ? "Loading full row data..."
+    : Object.keys(rowObj).length
+      ? JSON.stringify(rowObj, null, 2)
+      : "No visible columns";
   updateRowActions();
 }
 
-function toggleRowInspectorRaw() {
+async function toggleRowInspectorRaw() {
   if (state.selectedRowIndex === null || state.selectedRowIndex === undefined) {
     return;
   }
-  state.rowInspectorRaw = !state.rowInspectorRaw;
-  renderRowInspector(state.selectedRowIndex);
+  if (state.rowInspectorRaw) {
+    resetRowInspectorRaw();
+    renderRowInspector(state.selectedRowIndex);
+    return;
+  }
+
+  const rowIndex = state.selectedRowIndex;
+  const fileAtStart = state.file;
+  const rowId = state.rowIds[rowIndex];
+  const request = { file: fileAtStart };
+  if (Number.isFinite(rowId)) {
+    request.row_id = rowId;
+  } else if (state.view === "query" && state.querySql) {
+    request.sql = state.querySql;
+    request.offset = state.offset + rowIndex;
+  } else {
+    showError("Full Raw data is unavailable for this row.");
+    return;
+  }
+
+  state.rowInspectorRaw = true;
+  state.rowInspectorRawColumns = [];
+  state.rowInspectorRawValues = null;
+  state.rowInspectorRawLoading = true;
+  const requestId = state.rowInspectorRawRequest + 1;
+  state.rowInspectorRawRequest = requestId;
+  renderRowInspector(rowIndex);
+
+  try {
+    const data = await fetchJSON("/api/raw_row", {
+      method: "POST",
+      body: JSON.stringify(request),
+    });
+    if (
+      state.rowInspectorRawRequest !== requestId ||
+      state.file !== fileAtStart ||
+      state.selectedRowIndex !== rowIndex
+    ) {
+      return;
+    }
+    state.rowInspectorRawColumns = data.columns || [];
+    state.rowInspectorRawValues = data.row || [];
+    state.rowInspectorRawLoading = false;
+    renderRowInspector(rowIndex);
+  } catch (err) {
+    if (state.rowInspectorRawRequest !== requestId) return;
+    resetRowInspectorRaw();
+    renderRowInspector(rowIndex);
+    showError(extractErrorMessage(err));
+  }
 }
 
 function updateRowActions() {
@@ -1089,7 +1165,7 @@ function applyTableData(data) {
   state.expandedRowIndex = null;
   state.selectedRowIndex = null;
   state.selectedRowId = null;
-  state.rowInspectorRaw = false;
+  resetRowInspectorRaw();
   closeImageOverlay();
   closeJsonOverlay();
   renderTable();
@@ -1524,7 +1600,7 @@ async function selectFile(fileName) {
   state.columnStats = {};
   state.selectedRowIndex = null;
   state.selectedRowId = null;
-  state.rowInspectorRaw = false;
+  resetRowInspectorRaw();
   state.pendingDeleteColumn = null;
   state.rowIds = [];
   state.hiddenTableColumns = new Set();

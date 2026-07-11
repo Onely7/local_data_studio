@@ -87,6 +87,31 @@ def serialize_value(value: Any, *, key: str | None = None, sibling_image_path: b
     return result
 
 
+def serialize_raw_value(value: Any) -> Any:
+    """Convert one explicitly requested row to JSON-friendly values without limits.
+
+    Preview responses use size limits to remain responsive. This function is used
+    only after a user explicitly requests the full selected row, so it must not
+    apply the preview's character or collection limits.
+    """
+    result: Any = value
+
+    if value is None:
+        result = None
+    elif isinstance(value, (datetime.date, datetime.datetime)):
+        result = value.isoformat()
+    elif isinstance(value, decimal.Decimal):
+        result = float(value)
+    elif isinstance(value, (bytes, bytearray)):
+        result = bytes(value).hex()
+    elif isinstance(value, (list, tuple)):
+        result = [serialize_raw_value(item) for item in value]
+    elif isinstance(value, dict):
+        result = {str(item_key): serialize_raw_value(item_value) for item_key, item_value in value.items()}
+
+    return result
+
+
 def serialize_rows(rows: Sequence[Sequence[Any]]) -> list[list[Any]]:
     """Serialize a list of row sequences into JSON-friendly lists."""
     return [[serialize_value(cell) for cell in row] for row in rows]
