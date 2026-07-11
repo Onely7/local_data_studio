@@ -33,6 +33,10 @@ from .contracts import DatasetMetadata, ScanControl
 
 LINE_DATASET_EXTENSIONS = {".jsonl", ".csv", ".tsv"}
 CSV_FIELD_SIZE_LOCK = Lock()
+JSONL_SCHEMA_SAMPLE_ROWS = 100
+JSONL_SCHEMA_MAX_SCANNED_LINES = 10_000
+JSONL_SCHEMA_MAX_BYTES = 4 * 1024 * 1024
+INDEX_CHECKPOINT_BATCH_SIZE = 256
 
 
 def _indexed_line_start(path: Path, target_row_number: int, hidden_row_ids: set[int]) -> tuple[int, int, int]:
@@ -114,15 +118,17 @@ def load_delimited_metadata(path: Path, delimiter: str, *, use_cache: bool = Tru
     return load_or_create_metadata(path, lambda source: _create_delimited_metadata(source, delimiter), use_cache=use_cache)
 
 
-def _create_jsonl_metadata(path: Path, sample_rows: int = 100) -> DatasetMetadata:
+def _create_jsonl_metadata(path: Path, sample_rows: int = JSONL_SCHEMA_SAMPLE_ROWS) -> DatasetMetadata:
     column_types: dict[str, str] = {}
     columns_truncated = False
     sampled = 0
+    scanned = 0
     with path.open("rb") as file:
-        while sampled < sample_rows:
+        while sampled < sample_rows and scanned < JSONL_SCHEMA_MAX_SCANNED_LINES and file.tell() < JSONL_SCHEMA_MAX_BYTES:
             line = file.readline()
             if not line:
                 break
+            scanned += 1
             if not line.strip():
                 continue
             try:
@@ -305,8 +311,16 @@ def build_line_index_with_progress(path: Path, control: ScanControl) -> dict[str
     if suffix not in LINE_DATASET_EXTENSIONS:
         raise HTTPException(status_code=400, detail="line index is only supported for jsonl, csv, and tsv")
     index = LineOffsetIndex(path)
+    byte_count = path.stat().st_size
+    cached_status = index.status()
+    if cached_status["complete"] and cached_status["byte_count"] == byte_count and cached_status["row_count"] is not None:
+        row_count = int(cached_status["row_count"])
+        control.update(progress=1.0, message=f"Using index for {row_count:,} rows")
+        return {"format": format_name(path), "row_count": row_count, "byte_count": byte_count, "index": cached_status}
+
     row_count = 0
-    size = max(path.stat().st_size, 1)
+    checkpoints: list[tuple[int, int]] = []
+    size = max(byte_count, 1)
     with path.open("rb") as file:
         if suffix in {".csv", ".tsv"}:
             file.readline()
@@ -319,10 +333,14 @@ def build_line_index_with_progress(path: Path, control: ScanControl) -> dict[str
             if not line.strip():
                 continue
             row_count += 1
-            index.record(row_count, byte_offset)
+            if row_count % index.stride == 0:
+                checkpoints.append((row_count, byte_offset))
+                if len(checkpoints) >= INDEX_CHECKPOINT_BATCH_SIZE:
+                    index.record_checkpoints(checkpoints)
+                    checkpoints.clear()
             if row_count % 10_000 == 0:
                 control.update(progress=min(file.tell() / size, 0.999), message=f"Indexed {row_count:,} rows")
-    byte_count = path.stat().st_size
+    index.record_checkpoints(checkpoints)
     index.mark_complete(row_count=row_count, byte_count=byte_count)
     status = index.status()
     control.update(progress=1.0, message=f"Indexed {row_count:,} rows")

@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from bisect import bisect_right
 from pathlib import Path
 from typing import Any
 
@@ -47,29 +48,38 @@ def raw_row(path: Path, row_id: int) -> tuple[list[str], list[Any]]:
         if target_offset >= group_rows:
             target_offset -= group_rows
             continue
-        for batch in parquet_file.iter_batches(batch_size=1, row_groups=[row_group], columns=columns):
-            if target_offset:
-                target_offset -= batch.num_rows
-                continue
-            record = batch.to_pylist()[0]
-            return columns, [record.get(column) for column in columns]
+        records, _ = _read_group_slice(parquet_file, row_group, target_offset, 1, columns)
+        if records:
+            return columns, [records[0].get(column) for column in columns]
+        break
     raise HTTPException(status_code=404, detail="row not found")
 
 
 def _cursor_for_offset(parquet_file: Any, offset: int, deleted_ids: set[int]) -> tuple[int, int, int]:
     if offset <= 0:
         return 0, 0, 1
-    visible_rows_skipped = 0
-    absolute_row = 1
+    group_ends: list[int] = []
+    total_rows = 0
     for row_group in range(parquet_file.num_row_groups):
-        group_rows = parquet_file.metadata.row_group(row_group).num_rows
-        for row_offset in range(group_rows):
-            if absolute_row not in deleted_ids:
-                if visible_rows_skipped >= offset:
-                    return row_group, row_offset, absolute_row
-                visible_rows_skipped += 1
-            absolute_row += 1
-    return parquet_file.num_row_groups, 0, absolute_row
+        total_rows += parquet_file.metadata.row_group(row_group).num_rows
+        group_ends.append(total_rows)
+    deleted = sorted(row_id for row_id in deleted_ids if 1 <= row_id <= total_rows)
+    if offset >= total_rows - len(deleted):
+        return parquet_file.num_row_groups, 0, total_rows + 1
+
+    target_visible_row = offset + 1
+    low, high = 1, total_rows
+    while low < high:
+        middle = (low + high) // 2
+        visible_through_middle = middle - bisect_right(deleted, middle)
+        if visible_through_middle >= target_visible_row:
+            high = middle
+        else:
+            low = middle + 1
+    absolute_row = low
+    row_group = bisect_right(group_ends, absolute_row - 1)
+    group_start = group_ends[row_group - 1] if row_group else 0
+    return row_group, absolute_row - group_start - 1, absolute_row
 
 
 def _read_group_slice(

@@ -66,6 +66,17 @@ class LineOffsetIndex:
                 (line_number, byte_offset),
             )
 
+    def record_checkpoints(self, checkpoints: list[tuple[int, int]]) -> None:
+        """Persist multiple sparse offsets in one SQLite transaction."""
+        valid = [(line_number, byte_offset) for line_number, byte_offset in checkpoints if line_number > 0]
+        if not valid:
+            return
+        with self._connect() as connection:
+            connection.executemany(
+                "INSERT OR REPLACE INTO line_offsets(line_number, byte_offset) VALUES (?, ?)",
+                valid,
+            )
+
     def mark_complete(self, *, row_count: int, byte_count: int) -> None:
         """Store completion metadata for a fully built sparse index."""
         with self._connect() as connection:
