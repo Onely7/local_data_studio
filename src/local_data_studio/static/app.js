@@ -986,13 +986,20 @@ function renderAtlasModelOptions() {
 function renderAtlasPromptControl() {
   if (!elements.atlasPromptControls || !elements.atlasPrompt) return;
   const model = selectedAtlasModelMetadata();
-  const sentenceTransformers = selectedAtlasBackend() === "sentence-transformers";
-  elements.atlasPromptControls.hidden = !sentenceTransformers;
+  const sentenceTransformers =
+    selectedAtlasBackend() === "sentence-transformers" &&
+    atlasBackendAvailable(model, "sentence-transformers");
   elements.atlasPrompt.disabled = !sentenceTransformers;
+  elements.atlasPromptControls.classList.toggle(
+    "atlas-prompt-unavailable",
+    !sentenceTransformers,
+  );
   const preview = model ? model.default_prompt_preview || "" : "";
-  elements.atlasPrompt.placeholder = preview
-    ? `Model default: ${preview}`
-    : "Optional prompt template";
+  elements.atlasPrompt.placeholder = sentenceTransformers
+    ? preview
+      ? `Model default: ${preview}`
+      : "Optional prompt template"
+    : "Available with Sentence Transformers only";
 }
 
 function renderAtlasBackendOptions() {
@@ -1005,8 +1012,15 @@ function renderAtlasBackendOptions() {
   ];
   const options = ['<option value="">Select backend</option>'].concat(
     backendDefinitions.map(([value, label]) => {
-      const available = atlasBackendAvailable(model, value);
-      const suffix = model && !available ? " (unavailable)" : "";
+      const capability = atlasBackendCapability(model, value);
+      const available = Boolean(capability && capability.available);
+      const suffix = model
+        ? !available
+          ? " (unavailable)"
+          : capability.status === "generic_fallback"
+            ? " (generic fallback)"
+            : ""
+        : "";
       return `<option value="${value}"${available ? "" : " disabled"}>${label}${suffix}</option>`;
     }),
   );

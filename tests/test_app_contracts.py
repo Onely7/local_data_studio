@@ -81,6 +81,7 @@ class ApplicationContractTests(TestCase):
         self.assertIn('id="atlas-backend"', response.text)
         self.assertIn('id="atlas-prompt"', response.text)
         self.assertIn('maxlength="16384"', response.text)
+        self.assertNotIn('id="atlas-prompt-controls" hidden', response.text)
 
     def test_blocking_routes_run_in_fastapi_threadpool(self) -> None:
         """Verify that blocking routes run in fastapi threadpool."""

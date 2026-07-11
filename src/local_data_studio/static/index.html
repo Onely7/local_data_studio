@@ -4,7 +4,7 @@
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <title>Data Viewer</title>
-    <link rel="stylesheet" href="styles.css?v=20260712-atlas-backend-prompt" />
+    <link rel="stylesheet" href="styles.css?v=20260713-atlas-backend-detection" />
   </head>
   <body>
     <div class="app">
@@ -170,7 +170,7 @@ SELECT * FROM data LIMIT 100</textarea
                 <option value="transformers" disabled>Transformers</option>
               </select>
             </div>
-            <div class="atlas-controls atlas-prompt-controls" id="atlas-prompt-controls" hidden>
+            <div class="atlas-controls atlas-prompt-controls atlas-prompt-unavailable" id="atlas-prompt-controls">
               <label for="atlas-prompt">Prompt</label>
               <textarea
                 id="atlas-prompt"
@@ -342,6 +342,6 @@ Select a row to inspect</pre
       </div>
     </div>
 
-    <script src="app.js?v=20260712-atlas-backend-prompt"></script>
+    <script src="app.js?v=20260713-atlas-backend-detection"></script>
   </body>
 </html>
