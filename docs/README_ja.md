@@ -232,9 +232,10 @@ INFO:     Application startup complete.
 - application package は `src/local_data_studio` 配下にあります。静的 UI asset は `src/local_data_studio/static` として package に含め、実行時の `.env`, `data`, `cache`, `models/embedder` は選択された workspace または現在の作業ディレクトリ配下をデフォルトにしています。CLI option、OS environment variable、config file、`.env`、workspace default の順で上書きされます。
 - `src/local_data_studio/app.py` は application assembly だけを行う小さな entrypoint です。Request model と API route は `src/local_data_studio/server/api` 配下で dataset access、analysis、background job、mutation、共通 service、static mount に分割されています。Filesystem、DuckDB、EDA、job に関する blocking route は FastAPI の threadpool で実行し、streaming upload だけを async のまま維持しています。
 - `src/local_data_studio/server/readers.py` は互換 facade として維持し、形式別実装を `src/local_data_studio/server/dataset_readers` に分割しています。JSONL metadata 推論は行数と byte 数の固定上限で停止し、JSONL/CSV/TSV preview は fingerprint 付き sparse line index と byte/page token を使います。完成済み index は再利用し、checkpoint は batch transaction で保存します。CSV/TSV の schema、preview、search、Raw は長大 field 対応 parser を共有します。Parquet schema は footer metadata のみを読み、preview と Raw は bounded record batch、offset 互換処理は行単位 scan ではなく row-group metadata を使います。
+- `src/local_data_studio/server/stats.py` は互換 facade として維持し、`src/local_data_studio/server/column_stats` で値の推論、カラム単位の集計、DuckDB orchestration を分離しています。Sample row は固定サイズ batch で取得し、全 row matrix と column copy を同時に保持せず、column accumulator へ直接渡します。
 - SQL 実行は `src/local_data_studio/server/sql.py` に集約され、読み取り専用 SQL の検証、DuckDB リソース制限、バックグラウンドジョブの協調キャンセルを扱います。
 - EDA レポートの orchestration は `src/local_data_studio/server/eda_reports.py`、profiling 設定と DataFrame sanitization は `src/local_data_studio/server/eda.py` に分離されています。
-- `src/local_data_studio/server/atlas.py` は互換 facade として維持し、`src/local_data_studio/server/atlas_components` で contract、画像変換、projection、dataset cache、subprocess 制御、orchestration を分離しています。Encoder は Atlas job ごとに 1 回だけ生成して anchor/transform batch 間で再利用します。Transform 対象 row index は固定長 batch で処理し、projection は使用しない neighbors 辞書を作らず座標だけを返します。同じ fingerprint・query・column・model・設定に対する並行 cache miss は 1 回の cache 生成を共有します。Cache pruning は古いファイルから削除しつつ、現在の Atlas 起動で必要な parquet artifact を保護します。
+- `src/local_data_studio/server/atlas.py` は互換 facade として維持し、`src/local_data_studio/server/atlas_components` で contract、画像変換、projection、dataset cache、subprocess 制御、orchestration を分離しています。Encoder は Atlas job ごとに 1 回だけ生成して anchor/transform batch 間で再利用します。Anchor-transform は input column 全体を Python list に変換せず、anchor と現在の transform batch だけを取得します。表示値の sanitization と projection column の追加は 1 つの owned DataFrame copy 上で行い、同じ fingerprint・query・column・model・設定に対する並行 cache miss は 1 回の cache 生成を共有します。
 - Atlas の UMAP projection は cache artifact の再現性のため固定 seed を使い、UMAP の seeded execution mode に合わせて `n_jobs=1` を明示することで thread override warning を出さないようにしています。
 - macOS では child-side fork による `SIGSEGV (-11)` を避けるため、Atlas subprocess 起動を Python の `posix_spawn` path に乗る形に固定しています。Atlas command は絶対パスを使い、`Popen` に `cwd` を渡さず、`close_fds=False` を維持してください。
 - バックグラウンドジョブは `src/local_data_studio/server/jobs.py` で管理され、`/api/jobs/*` 経由で進捗、キャンセル、結果、エラー状態を確認できます。
@@ -246,6 +247,7 @@ INFO:     Application startup complete.
   - `uv run ruff format` (あるいは `uvx ruff format`)
   - `uv run ruff check` (あるいは `uvx ruff check`)
   - `uv run ty check` (あるいは `uvx ty check`)
+- Ruff は application code と test code の両方に、PEP 257 を基本とした Google convention の docstring を適用します。公開 API は型と名前だけでは明確にならない制約、例外、副作用、ownership を記載し、private な実装詳細には処理内容を言い換えるだけの説明を追加しません。
 - 上で指摘された全てのエラーを解消した後に、コミットするようにしてください。
 
 ## 謝辞
