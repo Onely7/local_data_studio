@@ -36,6 +36,10 @@ class JobRecord:
     updated_at: str = field(default_factory=_utc_now_iso)
 
     def to_response(self) -> dict[str, Any]:
+        """Return a new response mapping for the current lock-protected state.
+
+        Nested ``result`` values are shared and must be treated as read-only.
+        """
         return {
             "id": self.job_id,
             "kind": self.kind,
@@ -54,14 +58,17 @@ class JobContext:
     """Cooperative progress and cancellation handle passed to worker code."""
 
     def __init__(self, store: JobStore, job_id: str) -> None:
+        """Bind worker callbacks to one job owned by ``store``."""
         self._store = store
         self._job_id = job_id
 
     def check_cancelled(self) -> None:
+        """Raise ``JobCancelledError`` when cooperative cancellation was requested."""
         if self._store.is_cancel_requested(self._job_id):
             raise JobCancelledError("job was cancelled")
 
     def update(self, *, progress: float | None = None, message: str | None = None) -> None:
+        """Publish progress clamped to [0, 1] and an optional user-facing message."""
         self._store.update_progress(self._job_id, progress=progress, message=message)
 
 
@@ -69,11 +76,16 @@ class JobStore:
     """Thread-safe registry for short-lived background jobs."""
 
     def __init__(self, *, max_workers: int = 4) -> None:
+        """Create a registry and a bounded worker pool owned by this store."""
         self._executor = ThreadPoolExecutor(max_workers=max_workers, thread_name_prefix="local-data-studio-job")
         self._lock = threading.RLock()
         self._jobs: dict[str, JobRecord] = {}
 
     def submit(self, kind: str, work: JobWork) -> JobRecord:
+        """Register work and return its live mutable record immediately.
+
+        Worker exceptions are captured in the record rather than propagated here.
+        """
         job_id = uuid.uuid4().hex
         record = JobRecord(job_id=job_id, kind=kind)
         with self._lock:
@@ -95,10 +107,12 @@ class JobStore:
             self._set_succeeded(job_id, result)
 
     def get(self, job_id: str) -> JobRecord | None:
+        """Return the store-owned live record, or ``None`` when unknown."""
         with self._lock:
             return self._jobs.get(job_id)
 
     def cancel(self, job_id: str) -> JobRecord | None:
+        """Request cooperative cancellation and return the live record if present."""
         with self._lock:
             record = self._jobs.get(job_id)
             if record is None:
@@ -111,11 +125,13 @@ class JobStore:
             return record
 
     def is_cancel_requested(self, job_id: str) -> bool:
+        """Return whether a job is missing or has a cancellation request."""
         with self._lock:
             record = self._jobs.get(job_id)
             return record is None or record.cancel_requested
 
     def update_progress(self, job_id: str, *, progress: float | None = None, message: str | None = None) -> None:
+        """Update a queued or running job while holding the registry lock."""
         with self._lock:
             record = self._jobs.get(job_id)
             if record is None or record.status not in {"queued", "running"}:

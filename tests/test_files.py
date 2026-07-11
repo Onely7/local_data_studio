@@ -1,3 +1,5 @@
+"""Tests for files behavior."""
+
 from pathlib import Path
 from tempfile import TemporaryDirectory
 from unittest import TestCase
@@ -14,7 +16,10 @@ from local_data_studio.server.files import (
 
 
 class DatasetDiscoveryTests(TestCase):
+    """Test dataset discovery behavior."""
+
     def test_discover_dataset_files_prunes_excluded_directories(self) -> None:
+        """Verify that discover dataset files prunes excluded directories."""
         with TemporaryDirectory() as tmpdir:
             data_root = Path(tmpdir).resolve()
             keep_file = data_root / "keep.csv"
@@ -32,6 +37,7 @@ class DatasetDiscoveryTests(TestCase):
             self.assertEqual([keep_file], files)
 
     def test_resolve_data_file_uses_discovered_name_allowlist(self) -> None:
+        """Verify that resolve data file uses discovered name allowlist."""
         with TemporaryDirectory() as tmpdir:
             data_root = Path(tmpdir).resolve()
             dataset = data_root / "example.jsonl"
@@ -49,7 +55,10 @@ class DatasetDiscoveryTests(TestCase):
 
 
 class RawImageFileResolutionTests(TestCase):
+    """Test raw image file resolution behavior."""
+
     def test_resolve_raw_image_file_accepts_file_url_inside_allowed_root(self) -> None:
+        """Verify that resolve raw image file accepts file url inside allowed root."""
         with TemporaryDirectory() as tmpdir:
             data_root = Path(tmpdir).resolve()
             image_path = data_root / "image.png"
@@ -60,6 +69,7 @@ class RawImageFileResolutionTests(TestCase):
             self.assertEqual(image_path, resolved)
 
     def test_resolve_raw_image_file_rejects_non_image_file(self) -> None:
+        """Verify that resolve raw image file rejects non image file."""
         with TemporaryDirectory() as tmpdir:
             data_root = Path(tmpdir).resolve()
             text_path = data_root / "notes.txt"
@@ -71,6 +81,7 @@ class RawImageFileResolutionTests(TestCase):
             self.assertEqual(400, raised.exception.status_code)
 
     def test_resolve_raw_image_file_rejects_image_outside_allowed_roots(self) -> None:
+        """Verify that resolve raw image file rejects image outside allowed roots."""
         with TemporaryDirectory() as allowed_tmpdir, TemporaryDirectory() as outside_tmpdir:
             allowed_root = Path(allowed_tmpdir).resolve()
             outside_root = Path(outside_tmpdir).resolve()
@@ -83,6 +94,7 @@ class RawImageFileResolutionTests(TestCase):
             self.assertEqual(403, raised.exception.status_code)
 
     def test_resolve_raw_image_file_rejects_similarly_prefixed_directory(self) -> None:
+        """Verify that resolve raw image file rejects similarly prefixed directory."""
         with TemporaryDirectory() as tmpdir:
             base = Path(tmpdir).resolve()
             allowed_root = base / "images"
@@ -98,6 +110,7 @@ class RawImageFileResolutionTests(TestCase):
             self.assertEqual(403, raised.exception.status_code)
 
     def test_resolve_raw_image_file_rejects_invalid_path(self) -> None:
+        """Verify that resolve raw image file rejects invalid path."""
         with TemporaryDirectory() as tmpdir:
             with self.assertRaises(HTTPException) as raised:
                 resolve_raw_image_file("\x00invalid.jpg", [Path(tmpdir)])

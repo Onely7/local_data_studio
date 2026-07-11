@@ -29,6 +29,7 @@ router = APIRouter()
 
 @router.get("/api/column_stats")
 def column_stats(file: str = Query(...), sample: int | None = Query(DEFAULT_SAMPLE)) -> dict[str, Any]:
+    """Return bounded sample statistics, rejecting large synchronous scans."""
     path = resolve_data_file(file)
     reject_large_sync_operation(path, "synchronous column stats")
     return compute_column_stats(file, path, sample if sample is not None else DEFAULT_SAMPLE)
@@ -36,6 +37,7 @@ def column_stats(file: str = Query(...), sample: int | None = Query(DEFAULT_SAMP
 
 @router.post("/api/eda")
 def run_eda(payload: EdaRequest) -> dict[str, Any]:
+    """Generate or reuse an EDA report and return its cache URL."""
     path = resolve_data_file(payload.file)
     return eda_reports_service().generate_dataset_eda_report(
         file_name=payload.file,
@@ -48,6 +50,7 @@ def run_eda(payload: EdaRequest) -> dict[str, Any]:
 
 @router.post("/api/nl_query")
 def nl_query(payload: NLQueryRequest) -> dict[str, Any]:
+    """Generate SQL from a non-empty natural-language prompt and dataset schema."""
     path = resolve_data_file(payload.file)
     prompt = payload.prompt.strip()
     if not prompt:
@@ -60,6 +63,7 @@ def nl_query(payload: NLQueryRequest) -> dict[str, Any]:
 
 @router.get("/api/count")
 def count_rows(file: str = Query(...)) -> dict[str, Any]:
+    """Count rows synchronously only when the dataset is below the safety limit."""
     path = resolve_data_file(file)
     reject_large_sync_operation(path, "synchronous row count")
     return {"file": file, "count": count_relation_rows(path)}
@@ -72,6 +76,11 @@ def search(
     limit: int | None = Query(DEFAULT_LIMIT),
     offset: int | None = Query(0),
 ) -> dict[str, Any]:
+    """Search textual columns synchronously with bounded pagination.
+
+    Raises:
+        HTTPException: The query is blank or the dataset requires a background job.
+    """
     path = resolve_data_file(file)
     reject_large_sync_operation(path, "synchronous search")
     deleted_ids = deleted_row_ids_for(path)
@@ -96,6 +105,7 @@ def search(
 
 @router.post("/api/query")
 def run_query(payload: QueryRequest) -> dict[str, Any]:
+    """Run validated read-only SQL under configured resource limits."""
     path = resolve_data_file(payload.file)
     return execute_query_guarded(
         file_name=payload.file,

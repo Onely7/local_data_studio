@@ -25,6 +25,10 @@ def _reject_large_hard_delete(path: Path) -> None:
 
 @router.post("/api/delete_row")
 def delete_row(payload: DeleteRowRequest) -> dict[str, Any]:
+    """Hide a row or rewrite a small dataset when persistent deletion is allowed.
+
+    Row IDs are one-based. Persistent deletion clears all soft-deleted row IDs.
+    """
     path = resolve_data_file(payload.file)
     row_id = int(payload.row_id)
     if row_id < 1:
@@ -45,6 +49,7 @@ def delete_row(payload: DeleteRowRequest) -> dict[str, Any]:
 
 @router.post("/api/delete_column")
 def delete_column(payload: DeleteColumnRequest) -> dict[str, Any]:
+    """Acknowledge a soft column hide or persistently rewrite a small dataset."""
     path = resolve_data_file(payload.file)
     column = payload.column.strip()
     if not column:

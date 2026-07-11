@@ -55,6 +55,11 @@ from .server.api.static import NoCacheStaticFiles, mount_static_files
 
 
 def create_app() -> FastAPI:
+    """Assemble the application with API routes before static catch-all mounts.
+
+    Returns:
+        A new application instance. Callers own the instance and may add routes.
+    """
     application = FastAPI(title="Data Viewer")
     application.include_router(datasets_router)
     application.include_router(analysis_router)

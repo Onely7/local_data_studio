@@ -1,3 +1,5 @@
+"""Tests for cli behavior."""
+
 import os
 import subprocess
 import sys
@@ -22,12 +24,16 @@ PATH_ENV_NAMES = {
 
 
 class CliConfigTests(TestCase):
+    """Test cli config behavior."""
+
     def setUp(self) -> None:
+        """Exercise set up behavior."""
         self.original_env = {name: os.environ.get(name) for name in PATH_ENV_NAMES}
         for name in PATH_ENV_NAMES:
             os.environ.pop(name, None)
 
     def tearDown(self) -> None:
+        """Exercise tear down behavior."""
         for name in PATH_ENV_NAMES:
             if self.original_env[name] is None:
                 os.environ.pop(name, None)
@@ -35,6 +41,7 @@ class CliConfigTests(TestCase):
                 os.environ[name] = self.original_env[name]
 
     def test_config_file_populates_runtime_environment(self) -> None:
+        """Verify that config file populates runtime environment."""
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
             config = root / "local_data_studio.toml"
@@ -74,6 +81,7 @@ reload = true
             )
 
     def test_environment_overrides_config_and_cli_overrides_environment(self) -> None:
+        """Verify that environment overrides config and cli overrides environment."""
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
             config = root / "local_data_studio.toml"
@@ -98,6 +106,7 @@ cache_dir = "config-cache"
             self.assertEqual(str(cli_cache_dir), os.environ["CACHE_DIR"])
 
     def test_workspace_cli_sets_default_base(self) -> None:
+        """Verify that workspace cli sets default base."""
         with tempfile.TemporaryDirectory() as tmp:
             workspace = Path(tmp) / "workspace"
 
@@ -108,6 +117,7 @@ cache_dir = "config-cache"
             self.assertEqual("data", os.environ["DATA_DIR"])
 
     def test_importing_app_defers_heavy_feature_modules(self) -> None:
+        """Verify that importing app defers heavy feature modules."""
         repository_root = Path(__file__).resolve().parents[1]
         env = os.environ.copy()
         env["PYTHONPATH"] = str(repository_root / "src")

@@ -54,6 +54,7 @@ class Settings(BaseSettings):
     @field_validator("data_file", mode="before")
     @classmethod
     def normalize_data_file(cls, value: str | None) -> str | None:
+        """Treat a blank single-file setting as unset."""
         if value is None:
             return None
         if isinstance(value, str) and not value.strip():
@@ -63,16 +64,19 @@ class Settings(BaseSettings):
     @field_validator("default_eda_mode", mode="before")
     @classmethod
     def normalize_eda_mode(cls, value: str | None) -> str:
+        """Normalize the EDA mode to a lowercase non-empty value."""
         return (value or "minimal").strip().lower()
 
     @field_validator("eda_nested_policy", mode="before")
     @classmethod
     def normalize_nested_policy(cls, value: str | None) -> str:
+        """Normalize the nested-value policy to a lowercase non-empty value."""
         return (value or "stringify").strip().lower()
 
     @field_validator("atlas_text_embedder", "atlas_image_embedder", mode="before")
     @classmethod
     def normalize_optional_atlas_setting(cls, value: str | None) -> str | None:
+        """Treat blank optional embedder names as unset."""
         if value is None:
             return None
         normalized = value.strip()
@@ -81,6 +85,7 @@ class Settings(BaseSettings):
     @field_validator("atlas_embedding_dtype", mode="before")
     @classmethod
     def normalize_atlas_embedding_dtype(cls, value: str | None) -> str:
+        """Accept only float32 or float16 Atlas embedding storage."""
         normalized = (value or "float32").strip().lower()
         if normalized not in {"float32", "float16"}:
             raise ValueError("ATLAS_EMBEDDING_DTYPE must be float32 or float16")
@@ -89,6 +94,7 @@ class Settings(BaseSettings):
     @field_validator("atlas_projection_mode", mode="before")
     @classmethod
     def normalize_atlas_projection_mode(cls, value: str | None) -> str:
+        """Accept full UMAP or shared-space anchor transform projection."""
         normalized = (value or "full").strip().lower().replace("-", "_")
         if normalized not in {"full", "anchor_transform"}:
             raise ValueError("ATLAS_PROJECTION_MODE must be full or anchor_transform")

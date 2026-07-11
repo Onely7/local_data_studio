@@ -143,6 +143,7 @@ def fetch_preview_page(
 
 
 def build_line_index_with_progress(path: Path, control: ScanControl) -> dict[str, Any]:
+    """Build a sparse byte-offset index for JSONL, CSV, or TSV datasets."""
     return line.build_line_index_with_progress(path, control)
 
 

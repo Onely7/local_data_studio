@@ -21,12 +21,14 @@ if not getattr(atlas_projection, "_local_data_studio_cache_patched", False):
     _original_async_compute_projection = atlas_projection.async_compute_projection
 
     def compute_projection(*args: Any, cache_root: str | Path | None = None, **kwargs: Any) -> Any:
+        """Delegate synchronous projection with the local cache root by default."""
         prune_cache_dir_from_env()
         result = _original_compute_projection(*args, cache_root=cache_root or _cache_root(), **kwargs)
         prune_cache_dir_from_env()
         return result
 
     async def async_compute_projection(*args: Any, cache_root: str | Path | None = None, **kwargs: Any) -> Any:
+        """Delegate asynchronous projection with the local cache root by default."""
         prune_cache_dir_from_env()
         result = await _original_async_compute_projection(*args, cache_root=cache_root or _cache_root(), **kwargs)
         prune_cache_dir_from_env()

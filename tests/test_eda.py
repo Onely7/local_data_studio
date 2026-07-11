@@ -1,3 +1,5 @@
+"""Tests for eda behavior."""
+
 from importlib.metadata import requires
 from pathlib import Path
 from unittest.mock import patch
@@ -8,6 +10,7 @@ from local_data_studio.server.eda import build_eda_report, eda_cache_key, saniti
 
 
 def test_runtime_dependencies_keep_pkg_resources_available_for_eda() -> None:
+    """Verify that runtime dependencies keep pkg resources available for eda."""
     project_requirements = requires("local-data-studio") or []
     setuptools_requirement = next(requirement for requirement in project_requirements if requirement.lower().startswith("setuptools"))
 
@@ -16,6 +19,7 @@ def test_runtime_dependencies_keep_pkg_resources_available_for_eda() -> None:
 
 
 def test_sanitize_eda_dataframe_normalizes_nested_and_binary_values() -> None:
+    """Verify that sanitize eda dataframe normalizes nested and binary values."""
     frame = pd.DataFrame(
         {
             "number": [1, 2],
@@ -32,6 +36,7 @@ def test_sanitize_eda_dataframe_normalizes_nested_and_binary_values() -> None:
 
 
 def test_eda_cache_key_changes_with_ydata_backend_version(tmp_path: Path) -> None:
+    """Verify that eda cache key changes with ydata backend version."""
     dataset = tmp_path / "dataset.csv"
     dataset.write_text("value\n1\n", encoding="utf-8")
 
@@ -39,6 +44,7 @@ def test_eda_cache_key_changes_with_ydata_backend_version(tmp_path: Path) -> Non
 
 
 def test_build_eda_report_uses_ydata_minimal_option() -> None:
+    """Verify that build eda report uses ydata minimal option."""
     frame = pd.DataFrame({"value": [1, 2]})
 
     with patch("local_data_studio.server.eda.ProfileReport") as profile_report:

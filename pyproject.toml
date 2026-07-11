@@ -89,7 +89,7 @@ include = [
 [tool.ruff]
 exclude = [".git", ".ruff_cache", ".venv", "third_party"]
 line-length = 160
-target-version = "py312"
+target-version = "py311"
 
 [tool.ruff.lint]
 fixable = ["ALL"]
@@ -97,6 +97,7 @@ unfixable = []
 select = [
     "A",   # flake8-builtin
     "B",   # flake8-bugbear
+    "D",   # pydocstyle
     "E",   # pycodestyle error
     "F",   # Pyflakes
     "I",   # isort
@@ -120,7 +121,10 @@ ignore = [
 ]
 
 [tool.ruff.lint.pyupgrade]
-keep-runtime-typing = true  # Settings for Python 3.8 compatibility
+keep-runtime-typing = true
+
+[tool.ruff.lint.pydocstyle]
+convention = "google"
 
 [tool.ruff.format]
 quote-style = "double"

@@ -42,6 +42,10 @@ class AtlasOptions:
 
     @classmethod
     def from_request(cls, sample: int | None = None) -> AtlasOptions:
+        """Resolve request sampling over environment-backed Atlas defaults.
+
+        Non-positive sample and anchor values are represented as ``None``.
+        """
         requested_sample = sample if sample is not None else ATLAS_SAMPLE
         anchor_sample = ATLAS_ANCHOR_SAMPLE if ATLAS_ANCHOR_SAMPLE > 0 else None
         return cls(

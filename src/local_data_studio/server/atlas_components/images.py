@@ -36,11 +36,13 @@ ATLAS_TRUNCATION_SUFFIX = "... (truncated for Atlas)"
 
 
 def is_image_reference(value: str) -> bool:
+    """Return whether a string has a supported image URL or filename suffix."""
     text = value.strip()
     return bool(text and (text.startswith("data:image") or IMAGE_REFERENCE_PATTERN.search(text)))
 
 
 def is_image_bytes_string(value: str) -> bool:
+    """Return whether a string is a plausible hex, base64, or data-image payload."""
     compact = re.sub(r"\s+", "", value.strip())
     if not compact:
         return False
@@ -49,6 +51,7 @@ def is_image_bytes_string(value: str) -> bool:
 
 
 def is_image_bytes(value: bytes) -> bool:
+    """Return whether bytes begin with a recognized image signature."""
     return (
         value.startswith(b"\x89PNG\r\n\x1a\n")
         or value.startswith(b"\xff\xd8\xff")
@@ -60,6 +63,7 @@ def is_image_bytes(value: bytes) -> bool:
 
 
 def is_image_like_value(value: Any) -> bool:
+    """Return whether a scalar or ``{bytes, path}`` object may contain an image."""
     if isinstance(value, bytes):
         return is_image_bytes(value)
     if isinstance(value, bytearray):
@@ -76,6 +80,7 @@ def is_image_like_value(value: Any) -> bool:
 
 
 def decode_data_image(value: str) -> bytes | None:
+    """Decode a base64 data-image URL, returning ``None`` when invalid."""
     text = value.strip()
     if not text.startswith("data:image"):
         return None
@@ -89,6 +94,7 @@ def decode_data_image(value: str) -> bytes | None:
 
 
 def decode_image_bytes_string(value: str) -> bytes | None:
+    """Decode supported textual bytes and verify an image signature."""
     text = re.sub(r"\s+", "", value.strip())
     if not text:
         return None
@@ -120,6 +126,11 @@ def _read_url_bytes_once(url: str) -> bytes:
 
 
 def read_url_bytes(url: str) -> bytes:
+    """Download an image URL with bounded retries and payload size.
+
+    Raises:
+        ValueError: All attempts fail or the response exceeds the byte limit.
+    """
     last_error: Exception | None = None
     for attempt in range(ATLAS_IMAGE_FETCH_RETRIES):
         try:
@@ -155,6 +166,14 @@ def _read_path_bytes(reference: str, dataset_path: Path) -> bytes:
 
 
 def image_value_to_bytes(value: Any, dataset_path: Path) -> bytes:
+    """Resolve an image value to encoder-owned bytes.
+
+    ``bytes`` wins over ``path`` for object values. Relative paths are resolved
+    from the dataset directory.
+
+    Raises:
+        ValueError: The value cannot be decoded, fetched, or resolved.
+    """
     result: bytes | None = None
     if isinstance(value, bytes):
         result = value
@@ -188,6 +207,7 @@ def image_value_to_bytes(value: Any, dataset_path: Path) -> bytes:
 
 
 def text_for_embedding(value: Any) -> str:
+    """Convert a text value to a bounded deterministic encoder string."""
     text = "null" if value is None else str(value)
     return text[:ATLAS_TEXT_MAX_CHARS] if ATLAS_TEXT_MAX_CHARS and len(text) > ATLAS_TEXT_MAX_CHARS else text
 
@@ -203,6 +223,7 @@ def _json_default_for_atlas(value: Any) -> str:
 
 
 def sanitize_atlas_cell(value: Any) -> Any:
+    """Convert non-image values to Parquet-safe bounded display values."""
     if value is None:
         return None
     if isinstance(value, str):
@@ -228,6 +249,7 @@ def _normalize_image_display_bytes(value: Any) -> Any:
 
 
 def normalize_image_display_value(value: Any, *, key: str | None = None) -> Any:
+    """Preserve image objects while normalizing nested Python bytes to binary."""
     if key == "bytes":
         return _normalize_image_display_bytes(value)
     if isinstance(value, bytes | bytearray):
@@ -240,6 +262,7 @@ def normalize_image_display_value(value: Any, *, key: str | None = None) -> Any:
 
 
 def normalize_image_display_columns(data_frame: Any, columns: set[str]) -> Any:
+    """Return a copy with selected image columns normalized for Parquet storage."""
     if not columns or not hasattr(data_frame, "copy") or not hasattr(data_frame, "columns"):
         return data_frame
     normalized = data_frame.copy()
@@ -250,12 +273,14 @@ def normalize_image_display_columns(data_frame: Any, columns: set[str]) -> Any:
 
 
 def drop_atlas_embed_input(data_frame: Any) -> Any:
+    """Return a frame without the hidden encoder-only input column."""
     if hasattr(data_frame, "drop") and ATLAS_EMBED_INPUT_COLUMN in data_frame.columns:
         return data_frame.drop(columns=[ATLAS_EMBED_INPUT_COLUMN])
     return data_frame
 
 
 def sanitize_atlas_output_frame(data_frame: Any, *, preserve_columns: set[str] | None = None) -> Any:
+    """Return a Parquet-safe display copy while preserving image object columns."""
     output = drop_atlas_embed_input(data_frame)
     if not hasattr(output, "copy") or not hasattr(output, "columns"):
         return output
@@ -269,6 +294,7 @@ def sanitize_atlas_output_frame(data_frame: Any, *, preserve_columns: set[str] |
 
 
 def image_like_columns(data_frame: Any, *, sample_size: int = 50) -> set[str]:
+    """Identify image-like columns from at most ``sample_size`` non-null values."""
     if not hasattr(data_frame, "columns"):
         return set()
     columns: set[str] = set()
@@ -283,6 +309,11 @@ def image_like_columns(data_frame: Any, *, sample_size: int = 50) -> set[str]:
 
 
 def prepare_image_projection_input(data_frame: Any, *, column: str, dataset_path: Path) -> tuple[Any, Any]:
+    """Build encoder-only image bytes while preserving original display values.
+
+    Rows that cannot be decoded are excluded from both returned frames so
+    projection coordinates remain aligned with displayed rows.
+    """
     try:
         values = data_frame[column]
     except Exception as exc:
@@ -312,6 +343,7 @@ def prepare_projection_input(
     modality: AtlasModality,
     dataset_path: Path,
 ) -> tuple[Any, str, Any]:
+    """Separate encoder input from an Atlas display frame with aligned rows."""
     if modality == "text":
         values = data_frame[column].tolist()
         frame = pd.DataFrame({ATLAS_EMBED_INPUT_COLUMN: [text_for_embedding(value) for value in values]})
@@ -323,6 +355,7 @@ def prepare_projection_input(
 
 
 def attach_projection_columns(base_frame: Any, projected_frame: Any) -> Any:
+    """Return a display copy with two float32 projection coordinate columns."""
     output = base_frame.copy()
     if isinstance(projected_frame, AtlasProjectionCoordinates):
         output[ATLAS_PROJECTION_X] = projected_frame.values[:, 0]

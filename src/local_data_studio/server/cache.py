@@ -30,6 +30,11 @@ class DatasetFingerprint:
 
     @classmethod
     def from_path(cls, path: Path) -> DatasetFingerprint:
+        """Fingerprint the resolved path, byte size, and nanosecond modification time.
+
+        Raises:
+            OSError: The dataset cannot be resolved or inspected.
+        """
         resolved = path.resolve()
         stat = resolved.stat()
         payload = f"{resolved}|{stat.st_size}|{stat.st_mtime_ns}"

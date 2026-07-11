@@ -34,6 +34,7 @@ UPLOAD_FILES = File(...)
 
 @router.get("/api/files")
 def list_files() -> dict[str, Any]:
+    """Refresh the dataset allowlist and return file sizes and modification times."""
     files: list[dict[str, Any]] = []
     for name, path in refresh_dataset_file_catalog().items():
         stat = path.stat()
@@ -49,6 +50,7 @@ def list_files() -> dict[str, Any]:
 
 @router.get("/api/config")
 def get_config() -> dict[str, Any]:
+    """Return non-secret UI configuration and local file-serving roots."""
     return {
         "allow_delete_data": ALLOW_DELETE_DATA,
         "file_serve_roots": [str(path) for path in FILE_SERVE_ROOTS],
@@ -58,11 +60,13 @@ def get_config() -> dict[str, Any]:
 
 @router.get("/api/embedder_models")
 def embedder_models() -> dict[str, Any]:
+    """Discover locally installed encoder model directories."""
     return {"models": discover_embedder_models(EMBEDDER_MODELS_DIR)}
 
 
 @router.get("/api/raw")
 def raw_file(path: str = Query(..., description="Absolute file path on the server")) -> FileResponse:
+    """Serve an allowed local image path after root-boundary validation."""
     resolved = resolve_raw_image_file(path, FILE_SERVE_ROOTS)
     media_type, _ = mimetypes.guess_type(str(resolved))
     return FileResponse(str(resolved), media_type=media_type or "application/octet-stream")
@@ -70,6 +74,14 @@ def raw_file(path: str = Query(..., description="Absolute file path on the serve
 
 @router.post("/api/upload")
 async def upload_files(files: list[UploadFile] = UPLOAD_FILES) -> dict[str, Any]:
+    """Stream supported uploads into the data directory in 1 MiB chunks.
+
+    Filenames are reduced to their basename and collisions receive a unique suffix.
+    Unsupported uploads are closed and reported without being written.
+
+    Raises:
+        HTTPException: Uploads are disabled or no supported file was supplied.
+    """
     if SINGLE_FILE:
         raise HTTPException(status_code=400, detail="uploads are disabled")
     DATA_ROOT.mkdir(parents=True, exist_ok=True)
@@ -99,6 +111,7 @@ async def upload_files(files: list[UploadFile] = UPLOAD_FILES) -> dict[str, Any]
 
 @router.get("/api/schema")
 def get_schema(file: str = Query(...)) -> dict[str, Any]:
+    """Return bounded format-specific metadata for an allowlisted dataset."""
     metadata = load_dataset_metadata(resolve_data_file(file))
     return metadata.to_response(file)
 
@@ -110,12 +123,18 @@ def preview(
     offset: int | None = Query(0),
     page_token: str | None = Query(None),
 ) -> dict[str, Any]:
+    """Return one bounded preview page using a cursor token when supplied."""
     path = resolve_data_file(file)
     return fetch_preview_page(file, path, limit=limit, offset=offset, page_token=page_token, deleted_ids=deleted_row_ids_for(path))
 
 
 @router.post("/api/raw_row")
 def raw_row(payload: RawRowRequest) -> dict[str, Any]:
+    """Return an untruncated dataset row or validated SQL result row.
+
+    Raises:
+        HTTPException: Neither a one-based dataset row ID nor SQL was supplied.
+    """
     path = resolve_data_file(payload.file)
     if payload.row_id is not None:
         columns, values = fetch_raw_row(path, payload.row_id)
@@ -139,6 +158,7 @@ def column_sample(
     column: str = Query(...),
     limit: int | None = Query(20),
 ) -> dict[str, Any]:
+    """Return up to 100 serialized non-null values from one column."""
     path = resolve_data_file(file)
     reject_large_sync_operation(path, "synchronous column sample")
     relation, params = relation_sql(path)

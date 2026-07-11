@@ -1,3 +1,5 @@
+"""Tests for atlas behavior."""
+
 import asyncio
 import os
 import sys
@@ -45,7 +47,10 @@ VALID_PNG_BYTES = b64decode("iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0l
 
 
 class AtlasModelDiscoveryTests(TestCase):
+    """Test atlas model discovery behavior."""
+
     def test_discovers_model_roots_without_nested_internal_dirs(self) -> None:
+        """Verify that discovers model roots without nested internal dirs."""
         with TemporaryDirectory() as tmp:
             root = Path(tmp)
             model = root / "Qwen" / "Qwen3-Embedding-0.6B"
@@ -65,6 +70,7 @@ class AtlasModelDiscoveryTests(TestCase):
         )
 
     def test_resolve_rejects_paths_outside_model_root(self) -> None:
+        """Verify that resolve rejects paths outside model root."""
         with TemporaryDirectory() as tmp:
             root = Path(tmp) / "models"
             root.mkdir()
@@ -74,6 +80,7 @@ class AtlasModelDiscoveryTests(TestCase):
                     resolve_embedder_model("../outside")
 
     def test_detects_qwen3_vl_embedding_model_from_path_or_config(self) -> None:
+        """Verify that detects qwen3 vl embedding model from path or config."""
         with TemporaryDirectory() as tmp:
             root = Path(tmp)
             named_model = root / "Qwen" / "Qwen3-VL-Embedding-2B"
@@ -90,12 +97,17 @@ class AtlasModelDiscoveryTests(TestCase):
             self.assertFalse(_is_qwen3_vl_embedding_model(root / "google" / "siglip2-base-patch16-224"))
 
     def test_qwen3_vl_image_embedder_uses_sentence_transformer_inputs(self) -> None:
+        """Verify that qwen3 vl image embedder uses sentence transformer inputs."""
+
         class FakeSentenceTransformer:
+            """Test fake sentence transformer behavior."""
+
             def __init__(self) -> None:
                 self.inputs: list[Any] | None = None
                 self.batch_size: int | None = None
 
             def encode(self, inputs, *, show_progress_bar, batch_size):  # noqa: ANN001
+                """Exercise encode behavior."""
                 if show_progress_bar:
                     raise AssertionError("Qwen3-VL test embedder should disable progress bars")
                 self.inputs = inputs
@@ -133,6 +145,7 @@ class AtlasModelDiscoveryTests(TestCase):
         self.assertEqual((1, 1), fake_model.inputs[0]["image"].size)
 
     def test_embedding_backend_policy_is_resolved_once_per_model(self) -> None:
+        """Verify that embedding backend policy is resolved once per model."""
         with TemporaryDirectory() as tmp:
             qwen_model = Path(tmp) / "Qwen" / "Qwen3-VL-Embedding-2B"
             regular_model = Path(tmp) / "google" / "siglip2-base-patch16-224"
@@ -157,6 +170,7 @@ class AtlasModelDiscoveryTests(TestCase):
         self.assertFalse(regular_backend.uses_qwen3_vl_adapter)
 
     def test_non_qwen_image_embedder_keeps_transformers_default(self) -> None:
+        """Verify that non qwen image embedder keeps transformers default."""
         with TemporaryDirectory() as tmp:
             model_path = Path(tmp) / "google" / "siglip2-base-patch16-224"
             model_path.mkdir(parents=True)
@@ -171,10 +185,12 @@ class AtlasModelDiscoveryTests(TestCase):
             )
 
             def fake_create_embedder(name, *, modality, model, embedder_args):  # noqa: ANN001
+                """Exercise fake create embedder behavior."""
                 self.assertEqual("transformers", name)
                 self.assertEqual("image", modality)
 
                 async def fake_embed(batch, *, model, embedder_args):  # noqa: ANN001
+                    """Exercise fake embed behavior."""
                     return np.ones((len(batch), 3), dtype=np.float32)
 
                 return fake_embed
@@ -185,10 +201,12 @@ class AtlasModelDiscoveryTests(TestCase):
         create_embedder.assert_called_once()
 
     def test_normalizes_atlas_url_from_cli_output(self) -> None:
+        """Verify that normalizes atlas url from cli output."""
         self.assertEqual("http://localhost:5055", _normalize_atlas_url("\x1b[32mhttp://localhost:5055\x1b[0m."))
         self.assertEqual("http://127.0.0.1:5055/", _normalize_atlas_url("http://0.0.0.0:5055/"))
 
     def test_atlas_command_loads_projection_cache_patch(self) -> None:
+        """Verify that atlas command loads projection cache patch."""
         command = build_atlas_command(
             path=Path("data/example.jsonl"),
             column="image",
@@ -211,29 +229,42 @@ class AtlasModelDiscoveryTests(TestCase):
         self.assertTrue(Path(command[3]).is_absolute())
 
     def test_launch_embedding_atlas_uses_posix_spawn_compatible_popen(self) -> None:
+        """Verify that launch embedding atlas uses posix spawn compatible popen."""
+
         class DummyContext:
+            """Test dummy context behavior."""
+
             def check_cancelled(self) -> None:
+                """Exercise check cancelled behavior."""
                 return None
 
             def update(self, *, progress=None, message=None):  # noqa: ANN001
+                """Exercise update behavior."""
                 return None
 
         class FakeStdout:
+            """Test fake stdout behavior."""
+
             def __init__(self) -> None:
                 self._lines = iter(["Embedding Atlas\n", "URL: http://127.0.0.1:5055\n"])
 
             def readline(self) -> str:
+                """Exercise readline behavior."""
                 return next(self._lines, "")
 
             def close(self) -> None:
+                """Exercise close behavior."""
                 return None
 
         class FakeProcess:
+            """Test fake process behavior."""
+
             stdout = FakeStdout()
             pid = 12345
             returncode = None
 
             def poll(self) -> None:
+                """Exercise poll behavior."""
                 return None
 
         with patch("local_data_studio.server.atlas_components.process.subprocess.Popen", return_value=FakeProcess()) as popen:
@@ -246,6 +277,7 @@ class AtlasModelDiscoveryTests(TestCase):
         self.assertNotIn("cwd", kwargs)
 
     def test_embedding_atlas_env_can_import_local_server_package(self) -> None:
+        """Verify that embedding atlas env can import local server package."""
         env = _embedding_atlas_env()
 
         python_paths = env["PYTHONPATH"].split(os.pathsep)
@@ -257,6 +289,7 @@ class AtlasModelDiscoveryTests(TestCase):
         self.assertEqual("1", env["VECLIB_MAXIMUM_THREADS"])
 
     def test_projection_cache_prunes_oldest_files_first(self) -> None:
+        """Verify that projection cache prunes oldest files first."""
         with TemporaryDirectory() as tmp:
             root = Path(tmp)
             old_file = root / "old"
@@ -278,6 +311,7 @@ class AtlasModelDiscoveryTests(TestCase):
             self.assertTrue(new_file.exists())
 
     def test_projection_cache_preserves_active_artifact(self) -> None:
+        """Verify that projection cache preserves active artifact."""
         with TemporaryDirectory() as tmp:
             root = Path(tmp)
             old_file = root / "old"
@@ -299,6 +333,7 @@ class AtlasModelDiscoveryTests(TestCase):
             self.assertTrue(active_file.exists())
 
     def test_projection_cache_reuses_same_inputs_and_settings(self) -> None:
+        """Verify that projection cache reuses same inputs and settings."""
         with TemporaryDirectory() as tmp:
             os.environ["LOCAL_DATA_STUDIO_ATLAS_CACHE_DIR"] = tmp
             os.environ["LOCAL_DATA_STUDIO_ATLAS_CACHE_MAX_BYTES"] = str(1024 * 1024)
@@ -308,6 +343,7 @@ class AtlasModelDiscoveryTests(TestCase):
             original_run_umap = projection._run_umap
 
             def fake_run_umap(hidden_vectors: Any, *, umap_args: dict | None = None) -> Any:
+                """Exercise fake run umap behavior."""
                 nonlocal calls
                 calls += 1
                 row_count = len(hidden_vectors)
@@ -348,6 +384,7 @@ class AtlasModelDiscoveryTests(TestCase):
             self.assertTrue(any(path.is_file() for path in Path(tmp).rglob("*")))
 
     def test_projected_dataset_cache_path_is_stable_for_same_inputs(self) -> None:
+        """Verify that projected dataset cache path is stable for same inputs."""
         with TemporaryDirectory() as tmp:
             root = Path(tmp)
             data_path = root / "data.jsonl"
@@ -396,8 +433,13 @@ class AtlasModelDiscoveryTests(TestCase):
         self.assertNotEqual(first, changed)
 
     def test_prepare_atlas_dataset_reuses_projected_parquet_cache(self) -> None:
+        """Verify that prepare atlas dataset reuses projected parquet cache."""
+
         class DummyContext:
+            """Test dummy context behavior."""
+
             def update(self, *, progress=None, message=None):  # noqa: ANN001
+                """Exercise update behavior."""
                 return None
 
         with TemporaryDirectory() as tmp:
@@ -422,9 +464,11 @@ class AtlasModelDiscoveryTests(TestCase):
             calls = 0
 
             def fake_load_datasets(inputs, query=None, sample=None, splits=None):  # noqa: ANN001, ARG001
+                """Exercise fake load datasets behavior."""
                 return pd.DataFrame({"text": ["a", "b"]})
 
             def fake_project_atlas_frame(data_frame, **kwargs):  # noqa: ANN001
+                """Exercise fake project atlas frame behavior."""
                 nonlocal calls
                 calls += 1
                 data_frame[ATLAS_PROJECTION_X] = [0.0, 1.0]
@@ -470,8 +514,13 @@ class AtlasModelDiscoveryTests(TestCase):
         self.assertNotIn(ATLAS_PROJECTION_NEIGHBORS, cached_columns)
 
     def test_concurrent_atlas_cache_misses_compute_projection_once(self) -> None:
+        """Verify that concurrent atlas cache misses compute projection once."""
+
         class DummyContext:
+            """Test dummy context behavior."""
+
             def update(self, *, progress=None, message=None):  # noqa: ANN001
+                """Exercise update behavior."""
                 return None
 
         with TemporaryDirectory() as tmp:
@@ -491,6 +540,7 @@ class AtlasModelDiscoveryTests(TestCase):
             results = []
 
             def fake_project(data_frame, **kwargs):  # noqa: ANN001, ARG001
+                """Exercise fake project behavior."""
                 nonlocal calls
                 calls += 1
                 entered.set()
@@ -500,6 +550,7 @@ class AtlasModelDiscoveryTests(TestCase):
                 return data_frame
 
             def prepare() -> None:
+                """Exercise prepare behavior."""
                 results.append(
                     prepare_atlas_dataset(
                         path=data_path,
@@ -532,8 +583,13 @@ class AtlasModelDiscoveryTests(TestCase):
         self.assertEqual([False, True], sorted(result.cache_hit for result in results))
 
     def test_prepare_atlas_dataset_converts_image_urls_to_bytes_for_embedding(self) -> None:
+        """Verify that prepare atlas dataset converts image urls to bytes for embedding."""
+
         class DummyContext:
+            """Test dummy context behavior."""
+
             def update(self, *, progress=None, message=None):  # noqa: ANN001
+                """Exercise update behavior."""
                 return None
 
         with TemporaryDirectory() as tmp:
@@ -557,9 +613,11 @@ class AtlasModelDiscoveryTests(TestCase):
             )
 
             def fake_load_datasets(inputs, query=None, sample=None, splits=None):  # noqa: ANN001, ARG001
+                """Exercise fake load datasets behavior."""
                 return pd.DataFrame({"image": ["https://example.test/image.jpg"], "label": ["sample"]})
 
             def fake_project_atlas_frame(data_frame, **kwargs):  # noqa: ANN001
+                """Exercise fake project atlas frame behavior."""
                 self.assertEqual(ATLAS_EMBED_INPUT_COLUMN, kwargs["input_column"])
                 self.assertEqual(b"\xff\xd8\xfftest", data_frame[ATLAS_EMBED_INPUT_COLUMN].iloc[0]["bytes"])
                 data_frame[ATLAS_PROJECTION_X] = [0.0]
@@ -592,8 +650,13 @@ class AtlasModelDiscoveryTests(TestCase):
             self.assertEqual("https://example.test/image.jpg", cached["image"].iloc[0])
 
     def test_prepare_atlas_dataset_skips_unreadable_image_rows(self) -> None:
+        """Verify that prepare atlas dataset skips unreadable image rows."""
+
         class DummyContext:
+            """Test dummy context behavior."""
+
             def update(self, *, progress=None, message=None):  # noqa: ANN001
+                """Exercise update behavior."""
                 return None
 
         with TemporaryDirectory() as tmp:
@@ -617,9 +680,11 @@ class AtlasModelDiscoveryTests(TestCase):
             )
 
             def fake_load_datasets(inputs, query=None, sample=None, splits=None):  # noqa: ANN001, ARG001
+                """Exercise fake load datasets behavior."""
                 return pd.DataFrame({"image": ["https://example.test/good.jpg", "https://example.test/bad.jpg"], "label": ["good", "bad"]})
 
             def fake_project_atlas_frame(data_frame, **kwargs):  # noqa: ANN001
+                """Exercise fake project atlas frame behavior."""
                 self.assertEqual(1, len(data_frame))
                 self.assertEqual(b"\xff\xd8\xffgood", data_frame[ATLAS_EMBED_INPUT_COLUMN].iloc[0]["bytes"])
                 data_frame[ATLAS_PROJECTION_X] = [0.0]
@@ -628,6 +693,7 @@ class AtlasModelDiscoveryTests(TestCase):
                 return data_frame
 
             def fake_read_url_bytes(url: str) -> bytes:
+                """Exercise fake read url bytes behavior."""
                 if url.endswith("bad.jpg"):
                     raise ValueError("connection reset")
                 return b"\xff\xd8\xffgood"
@@ -655,8 +721,13 @@ class AtlasModelDiscoveryTests(TestCase):
             self.assertEqual("https://example.test/good.jpg", cached["image"].iloc[0])
 
     def test_prepare_atlas_dataset_preserves_dict_image_bytes_for_display(self) -> None:
+        """Verify that prepare atlas dataset preserves dict image bytes for display."""
+
         class DummyContext:
+            """Test dummy context behavior."""
+
             def update(self, *, progress=None, message=None):  # noqa: ANN001
+                """Exercise update behavior."""
                 return None
 
         with TemporaryDirectory() as tmp:
@@ -680,9 +751,11 @@ class AtlasModelDiscoveryTests(TestCase):
             )
 
             def fake_load_datasets(inputs, query=None, sample=None, splits=None):  # noqa: ANN001, ARG001
+                """Exercise fake load datasets behavior."""
                 return pd.DataFrame({"image": [{"bytes": "89504e470d0a1a0a", "path": "scenes/scene_003444.png"}]})
 
             def fake_project_atlas_frame(data_frame, **kwargs):  # noqa: ANN001
+                """Exercise fake project atlas frame behavior."""
                 self.assertEqual(b"\x89PNG\r\n\x1a\n", data_frame[ATLAS_EMBED_INPUT_COLUMN].iloc[0]["bytes"])
                 data_frame[ATLAS_PROJECTION_X] = [0.0]
                 data_frame[ATLAS_PROJECTION_Y] = [1.0]
@@ -712,8 +785,13 @@ class AtlasModelDiscoveryTests(TestCase):
             self.assertEqual("scenes/scene_003444.png", image["path"])
 
     def test_prepare_atlas_dataset_preserves_python_bytes_in_image_objects(self) -> None:
+        """Verify that prepare atlas dataset preserves python bytes in image objects."""
+
         class DummyContext:
+            """Test dummy context behavior."""
+
             def update(self, *, progress=None, message=None):  # noqa: ANN001
+                """Exercise update behavior."""
                 return None
 
         with TemporaryDirectory() as tmp:
@@ -739,9 +817,11 @@ class AtlasModelDiscoveryTests(TestCase):
             image_bytes = b"\x89PNG\r\n\x1a\n"
 
             def fake_load_datasets(inputs, query=None, sample=None, splits=None):  # noqa: ANN001, ARG001
+                """Exercise fake load datasets behavior."""
                 return pd.DataFrame({"image": [{"bytes": image_bytes, "path": "scenes/scene_003444.png"}]})
 
             def fake_project_atlas_frame(data_frame, **kwargs):  # noqa: ANN001
+                """Exercise fake project atlas frame behavior."""
                 self.assertEqual(image_bytes, data_frame[ATLAS_EMBED_INPUT_COLUMN].iloc[0]["bytes"])
                 data_frame[ATLAS_PROJECTION_X] = [0.0]
                 data_frame[ATLAS_PROJECTION_Y] = [1.0]
@@ -771,8 +851,13 @@ class AtlasModelDiscoveryTests(TestCase):
             self.assertEqual("scenes/scene_003444.png", image["path"])
 
     def test_prepare_atlas_dataset_preserves_other_image_columns(self) -> None:
+        """Verify that prepare atlas dataset preserves other image columns."""
+
         class DummyContext:
+            """Test dummy context behavior."""
+
             def update(self, *, progress=None, message=None):  # noqa: ANN001
+                """Exercise update behavior."""
                 return None
 
         with TemporaryDirectory() as tmp:
@@ -796,6 +881,7 @@ class AtlasModelDiscoveryTests(TestCase):
             )
 
             def fake_load_datasets(inputs, query=None, sample=None, splits=None):  # noqa: ANN001, ARG001
+                """Exercise fake load datasets behavior."""
                 return pd.DataFrame(
                     {
                         "image": ["https://example.test/image.jpg"],
@@ -805,6 +891,7 @@ class AtlasModelDiscoveryTests(TestCase):
                 )
 
             def fake_project_atlas_frame(data_frame, **kwargs):  # noqa: ANN001
+                """Exercise fake project atlas frame behavior."""
                 self.assertEqual(b"\xff\xd8\xfftest", data_frame[ATLAS_EMBED_INPUT_COLUMN].iloc[0]["bytes"])
                 data_frame[ATLAS_PROJECTION_X] = [0.0]
                 data_frame[ATLAS_PROJECTION_Y] = [1.0]
@@ -837,8 +924,13 @@ class AtlasModelDiscoveryTests(TestCase):
             self.assertIn("<binary 6 bytes>", cached["metadata"].iloc[0])
 
     def test_prepare_atlas_dataset_truncates_long_text_for_embedding_and_cache(self) -> None:
+        """Verify that prepare atlas dataset truncates long text for embedding and cache."""
+
         class DummyContext:
+            """Test dummy context behavior."""
+
             def update(self, *, progress=None, message=None):  # noqa: ANN001
+                """Exercise update behavior."""
                 return None
 
         with TemporaryDirectory() as tmp:
@@ -862,9 +954,11 @@ class AtlasModelDiscoveryTests(TestCase):
             )
 
             def fake_load_datasets(inputs, query=None, sample=None, splits=None):  # noqa: ANN001, ARG001
+                """Exercise fake load datasets behavior."""
                 return pd.DataFrame({"text": ["x" * 100], "notes": ["y" * 100]})
 
             def fake_project_atlas_frame(data_frame, **kwargs):  # noqa: ANN001
+                """Exercise fake project atlas frame behavior."""
                 self.assertEqual(ATLAS_EMBED_INPUT_COLUMN, kwargs["input_column"])
                 self.assertEqual("x" * 8, data_frame[ATLAS_EMBED_INPUT_COLUMN].iloc[0])
                 data_frame[ATLAS_PROJECTION_X] = [0.0]
@@ -897,6 +991,7 @@ class AtlasModelDiscoveryTests(TestCase):
             self.assertEqual(f"{'y' * 8}{ATLAS_TRUNCATION_SUFFIX}", cached["notes"].iloc[0])
 
     def test_project_atlas_frame_honors_float16_for_vector_embeddings(self) -> None:
+        """Verify that project atlas frame honors float16 for vector embeddings."""
         options = AtlasOptions(
             sample=None,
             host="127.0.0.1",
@@ -912,6 +1007,7 @@ class AtlasModelDiscoveryTests(TestCase):
         seen_dtype = None
 
         def fake_run_full_projection(embeddings):  # noqa: ANN001
+            """Exercise fake run full projection behavior."""
             nonlocal seen_dtype
             seen_dtype = embeddings.dtype
             return projection.Projection(
@@ -934,9 +1030,11 @@ class AtlasModelDiscoveryTests(TestCase):
         self.assertTrue(np.array_equal(np.array([[0.0, 1.0], [1.0, 0.0]], dtype=np.float32), projected.values))
 
     def test_full_projection_sets_single_threaded_umap_with_seed(self) -> None:
+        """Verify that full projection sets single threaded umap with seed."""
         seen_args: dict[str, Any] | None = None
 
         def fake_run_umap(embeddings, *, umap_args=None):  # noqa: ANN001
+            """Exercise fake run umap behavior."""
             nonlocal seen_args
             seen_args = umap_args
             row_count = len(embeddings)
@@ -954,6 +1052,7 @@ class AtlasModelDiscoveryTests(TestCase):
         self.assertEqual(1, seen_args["n_jobs"])
 
     def test_anchor_transform_projects_remainder_without_neighbors(self) -> None:
+        """Verify that anchor transform projects remainder without neighbors."""
         options = AtlasOptions(
             sample=None,
             host="127.0.0.1",
@@ -969,14 +1068,21 @@ class AtlasModelDiscoveryTests(TestCase):
         calls: list[int] = []
 
         class FakeReducer:
+            """Test fake reducer behavior."""
+
             def fit_transform(self, embeddings):  # noqa: ANN001
+                """Exercise fit transform behavior."""
                 return np.column_stack((np.arange(len(embeddings)), np.arange(len(embeddings)) + 10)).astype(np.float32)
 
             def transform(self, embeddings):  # noqa: ANN001
+                """Exercise transform behavior."""
                 return np.column_stack((np.arange(len(embeddings)) + 100, np.arange(len(embeddings)) + 200)).astype(np.float32)
 
         class FakeSession:
+            """Test fake session behavior."""
+
             def embed(self, items):  # noqa: ANN001
+                """Exercise embed behavior."""
                 calls.append(len(items))
                 return np.ones((len(items), 3), dtype=np.float32)
 
@@ -997,6 +1103,7 @@ class AtlasModelDiscoveryTests(TestCase):
         factory.assert_called_once()
 
     def test_atlas_command_omits_neighbors_when_projection_has_none(self) -> None:
+        """Verify that atlas command omits neighbors when projection has none."""
         command = build_atlas_command(
             path=Path("cache/atlas/datasets/example.parquet"),
             column="text",
@@ -1020,6 +1127,7 @@ class AtlasModelDiscoveryTests(TestCase):
         self.assertNotIn("--with", command)
 
     def test_atlas_command_uses_current_python_module(self) -> None:
+        """Verify that atlas command uses current python module."""
         command = build_atlas_command(
             path=Path("cache/atlas/datasets/example.parquet"),
             column="text",
@@ -1041,6 +1149,7 @@ class AtlasModelDiscoveryTests(TestCase):
         self.assertEqual([sys.executable, "-m", "embedding_atlas.cli"], command[:3])
 
     def test_reserve_atlas_start_port_advances_preferred_ports(self) -> None:
+        """Verify that reserve atlas start port advances preferred ports."""
         options = AtlasOptions(
             sample=None,
             host="127.0.0.1",

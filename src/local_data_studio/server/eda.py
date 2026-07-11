@@ -43,8 +43,7 @@ def load_eda_dataframe(path: Path, sample_rows: int, deleted_ids: list[int]) -> 
 
 
 def sanitize_eda_dataframe(df: Any) -> Any:
-    """
-    Convert unsupported nested and binary values to bounded strings.
+    """Convert unsupported nested and binary values to bounded strings.
 
     YData Profiling consumes pandas DataFrames.  Scalar columns remain typed so
     their statistics stay useful; only cells that cannot be profiled reliably
@@ -56,7 +55,7 @@ def sanitize_eda_dataframe(df: Any) -> Any:
     nested_policy = EDA_NESTED_POLICY
     # nested_policy: "stringify" or "drop"
 
-    def stringify(v: Any) -> str | None:
+    def _stringify(v: Any) -> str | None:
         if v is None:
             return None
         if isinstance(v, bytes):
@@ -90,7 +89,7 @@ def sanitize_eda_dataframe(df: Any) -> Any:
         if nested_policy == "drop":
             drop_cols.append(str(name))
             continue
-        out[name] = values.map(stringify)
+        out[name] = values.map(_stringify)
 
     if drop_cols:
         out = out.drop(columns=drop_cols)

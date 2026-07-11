@@ -31,6 +31,7 @@ def eda_reports_service() -> Any:
 
 
 def reject_large_sync_operation(path: Path, operation: str) -> None:
+    """Reject potentially blocking full scans above the large-dataset threshold."""
     if is_large_dataset(path):
         raise HTTPException(
             status_code=400,
@@ -39,6 +40,7 @@ def reject_large_sync_operation(path: Path, operation: str) -> None:
 
 
 def load_cached_result(cache_path: Path) -> dict[str, Any] | None:
+    """Load an object-shaped JSON cache, treating missing or invalid data as a miss."""
     if not cache_path.exists():
         return None
     try:
@@ -49,6 +51,10 @@ def load_cached_result(cache_path: Path) -> dict[str, Any] | None:
 
 
 def write_cached_result(cache_path: Path, result: dict[str, Any]) -> None:
+    """Replace a JSON cache file with the supplied result.
+
+    The caller retains ownership of ``result``; this function does not mutate it.
+    """
     cache_path.write_text(json.dumps(result, ensure_ascii=False, indent=2), encoding="utf-8")
 
 
@@ -61,6 +67,7 @@ def _load_cached_stats(path: Path, sample: int) -> dict[str, Any] | None:
 
 
 def compute_cached_column_stats(file_name: str, path: Path, sample: int | None, force: bool) -> dict[str, Any]:
+    """Compute or reuse statistics keyed by dataset fingerprint and sample size."""
     sample_value = sample if sample is not None else DEFAULT_SAMPLE
     if not force:
         cached = _load_cached_stats(path, sample_value)

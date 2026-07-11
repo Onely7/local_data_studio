@@ -36,6 +36,7 @@ RUNNING_ATLAS_PROCESSES: list[subprocess.Popen[str]] = []
 
 
 def embedding_atlas_executable() -> list[str]:
+    """Return the installed Atlas module invocation using the active interpreter."""
     return [sys.executable, "-m", "embedding_atlas.cli"]
 
 
@@ -49,6 +50,7 @@ def build_atlas_command(
     options: AtlasOptions,
     projection_columns: tuple[str, str, str | None] | None = None,
 ) -> list[str]:
+    """Build an argument vector without shell interpolation."""
     command = [
         *embedding_atlas_executable(),
         str(path.resolve()),
@@ -105,11 +107,13 @@ def _terminate_process(process: subprocess.Popen[str]) -> None:
 
 
 def normalize_atlas_url(url: str) -> str:
+    """Normalize wildcard hosts to a browser-reachable loopback URL."""
     cleaned = ANSI_ESCAPE_PATTERN.sub("", url).strip().rstrip(".,);")
     return cleaned.replace("://0.0.0.0", "://127.0.0.1")
 
 
 def embedding_atlas_env() -> dict[str, str]:
+    """Return a child environment with bounded native threads and local caches."""
     env = os.environ.copy()
     env["PYTHONUNBUFFERED"] = "1"
     env["PATH"] = f"{Path(sys.executable).parent}{os.pathsep}{env.get('PATH', '')}"
@@ -130,6 +134,7 @@ def embedding_atlas_env() -> dict[str, str]:
 
 
 def format_process_returncode(returncode: int | None) -> str:
+    """Format normal exits and POSIX signals for user-facing errors."""
     if returncode is None:
         return "still running"
     if returncode >= 0:
@@ -144,6 +149,11 @@ def format_process_returncode(returncode: int | None) -> str:
 def spawn_embedding_atlas(command: list[str], env: dict[str, str]) -> subprocess.Popen[str]:
     # Keep this eligible for posix_spawn on macOS. Do not add cwd,
     # preexec_fn, pass_fds, start_new_session, or shell=True.
+    """Spawn Atlas through the macOS-safe ``posix_spawn``-eligible path.
+
+    The child uses no shell and ``close_fds=False`` to avoid the known SIGSEGV
+    regression. The returned process is owned by the runtime process registry.
+    """
     return subprocess.Popen(
         command,
         env=env,

@@ -34,10 +34,12 @@ def _create_metadata(path: Path) -> DatasetMetadata:
 
 
 def load_metadata(path: Path, *, use_cache: bool = True) -> DatasetMetadata:
+    """Return schema metadata read from the Parquet footer only."""
     return load_or_create_metadata(path, _create_metadata, use_cache=use_cache)
 
 
 def raw_row(path: Path, row_id: int) -> tuple[list[str], list[Any]]:
+    """Return one one-based row using row-group metadata and bounded batches."""
     import pyarrow.parquet as pq  # noqa: PLC0415
 
     parquet_file = pq.ParquetFile(path)
@@ -121,6 +123,7 @@ def preview(
     page_token: str | None,
     deleted_ids: set[int],
 ) -> dict[str, Any]:
+    """Return a bounded page from record batches with a row-group cursor."""
     import pyarrow.parquet as pq  # noqa: PLC0415
 
     token = decode_page_token_for(page_token, "parquet")
@@ -193,6 +196,7 @@ def preview(
 
 
 def count_rows(path: Path) -> int:
+    """Return the physical row count from Parquet footer metadata."""
     import pyarrow.parquet as pq  # noqa: PLC0415
 
     return int(pq.ParquetFile(path).metadata.num_rows)

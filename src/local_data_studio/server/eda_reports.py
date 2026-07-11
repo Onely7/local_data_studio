@@ -29,10 +29,12 @@ class EdaReportOptions:
 
     @property
     def minimal(self) -> bool:
+        """Return whether report generation uses the reduced-cost profile."""
         return self.mode != "maximal"
 
     @classmethod
     def from_request(cls, *, sample: int | None, mode: str | None, force: bool | None) -> EdaReportOptions:
+        """Normalize nullable request values over configured EDA defaults."""
         requested_sample = sample or DEFAULT_EDA_SAMPLE
         bounded_sample = max(100, min(MAX_EDA_SAMPLE, requested_sample))
         normalized_mode = (mode or DEFAULT_EDA_MODE or "minimal").strip().lower()
