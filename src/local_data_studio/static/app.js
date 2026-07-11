@@ -90,6 +90,9 @@ const elements = {
   edaSample: document.getElementById("eda-sample"),
   atlasColumn: document.getElementById("atlas-column"),
   atlasModel: document.getElementById("atlas-model"),
+  atlasBackend: document.getElementById("atlas-backend"),
+  atlasPromptControls: document.getElementById("atlas-prompt-controls"),
+  atlasPrompt: document.getElementById("atlas-prompt"),
   runAtlas: document.getElementById("run-atlas"),
   runAtlasQuery: document.getElementById("run-atlas-query"),
   atlasStatus: document.getElementById("atlas-status"),
@@ -893,6 +896,28 @@ function selectedAtlasModel() {
   return elements.atlasModel ? elements.atlasModel.value.trim() : "";
 }
 
+function selectedAtlasModelMetadata() {
+  const selected = selectedAtlasModel();
+  return (
+    state.embedderModels.find(
+      (model) => (model.value || model.name || "") === selected,
+    ) || null
+  );
+}
+
+function selectedAtlasBackend() {
+  return elements.atlasBackend ? elements.atlasBackend.value.trim() : "";
+}
+
+function atlasBackendCapability(model, backend) {
+  return model && model.backends ? model.backends[backend] || null : null;
+}
+
+function atlasBackendAvailable(model, backend) {
+  const capability = atlasBackendCapability(model, backend);
+  return Boolean(capability && capability.available);
+}
+
 function normalizeAtlasUrl(url) {
   if (!url) return "";
   try {
@@ -955,6 +980,55 @@ function renderAtlasModelOptions() {
   ) {
     elements.atlasModel.value = current;
   }
+  renderAtlasBackendOptions();
+}
+
+function renderAtlasPromptControl() {
+  if (!elements.atlasPromptControls || !elements.atlasPrompt) return;
+  const model = selectedAtlasModelMetadata();
+  const sentenceTransformers = selectedAtlasBackend() === "sentence-transformers";
+  elements.atlasPromptControls.hidden = !sentenceTransformers;
+  elements.atlasPrompt.disabled = !sentenceTransformers;
+  const preview = model ? model.default_prompt_preview || "" : "";
+  elements.atlasPrompt.placeholder = preview
+    ? `Model default: ${preview}`
+    : "Optional prompt template";
+}
+
+function renderAtlasBackendOptions() {
+  if (!elements.atlasBackend) return;
+  const model = selectedAtlasModelMetadata();
+  const current = selectedAtlasBackend();
+  const backendDefinitions = [
+    ["sentence-transformers", "Sentence Transformers"],
+    ["transformers", "Transformers"],
+  ];
+  const options = ['<option value="">Select backend</option>'].concat(
+    backendDefinitions.map(([value, label]) => {
+      const available = atlasBackendAvailable(model, value);
+      const suffix = model && !available ? " (unavailable)" : "";
+      return `<option value="${value}"${available ? "" : " disabled"}>${label}${suffix}</option>`;
+    }),
+  );
+  elements.atlasBackend.innerHTML = options.join("");
+  const defaultBackend = model ? model.default_backend || "" : "";
+  const selected = atlasBackendAvailable(model, current)
+    ? current
+    : atlasBackendAvailable(model, defaultBackend)
+      ? defaultBackend
+      : backendDefinitions.find(([value]) => atlasBackendAvailable(model, value))?.[0] || "";
+  elements.atlasBackend.value = selected;
+  const hasAvailableBackend = backendDefinitions.some(([value]) =>
+    atlasBackendAvailable(model, value),
+  );
+  elements.atlasBackend.disabled = !hasAvailableBackend;
+  elements.atlasBackend.classList.toggle(
+    "atlas-backend-unavailable",
+    !hasAvailableBackend,
+  );
+  const capability = atlasBackendCapability(model, selected);
+  elements.atlasBackend.title = capability ? capability.reason || "" : "";
+  renderAtlasPromptControl();
   setAtlasButtonsRunning(state.atlasJobKind);
 }
 
@@ -1944,8 +2018,9 @@ async function runEdaOnQueryResults() {
 
 function setAtlasButtonsRunning(kind) {
   const hasColumn = Boolean(selectedAtlasColumn());
-  const hasModel = Boolean(selectedAtlasModel());
-  const ready = hasColumn && hasModel;
+  const model = selectedAtlasModelMetadata();
+  const backend = selectedAtlasBackend();
+  const ready = hasColumn && Boolean(model) && atlasBackendAvailable(model, backend);
   if (elements.runAtlas) {
     const enabled = kind ? kind === "all" : ready;
     elements.runAtlas.disabled = !enabled;
@@ -1978,6 +2053,7 @@ async function runAtlasJob(kind) {
 
   const column = selectedAtlasColumn();
   const model = selectedAtlasModel();
+  const backend = selectedAtlasBackend();
   if (!column) {
     if (elements.atlasStatus) {
       elements.atlasStatus.textContent = "Select a column first.";
@@ -1993,7 +2069,19 @@ async function runAtlasJob(kind) {
     return;
   }
 
-  const payload = { file: state.file, column, model };
+  if (!atlasBackendAvailable(selectedAtlasModelMetadata(), backend)) {
+    if (elements.atlasStatus) {
+      elements.atlasStatus.textContent = "Select an available backend first.";
+    }
+    setAtlasButtonsRunning("");
+    return;
+  }
+
+  const payload = { file: state.file, column, model, backend };
+  if (backend === "sentence-transformers" && elements.atlasPrompt) {
+    const prompt = elements.atlasPrompt.value;
+    if (prompt.trim()) payload.prompt = prompt;
+  }
   let jobKind = "atlas";
   let sourceLabel = "Atlas";
   if (kind === "query") {
@@ -2042,10 +2130,11 @@ async function runAtlasJob(kind) {
       const modalityNote = data.modality ? ` (${data.modality})` : "";
       const sampleNote = data.sample ? ` Sample: ${data.sample}.` : "";
       const modelNote = data.model ? ` Model: ${data.model}.` : "";
+      const backendNote = data.backend ? ` Backend: ${data.backend}.` : "";
       const projectionNote = data.projection_mode ? ` Projection: ${data.projection_mode}.` : "";
       const dtypeNote = data.embedding_dtype ? ` Embedding: ${data.embedding_dtype}.` : "";
       const cacheNote = data.cache_hit ? " Cache: reused." : data.cache_path ? " Cache: refreshed." : "";
-      elements.atlasStatus.textContent = `${sourceLabel} is ready for "${data.column || column}"${modalityNote}.${modelNote}${sampleNote}${projectionNote}${dtypeNote}${cacheNote}`;
+      elements.atlasStatus.textContent = `${sourceLabel} is ready for "${data.column || column}"${modalityNote}.${modelNote}${backendNote}${sampleNote}${projectionNote}${dtypeNote}${cacheNote}`;
     }
     const atlasUrl = normalizeAtlasUrl(data.url);
     if (elements.atlasLink && atlasUrl) {
@@ -2224,6 +2313,16 @@ function attachEvents() {
       if (elements.atlasStatus) {
         elements.atlasStatus.textContent = "";
       }
+      if (elements.atlasPrompt) elements.atlasPrompt.value = "";
+      renderAtlasBackendOptions();
+    });
+  }
+  if (elements.atlasBackend) {
+    elements.atlasBackend.addEventListener("change", () => {
+      if (elements.atlasStatus) {
+        elements.atlasStatus.textContent = "";
+      }
+      renderAtlasPromptControl();
       setAtlasButtonsRunning(state.atlasJobKind);
     });
   }

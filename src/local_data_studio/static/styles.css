@@ -756,6 +756,31 @@ tr.expanded {
   flex: 1;
 }
 
+.atlas-controls select option:disabled {
+  color: #aeb5bf;
+}
+
+.atlas-controls select.atlas-backend-unavailable {
+  color: var(--muted);
+  background: #f4f5f6;
+  cursor: not-allowed;
+}
+
+.atlas-prompt-controls {
+  align-items: flex-start;
+}
+
+.atlas-prompt-controls label {
+  padding-top: 9px;
+}
+
+.atlas-prompt-controls textarea {
+  min-width: 0;
+  min-height: 72px;
+  flex: 1;
+  resize: vertical;
+}
+
 .atlas-actions {
   display: flex;
   flex-wrap: wrap;
