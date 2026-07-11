@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+from collections.abc import Iterable
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -17,6 +18,69 @@ STATS_CACHE_DIR = CACHE_DIR / "stats"
 
 for cache_dir in (COUNT_CACHE_DIR, METADATA_CACHE_DIR, INDEX_CACHE_DIR, SEARCH_CACHE_DIR, STATS_CACHE_DIR):
     cache_dir.mkdir(parents=True, exist_ok=True)
+
+
+def _file_size(path: Path) -> int:
+    try:
+        return path.stat().st_size
+    except OSError:
+        return 0
+
+
+def _file_mtime(path: Path) -> float:
+    try:
+        return path.stat().st_mtime
+    except OSError:
+        return 0.0
+
+
+def prune_cache_dir(cache_dir: Path, max_bytes: int, *, preserve: Iterable[Path] | None = None) -> int:
+    """Prune cache files oldest-first while retaining active artifacts.
+
+    A file listed in ``preserve`` is never removed during this call, so a report
+    returned to the caller remains available even when it alone exceeds the
+    configured capacity.
+    """
+    protected_paths = {path.resolve() for path in preserve or ()}
+    if max_bytes <= 0:
+        if cache_dir.exists():
+            for path in sorted(cache_dir.rglob("*"), key=lambda item: len(item.parts), reverse=True):
+                if path.resolve() in protected_paths:
+                    continue
+                if path.is_file():
+                    path.unlink(missing_ok=True)
+                elif path.is_dir():
+                    try:
+                        path.rmdir()
+                    except OSError:
+                        pass
+        cache_dir.mkdir(parents=True, exist_ok=True)
+        return sum(_file_size(path) for path in cache_dir.rglob("*") if path.is_file())
+
+    cache_dir.mkdir(parents=True, exist_ok=True)
+    files = [path for path in cache_dir.rglob("*") if path.is_file()]
+    total = sum(_file_size(path) for path in files)
+    if total <= max_bytes:
+        return total
+
+    for path in sorted(files, key=lambda item: (_file_mtime(item), item.as_posix())):
+        if path.resolve() in protected_paths:
+            continue
+        try:
+            size = path.stat().st_size
+            path.unlink()
+            total -= size
+        except OSError:
+            continue
+        if total <= max_bytes:
+            break
+
+    for directory in sorted((path for path in cache_dir.rglob("*") if path.is_dir()), key=lambda item: len(item.parts), reverse=True):
+        try:
+            directory.rmdir()
+        except OSError:
+            pass
+    return max(total, 0)
 
 
 @dataclass(frozen=True, slots=True)

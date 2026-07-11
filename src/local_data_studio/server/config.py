@@ -28,6 +28,7 @@ class Settings(BaseSettings):
     default_eda_mode: str = Field(default="minimal", validation_alias="EDA_PROFILE_MODE")
     eda_cell_max_chars: int = Field(default=5000, validation_alias="EDA_CELL_MAX_CHARS")
     eda_nested_policy: str = Field(default="stringify", validation_alias="EDA_NESTED_POLICY")
+    eda_cache_max_bytes: int = Field(default=1024 * 1024 * 1024, validation_alias="EDA_CACHE_MAX_BYTES")
     atlas_host: str = Field(default="127.0.0.1", validation_alias="ATLAS_HOST")
     atlas_port: int = Field(default=5055, validation_alias="ATLAS_PORT")
     atlas_sample: int = Field(default=0, validation_alias="ATLAS_SAMPLE")
@@ -197,6 +198,9 @@ ALLOW_DELETE_DATA: bool = SETTINGS.allow_delete_data
 DEFAULT_EDA_MODE: str = SETTINGS.default_eda_mode
 EDA_CELL_MAX_CHARS: int = SETTINGS.eda_cell_max_chars
 EDA_NESTED_POLICY: str = SETTINGS.eda_nested_policy
+EDA_CACHE_DIR: Path = CACHE_DIR / "eda"
+EDA_CACHE_DIR.mkdir(parents=True, exist_ok=True)
+EDA_CACHE_MAX_BYTES: int = max(0, SETTINGS.eda_cache_max_bytes)
 
 ATLAS_HOST: str = SETTINGS.atlas_host
 ATLAS_PORT: int = SETTINGS.atlas_port
