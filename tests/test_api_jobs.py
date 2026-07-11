@@ -140,7 +140,7 @@ class ApiJobTests(TestCase):
 
         self.assertEqual("succeeded", payload["status"])
         self.assertEqual("query", payload["result"]["source"])
-        self.assertIn("/cache/", payload["result"]["url"])
+        self.assertIn("/cache/eda/", payload["result"]["url"])
         self.assertNotIn("rn", report_columns)
         self.assertIn("object", report_columns)
 
@@ -162,7 +162,7 @@ class ApiJobTests(TestCase):
         payload = self._wait_for_job(started["id"], attempts=80)
 
         self.assertEqual("succeeded", payload["status"])
-        self.assertIn("/cache/", payload["result"]["url"])
+        self.assertIn("/cache/eda/", payload["result"]["url"])
         self.assertEqual(100, payload["result"]["sample"])
 
     def test_atlas_job_launches_for_selected_image_column(self) -> None:

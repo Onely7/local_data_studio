@@ -10,13 +10,13 @@ from typing import Any
 from ydata_profiling import ProfileReport
 
 from .config import (
-    CACHE_DIR,
+    EDA_CACHE_DIR,
     EDA_CELL_MAX_CHARS,
     EDA_NESTED_POLICY,
 )
 from .db import open_connection, relation_with_rowid_sql
 
-EDA_CACHE_VERSION = "ydata-v1"
+EDA_CACHE_VERSION = "ydata-v2"
 
 
 def eda_cache_key(path: Path, sample_rows: int, mode: str) -> str:
@@ -31,7 +31,7 @@ def eda_cache_path(path: Path, sample_rows: int, mode: str) -> Path:
     key = eda_cache_key(path, sample_rows, mode)[:12]
     stem = path.stem or "data"
     safe_stem = "".join(ch if ch.isalnum() or ch in ("-", "_") else "_" for ch in stem)
-    return CACHE_DIR / f"{safe_stem}-{mode}-{key}.html"
+    return EDA_CACHE_DIR / f"{safe_stem}-{mode}-{key}.html"
 
 
 def load_eda_dataframe(path: Path, sample_rows: int, deleted_ids: list[int]) -> Any:
