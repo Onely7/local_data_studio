@@ -1,8 +1,12 @@
+import inspect
 from unittest import TestCase
 
 from fastapi.testclient import TestClient
 
 from local_data_studio.app import app
+from local_data_studio.server.api.analysis import run_query
+from local_data_studio.server.api.datasets import get_schema, preview, upload_files
+from local_data_studio.server.api.jobs import get_job, start_atlas_job
 
 EXPECTED_API_OPERATIONS = {
     ("/api/column_sample", "get"),
@@ -61,3 +65,11 @@ class ApplicationContractTests(TestCase):
         self.assertEqual(200, response.status_code)
         self.assertEqual("no-store, max-age=0", response.headers["cache-control"])
         self.assertIn("Data Studio", response.text)
+
+    def test_blocking_routes_run_in_fastapi_threadpool(self) -> None:
+        for endpoint in (get_schema, preview, run_query, start_atlas_job, get_job):
+            with self.subTest(endpoint=endpoint.__name__):
+                self.assertFalse(inspect.iscoroutinefunction(endpoint))
+
+    def test_streaming_upload_route_remains_async(self) -> None:
+        self.assertTrue(inspect.iscoroutinefunction(upload_files))

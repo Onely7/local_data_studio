@@ -1,4 +1,3 @@
-import asyncio
 import json
 from pathlib import Path
 from tempfile import TemporaryDirectory
@@ -42,7 +41,7 @@ class ApiJobTests(TestCase):
                 path = Path(tmpdir) / "data.jsonl"
                 path.write_text(json.dumps({"text": long_text, "items": list(range(40))}) + "\n", encoding="utf-8")
                 with patch("local_data_studio.server.api.datasets.resolve_data_file", return_value=path) as resolve_data_file:
-                    payload = asyncio.run(raw_row(RawRowRequest(file="example.jsonl", row_id=1)))
+                    payload = raw_row(RawRowRequest(file="example.jsonl", row_id=1))
 
             self.assertEqual(long_text, payload["row"][0])
             self.assertEqual(list(range(40)), payload["row"][1])
@@ -51,18 +50,18 @@ class ApiJobTests(TestCase):
         with self.subTest("query result"):
             long_text = "x" * 2_500
             with patch("local_data_studio.server.api.datasets.fetch_raw_query_row_guarded", return_value=(["text"], [long_text])):
-                payload = asyncio.run(raw_row(RawRowRequest(file="example.jsonl", sql="SELECT text FROM data", offset=0)))
+                payload = raw_row(RawRowRequest(file="example.jsonl", sql="SELECT text FROM data", offset=0))
 
             self.assertEqual(long_text, payload["row"][0])
 
     def test_preview_returns_page_token(self) -> None:
-        payload = asyncio.run(preview(file="example.jsonl", limit=2, offset=0, page_token=None))
+        payload = preview(file="example.jsonl", limit=2, offset=0, page_token=None)
 
         self.assertEqual(2, len(payload["rows"]))
         self.assertIn("next_page_token", payload)
 
     def test_count_job_completes(self) -> None:
-        started = asyncio.run(start_count_job(CountJobRequest(file="example.jsonl")))
+        started = start_count_job(CountJobRequest(file="example.jsonl"))
         payload = self._wait_for_job(started["id"])
 
         self.assertEqual("succeeded", payload["status"])
@@ -70,7 +69,7 @@ class ApiJobTests(TestCase):
         self.assertIn("cached", payload["result"])
 
     def test_search_job_returns_matching_rows(self) -> None:
-        started = asyncio.run(start_search_job(SearchJobRequest(file="example.jsonl", query="horse", limit=5)))
+        started = start_search_job(SearchJobRequest(file="example.jsonl", query="horse", limit=5))
         payload = self._wait_for_job(started["id"])
 
         self.assertEqual("succeeded", payload["status"])
@@ -78,7 +77,7 @@ class ApiJobTests(TestCase):
         self.assertIn("cached", payload["result"])
 
     def test_index_job_builds_line_index(self) -> None:
-        started = asyncio.run(start_index_job(IndexJobRequest(file="example.jsonl")))
+        started = start_index_job(IndexJobRequest(file="example.jsonl"))
         payload = self._wait_for_job(started["id"])
 
         self.assertEqual("succeeded", payload["status"])
@@ -86,7 +85,7 @@ class ApiJobTests(TestCase):
         self.assertTrue(payload["result"]["index"]["complete"])
 
     def test_query_job_returns_limited_rows(self) -> None:
-        started = asyncio.run(start_query_job(QueryRequest(file="example.jsonl", sql="SELECT * FROM data", limit=3)))
+        started = start_query_job(QueryRequest(file="example.jsonl", sql="SELECT * FROM data", limit=3))
         payload = self._wait_for_job(started["id"])
 
         self.assertEqual("succeeded", payload["status"])
@@ -94,7 +93,7 @@ class ApiJobTests(TestCase):
         self.assertIn("columns", payload["result"])
 
     def test_stats_job_completes(self) -> None:
-        started = asyncio.run(start_stats_job(StatsJobRequest(file="example.jsonl", sample=50)))
+        started = start_stats_job(StatsJobRequest(file="example.jsonl", sample=50))
         payload = self._wait_for_job(started["id"])
 
         self.assertEqual("succeeded", payload["status"])
@@ -113,14 +112,12 @@ class ApiJobTests(TestCase):
             return FakeReport()
 
         with patch("local_data_studio.server.eda_reports.build_eda_report", side_effect=fake_build_report):
-            started = asyncio.run(
-                start_eda_query_job(
-                    EdaQueryRequest(
-                        file="example.jsonl",
-                        sql=("SELECT row_number() OVER () AS rn, object, final_rating FROM data WHERE object = 'horse'"),
-                        sample=100,
-                        force=True,
-                    )
+            started = start_eda_query_job(
+                EdaQueryRequest(
+                    file="example.jsonl",
+                    sql=("SELECT row_number() OVER () AS rn, object, final_rating FROM data WHERE object = 'horse'"),
+                    sample=100,
+                    force=True,
                 )
             )
             payload = self._wait_for_job(started["id"])
@@ -143,7 +140,7 @@ class ApiJobTests(TestCase):
         self.assertFalse(dataframe.empty)
 
     def test_eda_job_completes_for_dataset_sample(self) -> None:
-        started = asyncio.run(start_eda_job(EdaRequest(file="example.jsonl", sample=100, force=True, mode="minimal")))
+        started = start_eda_job(EdaRequest(file="example.jsonl", sample=100, force=True, mode="minimal"))
         payload = self._wait_for_job(started["id"], attempts=80)
 
         self.assertEqual("succeeded", payload["status"])
@@ -176,7 +173,7 @@ class ApiJobTests(TestCase):
             ),
             patch("local_data_studio.server.atlas_components.service.launch_embedding_atlas", side_effect=fake_launch),
         ):
-            started = asyncio.run(start_atlas_job(AtlasRequest(file="example.jsonl", column="image", model="test-image-model")))
+            started = start_atlas_job(AtlasRequest(file="example.jsonl", column="image", model="test-image-model"))
             payload = self._wait_for_job(started["id"])
 
         self.assertEqual("succeeded", payload["status"])
@@ -210,14 +207,12 @@ class ApiJobTests(TestCase):
             ),
             patch("local_data_studio.server.atlas_components.service.launch_embedding_atlas", side_effect=fake_launch),
         ):
-            started = asyncio.run(
-                start_atlas_query_job(
-                    AtlasQueryRequest(
-                        file="example.jsonl",
-                        column="object",
-                        model="test-text-model",
-                        sql="SELECT object, short_description FROM data WHERE object = 'horse';",
-                    )
+            started = start_atlas_query_job(
+                AtlasQueryRequest(
+                    file="example.jsonl",
+                    column="object",
+                    model="test-text-model",
+                    sql="SELECT object, short_description FROM data WHERE object = 'horse';",
                 )
             )
             payload = self._wait_for_job(started["id"])
@@ -237,7 +232,7 @@ class ApiJobTests(TestCase):
     def _wait_for_job(self, job_id: str, attempts: int = 20) -> dict:
         payload = {}
         for _ in range(attempts):
-            payload = asyncio.run(get_job(job_id))
+            payload = get_job(job_id)
             if payload["status"] in {"succeeded", "failed", "cancelled"}:
                 return payload
             sleep(0.05)

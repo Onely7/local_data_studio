@@ -28,7 +28,7 @@ router = APIRouter()
 
 
 @router.post("/api/jobs/count")
-async def start_count_job(payload: CountJobRequest) -> dict[str, Any]:
+def start_count_job(payload: CountJobRequest) -> dict[str, Any]:
     path = resolve_data_file(payload.file)
     deleted_ids = deleted_row_ids_for(path)
 
@@ -46,7 +46,7 @@ async def start_count_job(payload: CountJobRequest) -> dict[str, Any]:
 
 
 @router.post("/api/jobs/index")
-async def start_index_job(payload: IndexJobRequest) -> dict[str, Any]:
+def start_index_job(payload: IndexJobRequest) -> dict[str, Any]:
     path = resolve_data_file(payload.file)
 
     def work(context: JobContext) -> dict[str, Any]:
@@ -56,7 +56,7 @@ async def start_index_job(payload: IndexJobRequest) -> dict[str, Any]:
 
 
 @router.post("/api/jobs/search")
-async def start_search_job(payload: SearchJobRequest) -> dict[str, Any]:
+def start_search_job(payload: SearchJobRequest) -> dict[str, Any]:
     path = resolve_data_file(payload.file)
     deleted_ids = deleted_row_ids_for(path)
     search_term = payload.query.strip()
@@ -76,7 +76,7 @@ async def start_search_job(payload: SearchJobRequest) -> dict[str, Any]:
 
 
 @router.post("/api/jobs/query")
-async def start_query_job(payload: QueryRequest) -> dict[str, Any]:
+def start_query_job(payload: QueryRequest) -> dict[str, Any]:
     path = resolve_data_file(payload.file)
 
     def work(context: JobContext) -> dict[str, Any]:
@@ -93,7 +93,7 @@ async def start_query_job(payload: QueryRequest) -> dict[str, Any]:
 
 
 @router.post("/api/jobs/stats")
-async def start_stats_job(payload: StatsJobRequest) -> dict[str, Any]:
+def start_stats_job(payload: StatsJobRequest) -> dict[str, Any]:
     path = resolve_data_file(payload.file)
 
     def work(context: JobContext) -> dict[str, Any]:
@@ -106,7 +106,7 @@ async def start_stats_job(payload: StatsJobRequest) -> dict[str, Any]:
 
 
 @router.post("/api/jobs/eda")
-async def start_eda_job(payload: EdaRequest) -> dict[str, Any]:
+def start_eda_job(payload: EdaRequest) -> dict[str, Any]:
     path = resolve_data_file(payload.file)
     reports = eda_reports_service()
 
@@ -124,7 +124,7 @@ async def start_eda_job(payload: EdaRequest) -> dict[str, Any]:
 
 
 @router.post("/api/jobs/eda_query")
-async def start_eda_query_job(payload: EdaQueryRequest) -> dict[str, Any]:
+def start_eda_query_job(payload: EdaQueryRequest) -> dict[str, Any]:
     path = resolve_data_file(payload.file)
     reports = eda_reports_service()
 
@@ -143,7 +143,7 @@ async def start_eda_query_job(payload: EdaQueryRequest) -> dict[str, Any]:
 
 
 @router.post("/api/jobs/atlas")
-async def start_atlas_job(payload: AtlasRequest) -> dict[str, Any]:
+def start_atlas_job(payload: AtlasRequest) -> dict[str, Any]:
     path = resolve_data_file(payload.file)
     atlas = atlas_service()
 
@@ -162,7 +162,7 @@ async def start_atlas_job(payload: AtlasRequest) -> dict[str, Any]:
 
 
 @router.post("/api/jobs/atlas_query")
-async def start_atlas_query_job(payload: AtlasQueryRequest) -> dict[str, Any]:
+def start_atlas_query_job(payload: AtlasQueryRequest) -> dict[str, Any]:
     path = resolve_data_file(payload.file)
     atlas = atlas_service()
 
@@ -181,7 +181,7 @@ async def start_atlas_query_job(payload: AtlasQueryRequest) -> dict[str, Any]:
 
 
 @router.get("/api/jobs/{job_id}")
-async def get_job(job_id: str) -> dict[str, Any]:
+def get_job(job_id: str) -> dict[str, Any]:
     record = JOB_STORE.get(job_id)
     if record is None:
         raise HTTPException(status_code=404, detail="job not found")
@@ -189,7 +189,7 @@ async def get_job(job_id: str) -> dict[str, Any]:
 
 
 @router.post("/api/jobs/{job_id}/cancel")
-async def cancel_job(job_id: str) -> dict[str, Any]:
+def cancel_job(job_id: str) -> dict[str, Any]:
     record = JOB_STORE.cancel(job_id)
     if record is None:
         raise HTTPException(status_code=404, detail="job not found")

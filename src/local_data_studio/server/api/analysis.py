@@ -28,14 +28,14 @@ router = APIRouter()
 
 
 @router.get("/api/column_stats")
-async def column_stats(file: str = Query(...), sample: int | None = Query(DEFAULT_SAMPLE)) -> dict[str, Any]:
+def column_stats(file: str = Query(...), sample: int | None = Query(DEFAULT_SAMPLE)) -> dict[str, Any]:
     path = resolve_data_file(file)
     reject_large_sync_operation(path, "synchronous column stats")
     return compute_column_stats(file, path, sample if sample is not None else DEFAULT_SAMPLE)
 
 
 @router.post("/api/eda")
-async def run_eda(payload: EdaRequest) -> dict[str, Any]:
+def run_eda(payload: EdaRequest) -> dict[str, Any]:
     path = resolve_data_file(payload.file)
     return eda_reports_service().generate_dataset_eda_report(
         file_name=payload.file,
@@ -47,7 +47,7 @@ async def run_eda(payload: EdaRequest) -> dict[str, Any]:
 
 
 @router.post("/api/nl_query")
-async def nl_query(payload: NLQueryRequest) -> dict[str, Any]:
+def nl_query(payload: NLQueryRequest) -> dict[str, Any]:
     path = resolve_data_file(payload.file)
     prompt = payload.prompt.strip()
     if not prompt:
@@ -59,14 +59,14 @@ async def nl_query(payload: NLQueryRequest) -> dict[str, Any]:
 
 
 @router.get("/api/count")
-async def count_rows(file: str = Query(...)) -> dict[str, Any]:
+def count_rows(file: str = Query(...)) -> dict[str, Any]:
     path = resolve_data_file(file)
     reject_large_sync_operation(path, "synchronous row count")
     return {"file": file, "count": count_relation_rows(path)}
 
 
 @router.get("/api/search")
-async def search(
+def search(
     file: str = Query(...),
     query: str = Query(...),
     limit: int | None = Query(DEFAULT_LIMIT),
@@ -95,7 +95,7 @@ async def search(
 
 
 @router.post("/api/query")
-async def run_query(payload: QueryRequest) -> dict[str, Any]:
+def run_query(payload: QueryRequest) -> dict[str, Any]:
     path = resolve_data_file(payload.file)
     return execute_query_guarded(
         file_name=payload.file,

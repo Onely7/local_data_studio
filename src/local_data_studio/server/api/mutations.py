@@ -24,7 +24,7 @@ def _reject_large_hard_delete(path: Path) -> None:
 
 
 @router.post("/api/delete_row")
-async def delete_row(payload: DeleteRowRequest) -> dict[str, Any]:
+def delete_row(payload: DeleteRowRequest) -> dict[str, Any]:
     path = resolve_data_file(payload.file)
     row_id = int(payload.row_id)
     if row_id < 1:
@@ -44,7 +44,7 @@ async def delete_row(payload: DeleteRowRequest) -> dict[str, Any]:
 
 
 @router.post("/api/delete_column")
-async def delete_column(payload: DeleteColumnRequest) -> dict[str, Any]:
+def delete_column(payload: DeleteColumnRequest) -> dict[str, Any]:
     path = resolve_data_file(payload.file)
     column = payload.column.strip()
     if not column:

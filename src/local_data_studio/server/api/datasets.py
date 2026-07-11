@@ -33,7 +33,7 @@ UPLOAD_FILES = File(...)
 
 
 @router.get("/api/files")
-async def list_files() -> dict[str, Any]:
+def list_files() -> dict[str, Any]:
     files: list[dict[str, Any]] = []
     for name, path in refresh_dataset_file_catalog().items():
         stat = path.stat()
@@ -48,7 +48,7 @@ async def list_files() -> dict[str, Any]:
 
 
 @router.get("/api/config")
-async def get_config() -> dict[str, Any]:
+def get_config() -> dict[str, Any]:
     return {
         "allow_delete_data": ALLOW_DELETE_DATA,
         "file_serve_roots": [str(path) for path in FILE_SERVE_ROOTS],
@@ -57,12 +57,12 @@ async def get_config() -> dict[str, Any]:
 
 
 @router.get("/api/embedder_models")
-async def embedder_models() -> dict[str, Any]:
+def embedder_models() -> dict[str, Any]:
     return {"models": discover_embedder_models(EMBEDDER_MODELS_DIR)}
 
 
 @router.get("/api/raw")
-async def raw_file(path: str = Query(..., description="Absolute file path on the server")) -> FileResponse:
+def raw_file(path: str = Query(..., description="Absolute file path on the server")) -> FileResponse:
     resolved = resolve_raw_image_file(path, FILE_SERVE_ROOTS)
     media_type, _ = mimetypes.guess_type(str(resolved))
     return FileResponse(str(resolved), media_type=media_type or "application/octet-stream")
@@ -98,13 +98,13 @@ async def upload_files(files: list[UploadFile] = UPLOAD_FILES) -> dict[str, Any]
 
 
 @router.get("/api/schema")
-async def get_schema(file: str = Query(...)) -> dict[str, Any]:
+def get_schema(file: str = Query(...)) -> dict[str, Any]:
     metadata = load_dataset_metadata(resolve_data_file(file))
     return metadata.to_response(file)
 
 
 @router.get("/api/preview")
-async def preview(
+def preview(
     file: str = Query(...),
     limit: int | None = Query(DEFAULT_LIMIT),
     offset: int | None = Query(0),
@@ -115,7 +115,7 @@ async def preview(
 
 
 @router.post("/api/raw_row")
-async def raw_row(payload: RawRowRequest) -> dict[str, Any]:
+def raw_row(payload: RawRowRequest) -> dict[str, Any]:
     path = resolve_data_file(payload.file)
     if payload.row_id is not None:
         columns, values = fetch_raw_row(path, payload.row_id)
@@ -134,7 +134,7 @@ async def raw_row(payload: RawRowRequest) -> dict[str, Any]:
 
 
 @router.get("/api/column_sample")
-async def column_sample(
+def column_sample(
     file: str = Query(...),
     column: str = Query(...),
     limit: int | None = Query(20),
