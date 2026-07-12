@@ -177,6 +177,14 @@ SELECT * FROM data LIMIT 100</textarea
                 <option value="transformers" disabled>Transformers</option>
               </select>
             </div>
+            <div class="atlas-controls">
+              <label for="atlas-projection">Projection</label>
+              <select id="atlas-projection">
+                <option value="umap" selected>UMAP</option>
+                <option value="tsne">t-SNE</option>
+                <option value="pca">PCA</option>
+              </select>
+            </div>
             <div class="atlas-controls atlas-prompt-controls atlas-prompt-unavailable" id="atlas-prompt-controls">
               <label for="atlas-prompt">Prompt</label>
               <textarea
@@ -354,6 +362,6 @@ Select a row to inspect</pre
       </div>
     </div>
 
-    <script src="app.js?v=20260713-atlas-backend-detection"></script>
+    <script src="app.js?v=20260712-atlas-projections"></script>
   </body>
 </html>
