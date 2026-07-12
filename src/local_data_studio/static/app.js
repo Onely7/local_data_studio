@@ -47,6 +47,9 @@ const state = {
   atlasJobKind: "",
   atlasUrl: "",
   embedderModels: [],
+  llmModels: [],
+  llmDefaultModel: "",
+  nlGenerating: false,
 };
 
 const UPLOAD_EXTENSIONS = new Set([".jsonl", ".parquet", ".csv", ".tsv"]);
@@ -99,6 +102,7 @@ const elements = {
   atlasStatus: document.getElementById("atlas-status"),
   atlasLink: document.getElementById("atlas-link"),
   nlInput: document.getElementById("nl-input"),
+  nlModel: document.getElementById("nl-model"),
   nlGenerate: document.getElementById("nl-generate"),
   nlStatus: document.getElementById("nl-status"),
   imageOverlay: document.getElementById("image-overlay"),
@@ -1676,6 +1680,60 @@ async function loadEmbedderModels() {
   renderAtlasModelOptions();
 }
 
+function selectedLlmModel() {
+  return elements.nlModel ? elements.nlModel.value.trim() : "";
+}
+
+function updateNlGenerateState() {
+  if (!elements.nlGenerate) return;
+  const selected = selectedLlmModel();
+  const available = state.llmModels.some(
+    (model) => model.id === selected && model.available,
+  );
+  elements.nlGenerate.disabled = state.nlGenerating || !available;
+}
+
+function renderLlmModelOptions() {
+  if (!elements.nlModel) return;
+  const current = selectedLlmModel();
+  const options = state.llmModels.length
+    ? state.llmModels.map((model) => {
+        const suffix = model.available ? "" : " (unavailable)";
+        const title = model.reason ? ` title="${escapeHtml(model.reason)}"` : "";
+        return `<option value="${escapeHtml(model.id)}"${model.available ? "" : " disabled"}${title}>${escapeHtml(model.label)}${suffix}</option>`;
+      })
+    : ['<option value="">No models configured</option>'];
+  elements.nlModel.innerHTML = options.join("");
+  const selected = state.llmModels.some(
+    (model) => model.id === current && model.available,
+  )
+    ? current
+    : state.llmModels.find(
+        (model) => model.id === state.llmDefaultModel && model.available,
+      )?.id || state.llmModels.find((model) => model.available)?.id || "";
+  elements.nlModel.value = selected;
+  elements.nlModel.disabled = !state.llmModels.some((model) => model.available);
+  updateNlGenerateState();
+}
+
+async function loadLlmModels() {
+  try {
+    const data = await fetchJSON("/api/llm_models");
+    state.llmModels = data.models || [];
+    state.llmDefaultModel = data.default_model || "";
+  } catch (err) {
+    state.llmModels = [];
+    state.llmDefaultModel = "";
+    if (elements.nlStatus) {
+      elements.nlStatus.textContent = extractErrorMessage(err);
+    }
+  }
+  renderLlmModelOptions();
+  if (!state.llmModels.some((model) => model.available) && elements.nlStatus) {
+    elements.nlStatus.textContent = "Configure an available LLM model to generate SQL.";
+  }
+}
+
 async function selectFile(fileName) {
   state.file = fileName;
   renderFiles();
@@ -2199,6 +2257,13 @@ async function runAtlasOnQueryResults() {
 async function runNlQuery() {
   if (!state.file || !elements.nlInput || !elements.nlGenerate) return;
   const prompt = elements.nlInput.value.trim();
+  const model = selectedLlmModel();
+  if (!model) {
+    if (elements.nlStatus) {
+      elements.nlStatus.textContent = "Select an available model first.";
+    }
+    return;
+  }
   if (!prompt) {
     if (elements.nlStatus) {
       elements.nlStatus.textContent = "Please enter a request.";
@@ -2206,20 +2271,23 @@ async function runNlQuery() {
     return;
   }
   const sampleRow = buildSampleRow();
-  elements.nlGenerate.disabled = true;
+  state.nlGenerating = true;
+  updateNlGenerateState();
   if (elements.nlStatus) {
     elements.nlStatus.textContent = "Generating SQL...";
   }
   try {
     const data = await fetchJSON("/api/nl_query", {
       method: "POST",
-      body: JSON.stringify({ file: state.file, prompt, sample: sampleRow }),
+      body: JSON.stringify({ file: state.file, prompt, sample: sampleRow, model }),
     });
     if (data.sql) {
       elements.sqlInput.value = data.sql;
     }
     if (elements.nlStatus) {
-      elements.nlStatus.textContent = "SQL ready.";
+      elements.nlStatus.textContent = data.model_label
+        ? `SQL ready with ${data.model_label}.`
+        : "SQL ready.";
     }
   } catch (err) {
     if (elements.nlStatus) {
@@ -2227,7 +2295,8 @@ async function runNlQuery() {
     }
     console.error(err);
   } finally {
-    elements.nlGenerate.disabled = false;
+    state.nlGenerating = false;
+    updateNlGenerateState();
   }
 }
 
@@ -2442,6 +2511,14 @@ function attachEvents() {
   if (elements.nlGenerate) {
     elements.nlGenerate.addEventListener("click", runNlQuery);
   }
+  if (elements.nlModel) {
+    elements.nlModel.addEventListener("change", () => {
+      if (elements.nlStatus) {
+        elements.nlStatus.textContent = "";
+      }
+      updateNlGenerateState();
+    });
+  }
   if (elements.nlInput) {
     elements.nlInput.addEventListener("keydown", (event) => {
       if (
@@ -2634,11 +2711,11 @@ addInfoStyles();
 attachEvents();
 updateRowActions();
 loadConfig()
-  .then(() => loadEmbedderModels())
+  .then(() => Promise.all([loadEmbedderModels(), loadLlmModels()]))
   .then(() => loadFiles())
   .catch((err) => {
     console.error(err);
-    loadEmbedderModels()
+    Promise.all([loadEmbedderModels(), loadLlmModels()])
       .catch((error) => {
         console.error(error);
       })

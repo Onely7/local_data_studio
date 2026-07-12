@@ -674,6 +674,32 @@ tr.expanded {
   margin-top: 8px;
 }
 
+.nl-model-control {
+  display: grid;
+  grid-template-columns: 48px minmax(0, 1fr);
+  gap: 8px;
+  align-items: center;
+  margin-bottom: 8px;
+  color: var(--muted);
+  font-size: 12px;
+}
+
+.nl-model-control select {
+  min-width: 0;
+  width: 100%;
+  padding: 7px 9px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: #fff;
+  color: var(--ink);
+}
+
+.nl-model-control select:disabled,
+.nl-model-control select option:disabled {
+  color: var(--muted);
+  background: var(--soft);
+}
+
 .nl-query {
   display: flex;
   gap: 8px;
@@ -716,6 +742,15 @@ tr.expanded {
 
 .nl-send:hover {
   transform: translateY(-1px);
+}
+
+.nl-send:disabled,
+.nl-send:disabled:hover {
+  color: var(--muted);
+  background: var(--soft);
+  cursor: not-allowed;
+  transform: none;
+  opacity: 0.65;
 }
 
 .eda-actions {
