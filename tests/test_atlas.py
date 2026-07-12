@@ -3,6 +3,7 @@
 import os
 import sys
 from base64 import b64decode
+from dataclasses import replace
 from pathlib import Path
 from tempfile import TemporaryDirectory
 from threading import Event, Thread
@@ -36,6 +37,7 @@ from local_data_studio.server.atlas import (
     resolve_embedder_model,
 )
 from local_data_studio.server.atlas_cache import prune_cache_dir
+from local_data_studio.server.atlas_components.contracts import AtlasProjectionCoordinates
 from local_data_studio.server.config import BASE_DIR, PACKAGE_DIR
 
 VALID_PNG_BYTES = b64decode("iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+/p9sAAAAASUVORK5CYII=")
@@ -308,9 +310,36 @@ class AtlasModelDiscoveryTests(TestCase):
                     model_path=model_path,
                     options=options,
                 )
+                tsne = atlas_dataset_cache_path(
+                    path=data_path,
+                    column="text",
+                    modality="text",
+                    sql="SELECT text FROM data",
+                    model_path=model_path,
+                    options=replace(options, projection_method="tsne", umap_projection_mode=None, umap_anchor_sample=None),
+                )
+                tsne_with_other_umap_settings = atlas_dataset_cache_path(
+                    path=data_path,
+                    column="text",
+                    modality="text",
+                    sql="SELECT text FROM data",
+                    model_path=model_path,
+                    options=replace(options, projection_method="tsne", umap_projection_mode="anchor_transform", umap_anchor_sample=1),
+                )
+                smaller_sample = atlas_dataset_cache_path(
+                    path=data_path,
+                    column="text",
+                    modality="text",
+                    sql="SELECT text FROM data",
+                    model_path=model_path,
+                    options=replace(options, sample=10),
+                )
 
         self.assertEqual(first, second)
         self.assertNotEqual(first, changed)
+        self.assertNotEqual(first, tsne)
+        self.assertEqual(tsne, tsne_with_other_umap_settings)
+        self.assertNotEqual(first, smaller_sample)
 
     def test_prepare_atlas_dataset_reuses_projected_parquet_cache(self) -> None:
         """Verify that prepare atlas dataset reuses projected parquet cache."""
@@ -463,6 +492,70 @@ class AtlasModelDiscoveryTests(TestCase):
 
         self.assertEqual(1, calls)
         self.assertEqual([False, True], sorted(result.cache_hit for result in results))
+
+    def test_prepare_atlas_dataset_limits_embedding_and_cached_rows(self) -> None:
+        """Apply ATLAS_SAMPLE before embedding and cache at most that many rows."""
+
+        class DummyContext:
+            """Ignore progress updates for cache construction."""
+
+            def update(self, *, progress=None, message=None):  # noqa: ANN001, ARG002
+                """Accept a progress update."""
+
+        with TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            data_path = root / "data.jsonl"
+            data_path.write_text('{"text":"value"}\n', encoding="utf-8")
+            model_root = root / "models"
+            model_path = model_root / "text-model"
+            model_path.mkdir(parents=True)
+            (model_path / "config.json").write_text("{}", encoding="utf-8")
+            data_cache = root / "cache" / "atlas" / "datasets"
+            cache_root = root / "cache" / "atlas"
+            options = AtlasOptions(
+                sample=4,
+                host="127.0.0.1",
+                port=5055,
+                batch_size=None,
+                text_embedder="sentence-transformers",
+                image_embedder=None,
+                trust_remote_code=False,
+                projection_method="pca",
+                umap_projection_mode=None,
+                umap_anchor_sample=None,
+            )
+
+            def fake_load_datasets(inputs, query=None, sample=None, splits=None):  # noqa: ANN001, ARG001
+                """Return a filtered result while keeping sampling application-owned."""
+                self.assertEqual("SELECT text FROM data WHERE text IS NOT NULL", query)
+                self.assertIsNone(sample)
+                return pd.DataFrame({"text": [f"row-{index}" for index in range(10)]})
+
+            def fake_project(data_frame, **kwargs):  # noqa: ANN001, ARG001
+                """Assert that sampling happened before encoder input is consumed."""
+                self.assertEqual(4, len(data_frame))
+                return AtlasProjectionCoordinates(np.zeros((4, 2), dtype=np.float32))
+
+            with (
+                patch("local_data_studio.server.atlas_components.dataset.EMBEDDER_MODELS_DIR", model_root),
+                patch("local_data_studio.server.atlas_components.dataset.ATLAS_DATA_CACHE_DIR", data_cache),
+                patch("local_data_studio.server.atlas_components.dataset.ATLAS_CACHE_ROOT", cache_root),
+                patch("local_data_studio.server.atlas_components.dataset.load_datasets", side_effect=fake_load_datasets),
+                patch("local_data_studio.server.atlas_components.dataset.project_atlas_frame", side_effect=fake_project),
+                patch("local_data_studio.server.atlas_components.dataset.effective_embedder_for_modality", return_value="sentence-transformers"),
+            ):
+                prepared = prepare_atlas_dataset(
+                    path=data_path,
+                    column="text",
+                    modality="text",
+                    sql="SELECT text FROM data WHERE text IS NOT NULL",
+                    model_path=model_path,
+                    options=options,
+                    context=DummyContext(),
+                )
+
+            self.assertEqual(4, prepared.row_count)
+            self.assertEqual(4, len(pd.read_parquet(prepared.path)))
 
     def test_prepare_atlas_dataset_converts_image_urls_to_bytes_for_embedding(self) -> None:
         """Verify that prepare atlas dataset converts image urls to bytes for embedding."""
@@ -889,8 +982,8 @@ class AtlasModelDiscoveryTests(TestCase):
             image_embedder=None,
             trust_remote_code=False,
             embedding_dtype="float16",
-            projection_mode="full",
-            anchor_sample=None,
+            umap_projection_mode="full",
+            umap_anchor_sample=None,
         )
         seen_dtype = None
 
@@ -904,7 +997,7 @@ class AtlasModelDiscoveryTests(TestCase):
                 knn_distances=np.zeros((2, 1), dtype=np.float32),
             )
 
-        with patch("local_data_studio.server.atlas_components.projection.run_full_projection", side_effect=fake_run_full_projection):
+        with patch("local_data_studio.server.atlas_components.reducers.run_umap_projection", side_effect=fake_run_full_projection):
             projected = project_atlas_frame(
                 pd.DataFrame({"vector": [[1.0, 2.0], [3.0, 4.0]]}),
                 input_column="vector",
@@ -932,7 +1025,7 @@ class AtlasModelDiscoveryTests(TestCase):
                 knn_distances=np.zeros((row_count, 0), dtype=np.float32),
             )
 
-        with patch("local_data_studio.server.atlas_components.projection._run_umap", side_effect=fake_run_umap):
+        with patch("local_data_studio.server.atlas_components.reducers._run_umap", side_effect=fake_run_umap):
             _run_full_projection(np.ones((3, 2), dtype=np.float32))
 
         self.assertIsNotNone(seen_args)
@@ -950,8 +1043,8 @@ class AtlasModelDiscoveryTests(TestCase):
             image_embedder=None,
             trust_remote_code=False,
             embedding_dtype="float32",
-            projection_mode="anchor_transform",
-            anchor_sample=2,
+            umap_projection_mode="anchor_transform",
+            umap_anchor_sample=2,
         )
         calls: list[int] = []
 

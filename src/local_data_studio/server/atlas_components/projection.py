@@ -2,127 +2,27 @@
 
 from __future__ import annotations
 
-import asyncio
-from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
 import numpy as np
 import umap
-from embedding_atlas.projection import Projection, _run_embedding, _run_umap
 
 from .contracts import AtlasModality, AtlasOptions, AtlasProjectionCoordinates
-from .embedding_backends import (
-    AtlasEmbeddingBackend,
-    effective_embedder_for_modality,
-    load_sentence_transformer_model,
-    resolve_embedder_callable,
+from .embedding_session import (
+    AtlasEmbeddingSession,
+    create_embedding_session,
+    embed_items,
+    embedding_batch,
+    embedding_items,
+    embedding_sequence,
 )
-
-ATLAS_UMAP_RANDOM_STATE = 42
-ATLAS_UMAP_N_JOBS = 1
-
-
-def embedding_items(projection_input: Any, input_column: str) -> list[Any]:
-    """Materialize one input column for full-projection compatibility.
-
-    Raises:
-        ValueError: The frame does not expose the requested column as a sequence.
-    """
-    try:
-        return projection_input[input_column].tolist()
-    except Exception as exc:
-        raise ValueError(f"failed to read Atlas embedding input: {exc}") from exc
-
-
-def _embedding_sequence(projection_input: Any, input_column: str) -> Any:
-    try:
-        return projection_input[input_column]
-    except Exception as exc:
-        raise ValueError(f"failed to read Atlas embedding input: {exc}") from exc
-
-
-def _embedding_batch(items: Any, indices: Any) -> list[Any]:
-    if hasattr(items, "iloc"):
-        return [items.iloc[int(index)] for index in indices]
-    return [items[int(index)] for index in indices]
-
-
-def projection_dtype(options: AtlasOptions) -> Any:
-    """Return the NumPy dtype selected for intermediate embeddings."""
-    return np.float16 if options.embedding_dtype == "float16" else np.float32
-
-
-def cast_embeddings(embeddings: np.ndarray, options: AtlasOptions) -> np.ndarray:
-    """Return an array in the configured embedding dtype, copying only as needed."""
-    return np.asarray(embeddings, dtype=projection_dtype(options))
-
-
-@dataclass(slots=True)
-class AtlasEmbeddingSession:
-    """One reusable encoder instance for all batches in an Atlas job."""
-
-    modality: AtlasModality
-    model_path: Path
-    options: AtlasOptions
-    embedder: Any = None
-    embedder_args: dict[str, bool] | None = None
-
-    def embed(self, items: list[Any]) -> np.ndarray:
-        """Encode one owned batch with the session's reusable model callable."""
-        if not items:
-            return np.empty((0, 0), dtype=projection_dtype(self.options))
-        if self.modality == "vector":
-            return cast_embeddings(np.asarray(items), self.options)
-        embeddings = asyncio.run(
-            _run_embedding(
-                self.embedder,
-                items,
-                model=str(self.model_path),
-                embedder_args=self.embedder_args or {},
-                batch_size=self.options.batch_size,
-                max_concurrency=1,
-            )
-        )
-        return cast_embeddings(embeddings, self.options)
-
-
-def create_embedding_session(modality: AtlasModality, model_path: Path, options: AtlasOptions) -> AtlasEmbeddingSession:
-    """Create one encoder session to be reused for every projection batch."""
-    if modality == "vector":
-        return AtlasEmbeddingSession(modality, model_path, options)
-    embedder, embedder_args = resolve_embedder_callable(modality, model_path, options)
-    return AtlasEmbeddingSession(modality, model_path, options, embedder, embedder_args)
-
-
-def embed_items(items: list[Any], *, modality: AtlasModality, model_path: Path, options: AtlasOptions) -> np.ndarray:
-    """Compatibility helper for callers embedding a single batch."""
-    return create_embedding_session(modality, model_path, options).embed(items)
-
-
-def zero_projection(row_count: int) -> Projection:
-    """Create zero coordinates and empty neighbors for zero or one input row."""
-    return Projection(
-        projection=np.zeros((row_count, 2), dtype=np.float32),
-        knn_indices=np.zeros((row_count, 0), dtype=np.int64),
-        knn_distances=np.zeros((row_count, 0), dtype=np.float32),
-    )
+from .reducers import ATLAS_PROJECTION_RANDOM_STATE, ATLAS_UMAP_N_JOBS, Projection, reduce_embeddings, run_umap_projection
 
 
 def run_full_projection(embeddings: np.ndarray) -> Projection:
-    """Run deterministic single-threaded UMAP over all embeddings."""
-    if len(embeddings) <= 1:
-        return zero_projection(len(embeddings))
-    n_neighbors = min(15, max(2, len(embeddings) - 1))
-    return _run_umap(
-        embeddings,
-        umap_args={
-            "metric": "cosine",
-            "n_neighbors": n_neighbors,
-            "random_state": ATLAS_UMAP_RANDOM_STATE,
-            "n_jobs": ATLAS_UMAP_N_JOBS,
-        },
-    )
+    """Compatibility alias for deterministic full-fit UMAP."""
+    return run_umap_projection(embeddings)
 
 
 def compute_full_projection(
@@ -136,8 +36,8 @@ def compute_full_projection(
 ) -> AtlasProjectionCoordinates:
     """Embed all input rows and return owned float32 projection coordinates."""
     embeddings = session.embed(embedding_items(projection_input, input_column))
-    result = run_full_projection(embeddings)
-    return AtlasProjectionCoordinates(np.asarray(result.projection, dtype=np.float32))
+    values = reduce_embeddings(embeddings, options.projection_method)
+    return AtlasProjectionCoordinates(values)
 
 
 def anchor_indices(row_count: int, anchor_sample: int | None) -> np.ndarray:
@@ -158,17 +58,27 @@ def compute_anchor_transform_projection(
     session: AtlasEmbeddingSession,
 ) -> AtlasProjectionCoordinates:
     """Fit UMAP on anchors and transform remaining rows into the same space."""
-    items = _embedding_sequence(projection_input, input_column)
+    items = embedding_sequence(projection_input, input_column)
     row_count = len(items)
     if row_count <= 1:
         return AtlasProjectionCoordinates(np.zeros((row_count, 2), dtype=np.float32))
-    selected = anchor_indices(row_count, options.anchor_sample)
+    selected = anchor_indices(row_count, options.umap_anchor_sample)
+    if len(selected) <= 1:
+        return compute_full_projection(
+            projection_input,
+            input_column=input_column,
+            modality=modality,
+            model_path=model_path,
+            options=options,
+            session=session,
+        )
     selected_set = set(selected.tolist())
-    anchor_embeddings = session.embed(_embedding_batch(items, selected))
+    anchor_embeddings = session.embed(embedding_batch(items, selected))
     reducer = umap.UMAP(
         metric="cosine",
+        init="random",
         n_neighbors=min(15, max(2, len(selected) - 1)),
-        random_state=ATLAS_UMAP_RANDOM_STATE,
+        random_state=ATLAS_PROJECTION_RANDOM_STATE,
         n_jobs=ATLAS_UMAP_N_JOBS,
     )
     values = np.empty((row_count, 2), dtype=np.float32)
@@ -181,11 +91,11 @@ def compute_anchor_transform_projection(
         batch_indices.append(index)
         if len(batch_indices) < transform_batch_size:
             continue
-        batch_embeddings = session.embed(_embedding_batch(items, batch_indices))
+        batch_embeddings = session.embed(embedding_batch(items, batch_indices))
         values[batch_indices] = np.asarray(reducer.transform(batch_embeddings), dtype=np.float32)
         batch_indices = []
     if batch_indices:
-        batch_embeddings = session.embed(_embedding_batch(items, batch_indices))
+        batch_embeddings = session.embed(embedding_batch(items, batch_indices))
         values[batch_indices] = np.asarray(reducer.transform(batch_embeddings), dtype=np.float32)
     return AtlasProjectionCoordinates(values)
 
@@ -200,7 +110,11 @@ def project_atlas_frame(
 ) -> AtlasProjectionCoordinates:
     """Create one encoder session and project the selected input column."""
     session = create_embedding_session(modality, model_path, options)
-    project = compute_anchor_transform_projection if options.projection_mode == "anchor_transform" else compute_full_projection
+    project = (
+        compute_anchor_transform_projection
+        if options.projection_method == "umap" and options.umap_projection_mode == "anchor_transform"
+        else compute_full_projection
+    )
     return project(
         projection_input,
         input_column=input_column,

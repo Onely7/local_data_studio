@@ -52,9 +52,10 @@ class AtlasRequest(BaseModel):
     file: str
     column: str
     model: str
-    sample: int | None = None
+    sample: int | None = Field(default=None, ge=0)
     backend: Literal["transformers", "sentence-transformers"] | None = None
     prompt: str | None = Field(default=None, max_length=16_384)
+    projection_method: Literal["umap", "tsne", "pca"] = "umap"
 
 
 class AtlasQueryRequest(AtlasRequest):

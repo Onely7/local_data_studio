@@ -202,6 +202,7 @@ class ApiJobTests(TestCase):
                     y="y",
                     neighbors=None,
                     cache_hit=True,
+                    row_count=3,
                 ),
             ),
             patch("local_data_studio.server.atlas_components.service.launch_embedding_atlas", side_effect=fake_launch),
@@ -216,6 +217,9 @@ class ApiJobTests(TestCase):
         self.assertEqual("test-image-model", payload["result"]["model"])
         self.assertEqual("http://127.0.0.1:5055/", payload["result"]["url"])
         self.assertTrue(payload["result"]["cache_hit"])
+        self.assertEqual("umap", payload["result"]["projection_method"])
+        self.assertEqual(3, payload["result"]["row_count"])
+        self.assertEqual("full", payload["result"]["umap_projection_mode"])
 
     def test_atlas_query_job_passes_guarded_sql(self) -> None:
         """Verify that atlas query job passes guarded sql."""
@@ -241,6 +245,7 @@ class ApiJobTests(TestCase):
                     y="y",
                     neighbors=None,
                     cache_hit=False,
+                    row_count=2,
                 ),
             ),
             patch("local_data_studio.server.atlas_components.service.launch_embedding_atlas", side_effect=fake_launch),

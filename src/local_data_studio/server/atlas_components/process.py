@@ -25,7 +25,7 @@ from ..config import (
 )
 from ..jobs import JobContext
 from .contracts import AtlasModality, AtlasOptions
-from .projection import effective_embedder_for_modality
+from .embedding_backends import effective_embedder_for_modality
 
 ATLAS_URL_PATTERN = re.compile(
     r"https?://(?:localhost|127\.0\.0\.1|0\.0\.0\.0|\[::1\])(?::\d+)?"

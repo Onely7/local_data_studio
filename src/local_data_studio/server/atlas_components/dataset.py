@@ -34,15 +34,17 @@ from .contracts import (
     AtlasOptions,
     AtlasPreparedDataset,
 )
+from .embedding_backends import effective_embedder_for_modality
 from .images import (
     build_atlas_output_frame,
     image_like_columns,
     prepare_projection_input,
 )
-from .projection import effective_embedder_for_modality, project_atlas_frame
+from .projection import project_atlas_frame
 from .prompts import PromptTemplateError, compile_prompt_template
+from .sampling import sample_atlas_frame
 
-ATLAS_DATASET_CACHE_VERSION = 10
+ATLAS_DATASET_CACHE_VERSION = 11
 
 
 @lru_cache(maxsize=256)
@@ -108,8 +110,15 @@ def atlas_dataset_cache_path(
         "batch_size": options.batch_size,
         "text_max_chars": ATLAS_TEXT_MAX_CHARS,
         "embedding_dtype": options.embedding_dtype,
-        "projection_mode": options.projection_mode,
-        "anchor_sample": options.anchor_sample,
+        "projection_method": options.projection_method,
+        "umap": (
+            {
+                "projection_mode": options.umap_projection_mode,
+                "anchor_sample": options.umap_anchor_sample,
+            }
+            if options.projection_method == "umap"
+            else None
+        ),
         "trust_remote_code": options.trust_remote_code,
         "projection_columns": {
             "x": ATLAS_PROJECTION_X,
@@ -145,12 +154,16 @@ def prepare_atlas_dataset(
         if cache_path.exists():
             prune_cache_dir(ATLAS_CACHE_ROOT, ATLAS_CACHE_MAX_BYTES, preserve=(cache_path,))
             context.update(progress=0.08, message="Using cached Atlas dataset")
-            return AtlasPreparedDataset(cache_path, ATLAS_PROJECTION_X, ATLAS_PROJECTION_Y, None, True)
+            import pyarrow.parquet as pq  # noqa: PLC0415
+
+            row_count = pq.ParquetFile(cache_path).metadata.num_rows
+            return AtlasPreparedDataset(cache_path, ATLAS_PROJECTION_X, ATLAS_PROJECTION_Y, None, True, row_count)
 
         context.update(progress=0.08, message="Building Atlas dataset cache")
         prune_cache_dir(ATLAS_CACHE_ROOT, ATLAS_CACHE_MAX_BYTES)
         try:
-            data_frame = load_datasets([str(path)], query=sql, sample=options.sample)
+            data_frame = load_datasets([str(path)], query=sql, sample=None)
+            data_frame = sample_atlas_frame(data_frame, options.sample)
             prompt_template = (
                 compile_prompt_template(options.prompt, [str(column_name) for column_name in data_frame.columns], ATLAS_TEXT_MAX_CHARS)
                 if options.prompt
@@ -184,4 +197,4 @@ def prepare_atlas_dataset(
             raise HTTPException(status_code=500, detail=f"Atlas dataset cache generation failed: {exc}") from exc
         finally:
             prune_cache_dir(ATLAS_CACHE_ROOT, ATLAS_CACHE_MAX_BYTES, preserve=(cache_path,))
-        return AtlasPreparedDataset(cache_path, ATLAS_PROJECTION_X, ATLAS_PROJECTION_Y, None, False)
+        return AtlasPreparedDataset(cache_path, ATLAS_PROJECTION_X, ATLAS_PROJECTION_Y, None, False, len(projected))
