@@ -91,6 +91,7 @@ const elements = {
   atlasColumn: document.getElementById("atlas-column"),
   atlasModel: document.getElementById("atlas-model"),
   atlasBackend: document.getElementById("atlas-backend"),
+  atlasProjection: document.getElementById("atlas-projection"),
   atlasPromptControls: document.getElementById("atlas-prompt-controls"),
   atlasPrompt: document.getElementById("atlas-prompt"),
   runAtlas: document.getElementById("run-atlas"),
@@ -2051,6 +2052,14 @@ function setAtlasButtonsRunning(kind) {
   }
 }
 
+function selectedAtlasProjection() {
+  return elements.atlasProjection?.value || "umap";
+}
+
+function atlasProjectionLabel(method) {
+  return { umap: "UMAP", tsne: "t-SNE", pca: "PCA" }[method] || method;
+}
+
 async function runAtlasJob(kind) {
   if (!state.file || !elements.runAtlas) return;
   if (state.atlasJobId) {
@@ -2090,7 +2099,13 @@ async function runAtlasJob(kind) {
     return;
   }
 
-  const payload = { file: state.file, column, model, backend };
+  const payload = {
+    file: state.file,
+    column,
+    model,
+    backend,
+    projection_method: selectedAtlasProjection(),
+  };
   if (backend === "sentence-transformers" && elements.atlasPrompt) {
     const prompt = elements.atlasPrompt.value;
     if (prompt.trim()) payload.prompt = prompt;
@@ -2141,13 +2156,18 @@ async function runAtlasJob(kind) {
     if (state.file !== fileAtStart || state.atlasJobId !== job.id) return;
     if (elements.atlasStatus) {
       const modalityNote = data.modality ? ` (${data.modality})` : "";
-      const sampleNote = data.sample ? ` Sample: ${data.sample}.` : "";
+      const sampleNote = data.sample ? ` Sample limit: ${data.sample}.` : "";
+      const rowCountNote = Number.isInteger(data.row_count) ? ` Rows: ${data.row_count}.` : "";
       const modelNote = data.model ? ` Model: ${data.model}.` : "";
       const backendNote = data.backend ? ` Backend: ${data.backend}.` : "";
-      const projectionNote = data.projection_mode ? ` Projection: ${data.projection_mode}.` : "";
+      const projectionMethod = data.projection_method || selectedAtlasProjection();
+      const umapMode = projectionMethod === "umap" && data.umap_projection_mode
+        ? ` (${data.umap_projection_mode.replace("_", " ")})`
+        : "";
+      const projectionNote = ` Projection: ${atlasProjectionLabel(projectionMethod)}${umapMode}.`;
       const dtypeNote = data.embedding_dtype ? ` Embedding: ${data.embedding_dtype}.` : "";
       const cacheNote = data.cache_hit ? " Cache: reused." : data.cache_path ? " Cache: refreshed." : "";
-      elements.atlasStatus.textContent = `${sourceLabel} is ready for "${data.column || column}"${modalityNote}.${modelNote}${backendNote}${sampleNote}${projectionNote}${dtypeNote}${cacheNote}`;
+      elements.atlasStatus.textContent = `${sourceLabel} is ready for "${data.column || column}"${modalityNote}.${modelNote}${backendNote}${sampleNote}${rowCountNote}${projectionNote}${dtypeNote}${cacheNote}`;
     }
     const atlasUrl = normalizeAtlasUrl(data.url);
     if (elements.atlasLink && atlasUrl) {
@@ -2337,6 +2357,13 @@ function attachEvents() {
       }
       renderAtlasPromptControl();
       setAtlasButtonsRunning(state.atlasJobKind);
+    });
+  }
+  if (elements.atlasProjection) {
+    elements.atlasProjection.addEventListener("change", () => {
+      if (elements.atlasStatus) {
+        elements.atlasStatus.textContent = "";
+      }
     });
   }
   if (elements.runAtlas) {

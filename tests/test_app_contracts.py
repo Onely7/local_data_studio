@@ -83,6 +83,18 @@ class ApplicationContractTests(TestCase):
         self.assertIn('maxlength="16384"', response.text)
         self.assertNotIn('id="atlas-prompt-controls" hidden', response.text)
 
+    def test_atlas_projection_control_and_payload_are_packaged(self) -> None:
+        """Keep all projection choices and the UMAP default in the shipped UI."""
+        client = TestClient(app)
+        response = client.get("/")
+        script = client.get("/app.js").text
+
+        self.assertIn('id="atlas-projection"', response.text)
+        self.assertIn('<option value="umap" selected>UMAP</option>', response.text)
+        self.assertIn('<option value="tsne">t-SNE</option>', response.text)
+        self.assertIn('<option value="pca">PCA</option>', response.text)
+        self.assertIn("projection_method: selectedAtlasProjection()", script)
+
     def test_operation_statuses_share_typography_and_eda_rows_are_not_editable(self) -> None:
         """Keep post-action feedback consistent and EDA row limits environment-owned."""
         client = TestClient(app)
@@ -123,6 +135,7 @@ class ApplicationContractTests(TestCase):
 
         self.assertEqual("example-model", dataset_request.model)
         self.assertEqual("SELECT text FROM data", query_request.sql)
+        self.assertEqual("umap", dataset_request.projection_method)
 
     def test_embedder_model_endpoint_keeps_models_collection(self) -> None:
         """Keep the model collection key while individual metadata is extended."""
