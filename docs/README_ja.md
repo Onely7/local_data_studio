@@ -63,6 +63,37 @@ vis_exclude_files = ["/Users/me/datasets/archive.csv"]
 host = "127.0.0.1"
 port = 8000
 reload = false
+
+[llm]
+default_model = "openai-main"
+timeout_seconds = 60
+
+[[llm.models]]
+id = "openai-main"
+label = "GPT-5.2"
+model = "openai/gpt-5.2"
+api_key_env = "OPENAI_API_KEY"
+provider_options = { max_completion_tokens = 400 }
+
+[[llm.models]]
+id = "claude-main"
+label = "Claude Sonnet"
+model = "anthropic/claude-sonnet-4-5-20250929"
+api_key_env = "ANTHROPIC_API_KEY"
+provider_options = { max_tokens = 400 }
+
+[[llm.models]]
+id = "gemini-main"
+label = "Gemini Flash"
+model = "gemini/gemini-2.5-flash"
+api_key_env = "GEMINI_API_KEY"
+
+[[llm.models]]
+id = "local-qwen"
+label = "Local Qwen"
+model = "hosted_vllm/Qwen/Qwen3-8B"
+base_url = "http://127.0.0.1:8000/v1"
+provider_options = { temperature = 0, extra_body = { top_k = 20 } }
 ```
 
 以下のように起動できます。
@@ -103,10 +134,10 @@ local-data-studio --config /path/to/local_data_studio.toml
    VIS_EXCLUDE_DIRS=""
    VIS_EXCLUDE_FILES=""
 
-   # LLM SQL Generation Settings
-   OPENAI_API_KEY=""  # FIXME: OpenAI API Key set here
-   OPENAI_BASE_URL=https://api.openai.com/v1
-   OPENAI_MODEL=gpt-5.2
+   # LLM provider credentials (model profile は local_data_studio.toml に記載)
+   OPENAI_API_KEY=""
+   ANTHROPIC_API_KEY=""
+   GEMINI_API_KEY=""
 
    # EDA Settings
    EDA_ROW_LIMIT=50000
@@ -137,9 +168,7 @@ local-data-studio --config /path/to/local_data_studio.toml
    - `FILE_SERVE_ROOTS`: ローカル画像プレビューとして配信を許可するディレクトリをカンマ区切りで指定します。
    - `VIS_EXCLUDE_DIRS`: `DATA_DIR` 配下でデータセット探索から除外するディレクトリをカンマ区切りで指定します。
    - `VIS_EXCLUDE_FILES`: `DATA_DIR` 配下でデータセット探索から除外するファイルをカンマ区切りで指定します。相対パスは `DATA_DIR` から解決し、絶対パスも指定できます。
-   - `OPENAI_API_KEY`: LLM による SQL 生成を有効化するための API Key です。
-   - `OPENAI_BASE_URL`: OpenAI 互換 API のエンドポイントです。
-   - `OPENAI_MODEL`: 使用する OpenAI モデル名です。
+   - `OPENAI_API_KEY`, `ANTHROPIC_API_KEY`, `GEMINI_API_KEY`: LLM model profile の `api_key_env` から参照するcredential環境変数の例です。値がブラウザーへ公開されることはありません。
    - `EDA_ROW_LIMIT`: データセット全体と SQL クエリ結果の EDA レポートに使うサーバー側の行数上限です。環境変数または `.env` で指定し、UI からは上書きしません。`1` 以上の整数は上限なく指定でき、`-1` を指定すると行数を制限しません。
    - `EDA_CELL_MAX_CHARS`: EDA で文字列が長い場合の最大表示文字数です。超過分は `... (truncated)` として省略されます。
    - `EDA_NESTED_POLICY`: ネスト型（list/struct/object/binary など）の扱い方です。`stringify` は文字列化して残し、`drop` は該当列を除外します。
@@ -194,7 +223,7 @@ INFO:     Application startup complete.
 
 3. **SQL コンソール**  
    DuckDB SQL で `data` テーブルに対してクエリを実行できます。  
-   また、LLM を用いた自然言語による指示から SQL の変換をサポートしています。SQL は単一の `SELECT`/CTE に制限され、タイムアウト、メモリ制限、大規模データセット向けのスキャンリスク検知が適用されます。  
+   また、サーバー側で管理する LiteLLM profile を使い、自然言語による指示からSQLを生成できます。SQL Consoleでは利用可能なOpenAI、Anthropic、Gemini、hosted vLLM、その他のLiteLLM modelを選択できます。SQL生成はplain text completionだけを使い、生成結果は単一の `SELECT`/CTE に制限されます。SQL実行には従来どおりタイムアウト、メモリ制限、大規模データセット向けのスキャンリスク検知が適用されます。
    <img src="../images/local_data_studio_04.png" alt="local data studio 04" width=45%>
 
 4. **EDA レポート**  
@@ -219,6 +248,7 @@ INFO:     Application startup complete.
 - サポートしているデータフォーマット: `.jsonl`, `.json`, `.csv`, `.tsv`, `.parquet`.
 - 大規模データでは検索・EDA の実行に時間がかかることがあります。
 - 非常に大きなデータセットでは、対応形式のプレビューに大きな `OFFSET` ではなくカーソル形式の `page_token` を使用します。行数カウント、全体検索、サンプル統計、EDA は進捗確認とキャンセルが可能なバックグラウンドジョブとして実行されます。
+- SQL生成用model profileは `local_data_studio.toml` の `[llm]` sectionから読み込みます。model名には `openai/`, `anthropic/`, `gemini/`, `hosted_vllm/` などLiteLLMのprovider prefixを明示し、非推奨の `vllm/` は拒否します。credentialは `api_key_env` が参照する環境変数に保存します。`provider_options` は管理者向けの信頼された設定で、`reasoning_effort`, `thinking`, token上限、`top_k`, `extra_body` などを指定できますが、message、credential、streaming、tool、multimodal input、structured responseを置き換える設定は拒否されます。`OPENAI_MODEL` と `OPENAI_BASE_URL` はLocal Data Studioの設定ではなくなりました。ASGI appを直接起動する場合は `LOCAL_DATA_STUDIO_CONFIG_FILE` で同じTOMLを指定できます。
 - Embedding Atlas ジョブは選択したローカル encoder model で embedding/projection 計算を行うため、時間がかかる場合があります。投影済み parquet input は `./cache/atlas/datasets` に保存され、dataset fingerprint、SQL、column、model、backend、prompt template、capability fingerprint、projection 手法・設定が一致する場合だけ再利用されます。画像表示カラムは元の URL/path/`{bytes, path}` 形式を保持し、encoder 入力変換には hidden embedding input column だけを使います。`ATLAS_SAMPLE=N` は SQL filter 後の embedding、projection、cache parquet を最大 `N` 行へ決定的に制限しますが、現状の最初の DataFrame 読み込み自体は制限しません。UMAP は `full` と `ATLAS_UMAP_PROJECTION_MODE=anchor_transform` に対応し、t-SNE と PCA は抽出済み全 embedding を常に full projection します。t-SNE には別の固定上限がなく、大規模時は時間・メモリ消費が急増するため、実用的な `ATLAS_SAMPLE` を設定してください。長文テキスト列と展開後 prompt は `ATLAS_TEXT_MAX_CHARS`、embedding メモリは `ATLAS_EMBEDDING_DTYPE=float16`、容量上限は `ATLAS_CACHE_MAX_BYTES` で調整できます。
 - backend 対応状況はモデル名ではなく、ローカルの `modules.json`、`config.json`、tokenizer/processor、pooling、normalization metadata を上限付きで解析して判定します。Sentence Transformers は `native`, `generic_fallback`, `metadata_only`, `unsupported`, `unknown`、Transformers は `direct`, `remote_code`, `backbone_only`, `unsupported`, `unknown` の状態を返します。Sentence Transformers の generic fallback は tokenizer を確認できるテキスト専用 Transformers model だけで選択でき、画像・multimodal model には native な `modules.json` が必要です。そのため画像専用 DINOv3 checkpoint は Transformers のみを選択でき、宣言された `pooler_output` を利用します。native Sentence Transformers pipeline を持つ Qwen3-VL-Embedding は両 backend を利用できます。実行可能な adapter を確認できた backend だけを選択でき、`remote_code` は `ATLAS_TRUST_REMOTE_CODE=true` で repository code の実行を明示許可した場合だけ利用できます。組み込み Transformer/Pooling/Normalize 構成は、モデルリポジトリ内の Python を import せず Transformers adapter で再現します。
 - `models/embedder` または設定した models directory 配下のローカル encoder model 実体は配布物に含めません。リポジトリにはディレクトリ用の placeholder のみを含め、モデルファイルは各環境で配置してください。
@@ -237,6 +267,7 @@ INFO:     Application startup complete.
 - `src/local_data_studio/server/readers.py` は互換 facade として維持し、形式別実装を `src/local_data_studio/server/dataset_readers` に分割しています。JSONL metadata 推論は行数と byte 数の固定上限で停止し、JSONL/CSV/TSV preview は fingerprint 付き sparse line index と byte/page token を使います。完成済み index は再利用し、checkpoint は batch transaction で保存します。CSV/TSV の schema、preview、search、Raw は長大 field 対応 parser を共有します。Parquet schema は footer metadata のみを読み、preview と Raw は bounded record batch、offset 互換処理は行単位 scan ではなく row-group metadata を使います。
 - `src/local_data_studio/server/stats.py` は互換 facade として維持し、`src/local_data_studio/server/column_stats` で値の推論、カラム単位の集計、DuckDB orchestration を分離しています。Sample row は固定サイズ batch で取得し、全 row matrix と column copy を同時に保持せず、column accumulator へ直接渡します。
 - SQL 実行は `src/local_data_studio/server/sql.py` に集約され、読み取り専用 SQL の検証、DuckDB リソース制限、バックグラウンドジョブの協調キャンセルを扱います。
+- SQL生成はLiteLLM Python SDKをlazy adapter経由で利用します。`server/llm_profiles.py` はサーバー管理profileの検証、`server/llm_prompt.py` はprovider共通の1件のuser message構築と生成SQL検証、`server/llm_client.py` は共通completion call、`server/llm_service.py` はprofile選択とorchestrationを担当します。provider errorの本文やcredentialはAPI responseへ返しません。
 - EDA レポートの orchestration は `src/local_data_studio/server/eda_reports.py`、profiling 設定と DataFrame sanitization は `src/local_data_studio/server/eda.py` に分離されています。report は `./cache/eda` に隔離し、共通の古いファイルから削除する容量管理を使います。
 - `src/local_data_studio/server/atlas.py` は互換 facade として維持し、`src/local_data_studio/server/atlas_components` で contract、capability-driven embedding adapter、安全な prompt template、画像変換、projection、dataset cache、subprocess 制御、orchestration を分離しています。`server/embedder_capabilities.py` は上限付きの metadata-only model inspection と関連設定の fingerprint 作成を担当します。Encoder は Atlas job ごとに 1 回だけ生成して anchor/transform batch 間で再利用します。Anchor-transform は input column 全体を Python list に変換せず、anchor と現在の transform batch だけを取得します。表示値の sanitization と projection column の追加は 1 つの owned DataFrame copy 上で行い、同じ fingerprint・query・column・model・backend・prompt・設定に対する並行 cache miss は 1 回の cache 生成を共有します。
 - Atlas の UMAP projection は cache artifact の再現性のため固定 seed を使い、UMAP の seeded execution mode に合わせて `n_jobs=1` を明示することで thread override warning を出さないようにしています。
