@@ -2,150 +2,129 @@
 
 # Local Data Studio
 
-**GUI Application for Local Dataset Viewing and Analysis**
+**ローカルデータセットを閲覧・分析するための GUI アプリケーション**
 
 [English](../README.md) | 日本語
 </div>
 
-Local Data Studio は、Huggingface Datasets の [Data Studio](https://huggingface.co/docs/hub/data-studio#data-studio) を参考にして作成された JSONL/JSON/CSV/TSV/Parquet をローカルで閲覧・分析するための Web Viewer です。  
-高速プレビュー、(LLM による SQL 補助付き) DuckDB SQL 実行、簡易統計、EDA レポート生成、Embedding Atlas による可視化などを提供します。
+Local Data Studio は、Hugging Face Datasets の [Data Studio](https://huggingface.co/docs/hub/data-studio#data-studio) を参考に開発された、ローカル環境向けの Web ビューアーです。
+JSONL、JSON、CSV、TSV、Parquet 形式のデータをブラウザーで閲覧・検索・分析できます。
+
+主な機能として、高速なプレビュー、DuckDB を使った SQL 実行、探索的データ分析（Exploratory Data Analysis、以下 EDA）レポートの生成、Embedding Atlas を使った埋め込みの可視化などを提供します。
+SQL コンソールでは、LLM に自然言語で指示して SQL を生成することもできます。
 
 <div align="center">
-<img src="../images/local_data_studio_01.png" alt="local data studio 01" width=90%>
+<img src="../images/local_data_studio_01.png" alt="Local Data Studio のメイン画面" width="90%">
 </div>
 
 ## 主な特徴
 
-- 大規模データに対応した bounded preview とカーソル形式ページング
-- タイムアウト・メモリ制限・大規模スキャン警告を備えた DuckDB SQL コンソール（読み取り専用）
-- データセット全体または SQL クエリ結果を対象にした EDA レポート生成（`./cache/eda` にキャッシュ）
-- 選択したテキスト/画像カラム、または SQL クエリ結果を対象にした Embedding Atlas 可視化
-- Row Inspector（コピー、削除、ハイライト）
-- URL、ローカルパス、`{bytes, path}` 形式の画像辞書からの画像レンダリング
-- 画像拡大・行内の複数画像ナビゲーション
-- ドラッグ&ドロップでアップロード可能
-- セッション内の非表示/削除
+- 大規模なデータでも、読み込む量を制限しながらプレビュー可能
+- 前後のページへ効率よく移動できるカーソル形式のページング
+- DuckDB SQL を使った読み取り専用の検索・集計
+- SQL 実行時のタイムアウト、メモリ制限、大規模スキャン警告
+- データセット全体または SQL クエリ結果を対象とした EDA レポート生成
+- テキスト列（カラム）・画像列または SQL クエリ結果を対象とした Embedding Atlas 可視化
+- 行の内容を詳しく確認できる **Row Inspector**
+- URL、ローカルパス、`{bytes, path}` 形式の辞書に保存された画像の表示
+- 画像の拡大表示と、同じ行に含まれる複数画像の切り替え
+- ドラッグ＆ドロップによるファイルのアップロード
+- セッション内での行の非表示と、必要に応じた実ファイルからの削除
+
+## 対応環境とデータ形式
+
+- Python 3.11、3.12、3.13
+- 対応形式：`.jsonl`、`.json`、`.csv`、`.tsv`、`.parquet`
 
 ## インストール
 
+利用方法に応じて、次のどちらかを選んでください。
+
+- 通常利用する場合: **PyPI からインストール**
+- 開発やコードの変更を行う場合: **ソースコードからセットアップ**
+
 ### PyPI からインストール
 
-パッケージ公開後は pip でインストールできます。
-
-Local Data Studio は Python 3.11、3.12、3.13 に対応しています。
+パッケージ公開後は、次のコマンドでインストールできます。
 
 ```bash
 python -m pip install local-data-studio
 ```
 
-以下のどちらの entrypoint でも起動できます。
+インストール後は、次のどちらのコマンドでも起動できます。
 
 ```bash
+# 指定したディレクトリ内のデータファイルを一覧表示する
 local-data-studio --data-dir /local/data/path
+
+# 上と同じ処理を Python モジュールとして実行する
 python -m local_data_studio --data-dir /local/data/path
 ```
 
-単一ファイルを開く場合は `--data-dir` の代わりに `--data-file` を指定します。デフォルトでは `.env`, `data`, `cache`, `models/embedder` は現在の作業ディレクトリ配下から解決されます。再現性のある起動には `--workspace-dir` または `--config` を使い、個別のパスは `--data-dir`, `--data-file`, `--cache-dir`, `--models-dir`, `--env-file`, `--file-serve-roots` で上書きできます。
+`/local/data/path` は、実際に閲覧したいデータが保存されているディレクトリへ置き換えてください。
 
-設定ファイルの例:
-
-```toml
-[paths]
-workspace_dir = "/Users/me/local-data-studio"
-env_file = ".env"
-data_dir = "/Users/me/datasets"
-cache_dir = "/Users/me/.cache/local-data-studio"
-models_dir = "/Users/me/models/embedder"
-file_serve_roots = ["/Users/me/datasets", "/Users/me/images"]
-vis_exclude_files = ["/Users/me/datasets/archive.csv"]
-
-[server]
-host = "127.0.0.1"
-port = 8000
-reload = false
-
-[llm]
-default_model = "openai-main"
-timeout_seconds = 60
-
-[[llm.models]]
-id = "openai-main"
-label = "GPT-5.2"
-model = "openai/gpt-5.2"
-api_key_env = "OPENAI_API_KEY"
-provider_options = { max_completion_tokens = 400 }
-
-[[llm.models]]
-id = "claude-main"
-label = "Claude Sonnet"
-model = "anthropic/claude-sonnet-4-5-20250929"
-api_key_env = "ANTHROPIC_API_KEY"
-provider_options = { max_tokens = 400 }
-
-[[llm.models]]
-id = "gemini-main"
-label = "Gemini Flash"
-model = "gemini/gemini-2.5-flash"
-api_key_env = "GEMINI_API_KEY"
-
-[[llm.models]]
-id = "local-qwen"
-label = "Local Qwen"
-model = "hosted_vllm/Qwen/Qwen3-8B"
-base_url = "http://127.0.0.1:8000/v1"
-provider_options = { temperature = 0, extra_body = { top_k = 20 } }
-```
-
-以下のように起動できます。
+単一のファイルだけを開く場合は、`--data-dir` の代わりに `--data-file` を指定します。
 
 ```bash
-local-data-studio --config /path/to/local_data_studio.toml
+local-data-studio --data-file /local/data/example.parquet
 ```
 
-パス設定の優先順位は、CLI option、OS environment variable、config file、`.env`、workspace default、current-working-directory default の順です。
+起動後、ブラウザーで <http://127.0.0.1:8000> を開いてください。
 
-### ソースからセットアップ
+### ソースコードからセットアップ
 
-1. **リポジトリをクローンまたはダウンロード**  
+ソースコードから実行する場合は、Python 3.11〜3.13、Git、uv が必要です。
+
+1. **リポジトリを取得する**
 
    ```bash
-   git clone git@github.com:Onely7/local_data_studio.git
+   # GitHub からリポジトリをダウンロードする
+   git clone https://github.com/Onely7/local_data_studio.git
+
+   # ダウンロードしたディレクトリへ移動する
    cd local_data_studio
    ```
 
-2. **必要なライブラリをインストール**  
+2. **必要なライブラリをインストールする**
 
    ```bash
+   # プロジェクトの設定に基づいて実行環境を準備する
    uv sync
    ```
 
-3. **環境変数の設定**  
-   `.env` を作成または編集し、環境変数を指定します。
+3. **環境変数ファイルを作成する**
 
    ```bash
+   # 設定例をコピーして .env を作成する
    cp .env.example .env
    ```
 
-   ```bash
-   # Data set specification (if both exist, DATA_FILE takes precedence)
-   # DATA_FILE=
-   DATA_DIR=/local/data/path  # FIXME: data directory path set here (required)
+4. **`.env` を編集する**
+
+   最低限、`DATA_DIR` を閲覧したいデータが保存されているディレクトリへ変更してください。
+   単一ファイルを指定する場合は、`DATA_DIR` の代わりに `DATA_FILE` を使用できます。
+
+   ```dotenv
+   # データセットの指定
+   # DATA_FILE=/local/data/example.parquet
+   DATA_DIR=/local/data/path
    FILE_SERVE_ROOTS=""
    VIS_EXCLUDE_DIRS=""
    VIS_EXCLUDE_FILES=""
 
-   # LLM provider credentials (model profile は local_data_studio.toml に記載)
-   OPENAI_API_KEY=""
-   ANTHROPIC_API_KEY=""
-   GEMINI_API_KEY=""
+   # 任意の LLM プロバイダー認証情報
+   # local_data_studio.toml の api_key_env で参照する変数だけを追加する
+   # OPENAI_API_KEY=your_openai_api_key
+   # ANTHROPIC_API_KEY=your_anthropic_api_key
+   # GEMINI_API_KEY=your_gemini_api_key
 
-   # EDA Settings
+   # EDA の設定
    EDA_ROW_LIMIT=50000
    EDA_CELL_MAX_CHARS=5000
    EDA_NESTED_POLICY=stringify
    EDA_CACHE_MAX_BYTES=1073741824
 
-   # Embedding Atlas Settings
+   # Embedding Atlas の設定
    EMBEDDER_MODELS_DIR=models/embedder
    ATLAS_HOST=127.0.0.1
    ATLAS_PORT=5055
@@ -158,137 +137,405 @@ local-data-studio --config /path/to/local_data_studio.toml
    ATLAS_UMAP_ANCHOR_SAMPLE=10000
    ATLAS_TRUST_REMOTE_CODE=false
 
-   # Delete Permission
+   # 実ファイルの削除を許可するか
    ALLOW_DELETE_DATA=false
    ```
 
-   環境変数の説明:
-   - `DATA_FILE`: 単一ファイルを直接指定します。指定した場合は `DATA_DIR` より優先されます。
-   - `DATA_DIR`: データセットの探索対象ディレクトリです（DATA_FILE を使わない場合は必須）。
-   - `FILE_SERVE_ROOTS`: ローカル画像プレビューとして配信を許可するディレクトリをカンマ区切りで指定します。
-   - `VIS_EXCLUDE_DIRS`: `DATA_DIR` 配下でデータセット探索から除外するディレクトリをカンマ区切りで指定します。
-   - `VIS_EXCLUDE_FILES`: `DATA_DIR` 配下でデータセット探索から除外するファイルをカンマ区切りで指定します。相対パスは `DATA_DIR` から解決し、絶対パスも指定できます。
-   - `OPENAI_API_KEY`, `ANTHROPIC_API_KEY`, `GEMINI_API_KEY`: LLM model profile の `api_key_env` から参照するcredential環境変数の例です。値がブラウザーへ公開されることはありません。
-   - `EDA_ROW_LIMIT`: データセット全体と SQL クエリ結果の EDA レポートに使うサーバー側の行数上限です。環境変数または `.env` で指定し、UI からは上書きしません。`1` 以上の整数は上限なく指定でき、`-1` を指定すると行数を制限しません。
-   - `EDA_CELL_MAX_CHARS`: EDA で文字列が長い場合の最大表示文字数です。超過分は `... (truncated)` として省略されます。
-   - `EDA_NESTED_POLICY`: ネスト型（list/struct/object/binary など）の扱い方です。`stringify` は文字列化して残し、`drop` は該当列を除外します。
-   - `EDA_CACHE_MAX_BYTES`: `./cache/eda` に保存する EDA レポート cache 全体の最大容量です。既定値は 1 GiB で、超過時は古いレポートから削除されます。
-   - `EMBEDDER_MODELS_DIR`: ローカル HuggingFace encoder model ディレクトリを含むディレクトリです。デフォルトは workspace/current directory 配下の `models/embedder` です。
-   - `ATLAS_HOST` / `ATLAS_PORT`: ローカル Embedding Atlas ページの host と開始 port です。port が使用中の場合、`embedding-atlas` が別 port を選ぶことがあります。
-   - `ATLAS_SAMPLE`: embedding、projection、Atlas cache parquet に含める行数の厳密な上限です。SQL query 適用後に seed 42 で決定的に抽出します。未設定または `0` は全選択行を使用し、負数は起動時に拒否されます。
-   - `ATLAS_BATCH_SIZE`: 任意の embedding batch size です。未設定または `0` の場合は Embedding Atlas のデフォルトを使用します。
-   - `ATLAS_CACHE_MAX_BYTES`: `./cache/atlas` に保存する Embedding Atlas cache 全体の最大容量です。超過時は古い cache file から削除されます。
-   - `ATLAS_TEXT_MAX_CHARS`: Atlas の embedding input と cached Atlas parquet output に残すテキストセルの最大文字数です。`0` で省略を無効化します。
-   - `ATLAS_EMBEDDING_DTYPE`: projection 前の embedding 配列精度です。`float32` または `float16` を指定できます。
-   - `ATLAS_UMAP_PROJECTION_MODE`: UMAP 専用の方式です。`full` は抽出後の全 embedding に UMAP を実行し、`anchor_transform` は代表 anchor で UMAP を fit して残りを同じ空間へ transform します。t-SNE と PCA は常に full projection です。
-   - `ATLAS_UMAP_ANCHOR_SAMPLE`: `ATLAS_UMAP_PROJECTION_MODE=anchor_transform` の場合に UMAP fit に使う行数です。
-   - `ATLAS_TRUST_REMOTE_CODE`: `true` の場合、Embedding Atlas に `--trust-remote-code` を渡します。
-   - `ALLOW_DELETE_DATA`: `false` の場合は実ファイル削除を無効にします（セッション内非表示は可）。
+5. **Local Data Studio を起動する**
 
-## 実行方法
+   ```bash
+   # 開発用の自動再読み込みを有効にして起動する
+   uv run local-data-studio --reload
+   ```
+
+6. **ブラウザーで画面を開く**
+
+   ターミナルに次のようなメッセージが表示されたら、起動は完了です。
+
+   ```text
+   INFO:     Uvicorn running on http://127.0.0.1:8000 (Press CTRL+C to quit)
+   INFO:     Application startup complete.
+   ```
+
+   ブラウザーで <http://127.0.0.1:8000> を開くと、Local Data Studio の画面が表示されます。
+
+   サーバーを停止するには、起動したターミナルで `Ctrl+C` を押してください。
+
+## パスと設定ファイル
+
+### デフォルトのパス
+
+特に指定しない場合、次のファイルやディレクトリは、コマンドを実行したディレクトリを基準に検索または作成されます。
+
+- `.env`
+- `data`
+- `cache`
+- `models/embedder`
+
+コマンドを実行したディレクトリは、「現在の作業ディレクトリ」または「カレントディレクトリ」と呼ばれます。
+毎回同じ場所を基準に起動したい場合は、`--workspace-dir` または `--config` を指定してください。
+
+個別のパスは、次のコマンドラインオプションで上書きできます。
+
+- `--data-dir`
+- `--data-file`
+- `--cache-dir`
+- `--models-dir`
+- `--env-file`
+- `--file-serve-roots`
+
+### TOML 設定ファイルの例
+
+複数の設定をまとめて管理する場合は、TOML 形式の設定ファイルを使用できます。
+TOML は、設定項目とその値をテキストで記述するためのファイル形式です。
+
+リポジトリには、パス、サーバー設定、認証情報を含まない任意の LLM モデルプロファイルを記載した [local_data_studio.example.toml](../local_data_studio.example.toml) を用意しています。
+このファイルを `local_data_studio.toml` へコピーしてから、使用するパスとモデルプロファイルを編集してください。
 
 ```bash
-uv run local-data-studio --reload
+cp local_data_studio.example.toml local_data_studio.toml
 ```
 
-ASGI app を直接起動して開発する場合は以下も使えます。
+API キーは `.env` またはシェルの環境変数に保存します。各モデルプロファイルの `api_key_env` には、参照する認証情報の環境変数名を指定します。
+
+設定ファイルを指定して起動する例を次に示します。
 
 ```bash
-uv run uvicorn local_data_studio.app:app --reload
+local-data-studio --config /path/to/local_data_studio.toml
 ```
 
-実行後、ターミナルに以下のようなメッセージが表示されます。
+同じ設定項目が複数の場所で指定されている場合は、次の順番で優先されます。
+上にあるものほど優先度が高くなります。
 
-```
-INFO:     Will watch for changes in these directories: ['local/data_viewer']
-INFO:     Uvicorn running on http://127.0.0.1:8000 (Press CTRL+C to quit)
-INFO:     Started reloader process [00000] using StatReload
-INFO:     Started server process [00000]
-INFO:     Waiting for application startup.
-INFO:     Application startup complete.
-```
+1. コマンドラインオプション
+2. OS の環境変数
+3. TOML 設定ファイル
+4. `.env`
+5. ワークスペースを基準としたデフォルト値
+6. 現在の作業ディレクトリを基準としたデフォルト値
 
-これで Local Data Studio サーバーが立ち上がりました。  
-<http://127.0.0.1:8000> にアクセスすることで、Local Data Studio の GUI が表示されます。
+### 環境変数の説明
+
+#### データとパス
+
+- `DATA_FILE`: 単一のデータファイルを直接指定します。指定した場合は `DATA_DIR` より優先されます。
+- `DATA_DIR`: データセットを検索するディレクトリです。`DATA_FILE` を使用しない場合は必須です。
+- `FILE_SERVE_ROOTS`: ローカル画像の配信を許可するディレクトリを、カンマ区切りで指定します。
+- `VIS_EXCLUDE_DIRS`: `DATA_DIR` の下にあるディレクトリのうち、データセットの検索対象から除外するものをカンマ区切りで指定します。
+- `VIS_EXCLUDE_FILES`: `DATA_DIR` の下にあるファイルのうち、データセットの検索対象から除外するものをカンマ区切りで指定します。相対パスは `DATA_DIR` を基準に解決され、絶対パスも指定できます。
+
+#### LLM の認証情報
+
+- `OPENAI_API_KEY`、`ANTHROPIC_API_KEY`、`GEMINI_API_KEY`: LLM モデルプロファイルの `api_key_env` から参照する認証情報の例です。これらの値がブラウザーへ送信されることはありません。
+
+#### EDA
+
+- `EDA_ROW_LIMIT`: データセット全体または SQL クエリ結果から EDA レポートへ読み込む最大行数です。UI からは変更できません。`1` 以上の整数を指定でき、`-1` を指定すると行数を制限しません。
+- `EDA_CELL_MAX_CHARS`: EDA で扱う文字列セルの最大文字数です。上限を超えた部分は `... (truncated)` として省略されます。
+- `EDA_NESTED_POLICY`: リスト、構造体、オブジェクト、バイナリなどのネスト型をどのように扱うかを指定します。`stringify` は文字列へ変換して残し、`drop` は対象の列を除外します。
+- `EDA_CACHE_MAX_BYTES`: `./cache/eda` に保存する EDA レポート全体の最大容量です。既定値は 1 GiB で、上限を超えると古いレポートから削除されます。
+
+#### Embedding Atlas
+
+- `EMBEDDER_MODELS_DIR`: ローカルの Hugging Face エンコーダーモデルを保存する親ディレクトリです。既定では、ワークスペースまたは現在の作業ディレクトリの `models/embedder` を使用します。
+- `ATLAS_HOST`、`ATLAS_PORT`: ローカルの Embedding Atlas ページを起動するホスト名と開始ポートです。指定したポートが使用中の場合、`embedding-atlas` が別のポートを選ぶことがあります。
+- `ATLAS_SAMPLE`: 埋め込み計算と次元削減を行い、Atlas 用キャッシュ Parquet に保存する行数の上限です。SQL クエリを適用した後、乱数の初期値（シード）を 42 に固定して、同じ入力からは毎回同じ行が選ばれるように抽出します。未設定または `0` の場合は、選択されたすべての行を使用します。負の値は指定できません。
+- `ATLAS_BATCH_SIZE`: 埋め込み計算で一度に処理する行数（バッチサイズ）です。未設定または `0` の場合は、Embedding Atlas の既定値を使用します。
+- `ATLAS_CACHE_MAX_BYTES`: `./cache/atlas` に保存する Embedding Atlas 関連キャッシュ全体の最大容量です。上限を超えると古いキャッシュファイルから削除されます。
+- `ATLAS_TEXT_MAX_CHARS`: 埋め込みへの入力と、Atlas 用キャッシュ Parquet に残すテキストセルの最大文字数です。`0` を指定すると省略しません。
+- `ATLAS_EMBEDDING_DTYPE`: 次元削減前の埋め込み配列に使用する数値精度です。`float32` または `float16` を指定できます。
+- `ATLAS_UMAP_PROJECTION_MODE`: UMAP による次元削減の実行方式です。`full` は、抽出したすべての埋め込みをまとめて処理します。`anchor_transform` は、代表となる行で UMAP の配置を決め、残りの行を同じ 2 次元空間へ配置します。t-SNE と PCA は、抽出したすべての行をまとめて処理します。
+- `ATLAS_UMAP_ANCHOR_SAMPLE`: `ATLAS_UMAP_PROJECTION_MODE=anchor_transform` の場合に、UMAP の学習へ使用する行数です。
+- `ATLAS_TRUST_REMOTE_CODE`: `true` を指定すると、Local Data Studio がモデルを読み込む際に、選択したローカルエンコーダーモデルのリポジトリーコード実行を許可します。信頼できるモデル以外では `false` のままにしてください。
+
+#### データの削除
+
+- `ALLOW_DELETE_DATA`: `false` の場合は、元のデータファイルからの削除を禁止します。画面上で一時的に非表示にする操作は可能です。
 
 ## 使い方
 
-1. **DATASETS からファイルを選択**  
-   左側の DATASETS リストから閲覧対象を選択します。検索ボックスで絞り込みも可能です。長いファイル名はリスト内で省略表示され、ファイルサイズは最大 3 有効桁で `Bytes`, `kB`, `MB`, `GB`, `TB` の適切な単位に変換して表示されます。  
-   <img src="../images/local_data_studio_02.png" alt="local data studio 02" width=45%>
+### 1. データファイルを選択する
 
-2. **プレビュー / 検索 / ページング**  
-   上部の Search でデータ検索、Rows で表示件数、Prev/Next でページ移動ができます。  
-   <img src="../images/local_data_studio_03.png" alt="local data studio 03" width=45%>
+左側の **DATASETS** リストから、閲覧するファイルを選択します。
+検索ボックスを使って、ファイル名を絞り込むこともできます。
 
-3. **SQL コンソール**  
-   DuckDB SQL で `data` テーブルに対してクエリを実行できます。  
-   また、サーバー側で管理する LiteLLM profile を使い、自然言語による指示からSQLを生成できます。SQL Consoleでは利用可能なOpenAI、Anthropic、Gemini、hosted vLLM、その他のLiteLLM modelを選択できます。SQL生成はplain text completionだけを使い、生成結果は単一の `SELECT`/CTE に制限されます。SQL実行には従来どおりタイムアウト、メモリ制限、大規模データセット向けのスキャンリスク検知が適用されます。
-   <img src="../images/local_data_studio_04.png" alt="local data studio 04" width=45%>
+長いファイル名はリスト内で省略して表示されます。
+ファイルサイズは有効数字 3 桁までに整えられ、`Bytes`、`kB`、`MB`、`GB`、`TB` の適切な単位で表示されます。
 
-4. **EDA レポート**  
-   Run EDA を実行するとデータセットのサンプルを対象にしたレポートが生成され、キャッシュされます。**Run EDA on Query Results** を使うと、SQL Console の現在のクエリ結果を対象にした EDA レポートを生成できます。  
-   データセット全体のレポートは `./cache/eda` に {ファイル fingerprint, 行数上限, profile mode} に基づいてキャッシュされます。クエリ結果のレポートは {ファイル fingerprint, SQL, 行数上限, profile mode} に基づいて別キャッシュされます。EDA cache 全体は既定で 1 GiB に制限され、`EDA_CACHE_MAX_BYTES` を超えると古いレポートから削除されます。
-   行数上限は環境変数または `.env` の `EDA_ROW_LIMIT` で指定します。UI からこのサーバー設定を上書きすることはできません。`1` 以上の値を指定でき、`-1` では行数制限を解除します。EDA panel の **Profile mode** では実行ごとの粒度を選択でき、初期値は `minimal` です。
-   <img src="../images/local_data_studio_05.png" alt="local data studio 05" width=45%> <img src="../images/local_data_studio_06.png" alt="local data studio 06" width=45%>
+<img src="../images/local_data_studio_02.png" alt="DATASETS リストからファイルを選択する画面" width="45%">
 
-5. **Embedding 可視化**  
-   HuggingFace 形式のローカル encoder model ディレクトリを `models/embedder` または `--models-dir` / `EMBEDDER_MODELS_DIR` で指定したディレクトリ配下に配置します（例: `models/embedder/google/siglip2-base-patch16-224`, `models/embedder/Qwen/Qwen3-Embedding-0.6B`, `models/embedder/Qwen/Qwen3-VL-Embedding-2B`）。`config.json`, `modules.json`, `tokenizer_config.json`, `preprocessor_config.json` などの model marker file を含むディレクトリが Model プルダウンに表示されます。
-   **Visualize Embedding** でテキストまたは画像カラム、モデル、利用可能な backend、projection 手法を選択し、**Run Atlas** を実行するとローカルの Embedding Atlas ページが起動します。projection は **UMAP**（既定）、**t-SNE**、**PCA** から選べます。**Run Atlas on Query Results** を使うと、SQL Console の現在のクエリ結果を対象に可視化できます。モデル探索では weight をロードせず設定だけを解析し、利用できない backend も選択不可の状態で表示します。両 backend を利用できる場合は Sentence Transformers が既定で選択されます。
-   Sentence Transformers を選択すると任意の Prompt 入力欄が表示されます。空欄の場合はモデルに保存された default prompt を使用します。placeholder を含まないテキストは選択列の各値へ prefix として付加されます。`{title}` や `{body}` のような正確な placeholder は、同じ dataset 行または SQL 結果行の値へ置換されます。`{{` / `}}` は通常の波括弧として扱われます。存在しないカラム、壊れた波括弧、conversion、format specifier はモデルをロードする前に拒否されます。
-   処理はバックグラウンドジョブとして進捗表示され、準備が完了すると **Open Atlas** リンクが表示されます。  
-   <img src="../images/local_data_studio_07.png" alt="local data studio 07" width=45%> <img src="../images/local_data_studio_08.png" alt="local data studio 08" width=45%>
+### 2. データを閲覧・検索する
 
-6. **Row Inspector / 画像拡大**  
-   行をクリックすると詳細パネルで展開されます。長い値はデフォルトで省略表示され、Raw で完全表示に切り替えられます。画像列はクリックで拡大表示できます。画像候補は画像 URL、相対/絶対画像パス、`{ "bytes": ..., "path": ... }` のような辞書から検出され、bytes を優先して表示し、失敗した場合は path を fallback として使用します。  
-   <img src="../images/local_data_studio_09.png" alt="local data studio 09" width=45%> <img src="../images/local_data_studio_10.png" alt="local data studio 10" width=45%>
+画面上部の各項目を使って、表示内容を操作できます。
 
-## 注意点
+- **Search**: データを検索します。
+- **Rows**: 1 ページに表示する行数を変更します。
+- **Prev**／**Next**: 前後のページへ移動します。
 
-- サポートしているデータフォーマット: `.jsonl`, `.json`, `.csv`, `.tsv`, `.parquet`.
-- 大規模データでは検索・EDA の実行に時間がかかることがあります。
-- 非常に大きなデータセットでは、対応形式のプレビューに大きな `OFFSET` ではなくカーソル形式の `page_token` を使用します。行数カウント、全体検索、サンプル統計、EDA は進捗確認とキャンセルが可能なバックグラウンドジョブとして実行されます。
-- SQL生成用model profileは `local_data_studio.toml` の `[llm]` sectionから読み込みます。model名には `openai/`, `anthropic/`, `gemini/`, `hosted_vllm/` などLiteLLMのprovider prefixを明示し、非推奨の `vllm/` は拒否します。credentialは `api_key_env` が参照する環境変数に保存します。`provider_options` は管理者向けの信頼された設定で、`reasoning_effort`, `thinking`, token上限、`top_k`, `extra_body` などを指定できますが、message、credential、streaming、tool、multimodal input、structured responseを置き換える設定は拒否されます。`OPENAI_MODEL` と `OPENAI_BASE_URL` はLocal Data Studioの設定ではなくなりました。ASGI appを直接起動する場合は `LOCAL_DATA_STUDIO_CONFIG_FILE` で同じTOMLを指定できます。
-- Embedding Atlas ジョブは選択したローカル encoder model で embedding/projection 計算を行うため、時間がかかる場合があります。投影済み parquet input は `./cache/atlas/datasets` に保存され、dataset fingerprint、SQL、column、model、backend、prompt template、capability fingerprint、projection 手法・設定が一致する場合だけ再利用されます。画像表示カラムは元の URL/path/`{bytes, path}` 形式を保持し、encoder 入力変換には hidden embedding input column だけを使います。`ATLAS_SAMPLE=N` は SQL filter 後の embedding、projection、cache parquet を最大 `N` 行へ決定的に制限しますが、現状の最初の DataFrame 読み込み自体は制限しません。UMAP は `full` と `ATLAS_UMAP_PROJECTION_MODE=anchor_transform` に対応し、t-SNE と PCA は抽出済み全 embedding を常に full projection します。t-SNE には別の固定上限がなく、大規模時は時間・メモリ消費が急増するため、実用的な `ATLAS_SAMPLE` を設定してください。長文テキスト列と展開後 prompt は `ATLAS_TEXT_MAX_CHARS`、embedding メモリは `ATLAS_EMBEDDING_DTYPE=float16`、容量上限は `ATLAS_CACHE_MAX_BYTES` で調整できます。
-- backend 対応状況はモデル名ではなく、ローカルの `modules.json`、`config.json`、tokenizer/processor、pooling、normalization metadata を上限付きで解析して判定します。Sentence Transformers は `native`, `generic_fallback`, `metadata_only`, `unsupported`, `unknown`、Transformers は `direct`, `remote_code`, `backbone_only`, `unsupported`, `unknown` の状態を返します。Sentence Transformers の generic fallback は tokenizer を確認できるテキスト専用 Transformers model だけで選択でき、画像・multimodal model には native な `modules.json` が必要です。そのため画像専用 DINOv3 checkpoint は Transformers のみを選択でき、宣言された `pooler_output` を利用します。native Sentence Transformers pipeline を持つ Qwen3-VL-Embedding は両 backend を利用できます。実行可能な adapter を確認できた backend だけを選択でき、`remote_code` は `ATLAS_TRUST_REMOTE_CODE=true` で repository code の実行を明示許可した場合だけ利用できます。組み込み Transformer/Pooling/Normalize 構成は、モデルリポジトリ内の Python を import せず Transformers adapter で再現します。
-- `models/embedder` または設定した models directory 配下のローカル encoder model 実体は配布物に含めません。リポジトリにはディレクトリ用の placeholder のみを含め、モデルファイルは各環境で配置してください。
-- キャッシュは `./cache/metadata`, `./cache/index`, `./cache/stats`, `./cache/count`, `./cache/search`, `./cache/eda` に分離されます。EDA レポートは `EDA_CACHE_MAX_BYTES` で全体容量を制限し、超過時は古いものから削除します。fingerprint を使う cache は該当するファイルパス・サイズ・更新時刻に基づいて無効化されます。
-- `Run EDA on Query Results` では、`rn` や `__rowid` のような補助カラムはレポートから除外されます。
-- Count Rows、EDA、Atlas の実行後に表示するフィードバックは、周囲の操作より目立ちすぎない共通のコンパクトな status style に統一しています。
-- `EDA_ROW_LIMIT=-1` は選択した全行を profiling 用のメモリへ展開します。データセットまたはクエリ結果の全体が無理なくメモリに収まる場合だけ使用してください。大規模データではメモリ不足になる可能性があります。
-- TB 級の `.json` 配列は推奨しません。高速な閲覧には JSONL または Parquet を推奨します。
-- `Delete from file` は実ファイルを書き換えるため、必要に応じてバックアップを推奨します。
-- `ALLOW_DELETE_DATA=false` の場合は、セッション内の非表示のみ可能です。（実ファイルは書き換わらない）
+<img src="../images/local_data_studio_03.png" alt="データの検索とページ移動を行う画面" width="45%">
 
-## 実装メモ
+### 3. SQL コンソールを使う
 
-- application package は `src/local_data_studio` 配下にあります。静的 UI asset は `src/local_data_studio/static` として package に含め、実行時の `.env`, `data`, `cache`, `models/embedder` は選択された workspace または現在の作業ディレクトリ配下をデフォルトにしています。CLI option、OS environment variable、config file、`.env`、workspace default の順で上書きされます。
-- `src/local_data_studio/app.py` は application assembly だけを行う小さな entrypoint です。Request model と API route は `src/local_data_studio/server/api` 配下で dataset access、analysis、background job、mutation、共通 service、static mount に分割されています。Filesystem、DuckDB、EDA、job に関する blocking route は FastAPI の threadpool で実行し、streaming upload だけを async のまま維持しています。
-- `src/local_data_studio/server/readers.py` は互換 facade として維持し、形式別実装を `src/local_data_studio/server/dataset_readers` に分割しています。JSONL metadata 推論は行数と byte 数の固定上限で停止し、JSONL/CSV/TSV preview は fingerprint 付き sparse line index と byte/page token を使います。完成済み index は再利用し、checkpoint は batch transaction で保存します。CSV/TSV の schema、preview、search、Raw は長大 field 対応 parser を共有します。Parquet schema は footer metadata のみを読み、preview と Raw は bounded record batch、offset 互換処理は行単位 scan ではなく row-group metadata を使います。
-- `src/local_data_studio/server/stats.py` は互換 facade として維持し、`src/local_data_studio/server/column_stats` で値の推論、カラム単位の集計、DuckDB orchestration を分離しています。Sample row は固定サイズ batch で取得し、全 row matrix と column copy を同時に保持せず、column accumulator へ直接渡します。
-- SQL 実行は `src/local_data_studio/server/sql.py` に集約され、読み取り専用 SQL の検証、DuckDB リソース制限、バックグラウンドジョブの協調キャンセルを扱います。
-- SQL生成はLiteLLM Python SDKをlazy adapter経由で利用します。`server/llm_profiles.py` はサーバー管理profileの検証、`server/llm_prompt.py` はprovider共通の1件のuser message構築と生成SQL検証、`server/llm_client.py` は共通completion call、`server/llm_service.py` はprofile選択とorchestrationを担当します。provider errorの本文やcredentialはAPI responseへ返しません。
-- EDA レポートの orchestration は `src/local_data_studio/server/eda_reports.py`、profiling 設定と DataFrame sanitization は `src/local_data_studio/server/eda.py` に分離されています。report は `./cache/eda` に隔離し、共通の古いファイルから削除する容量管理を使います。
-- `src/local_data_studio/server/atlas.py` は互換 facade として維持し、`src/local_data_studio/server/atlas_components` で contract、capability-driven embedding adapter、安全な prompt template、画像変換、projection、dataset cache、subprocess 制御、orchestration を分離しています。`server/embedder_capabilities.py` は上限付きの metadata-only model inspection と関連設定の fingerprint 作成を担当します。Encoder は Atlas job ごとに 1 回だけ生成して anchor/transform batch 間で再利用します。Anchor-transform は input column 全体を Python list に変換せず、anchor と現在の transform batch だけを取得します。表示値の sanitization と projection column の追加は 1 つの owned DataFrame copy 上で行い、同じ fingerprint・query・column・model・backend・prompt・設定に対する並行 cache miss は 1 回の cache 生成を共有します。
-- Atlas の UMAP projection は cache artifact の再現性のため固定 seed を使い、UMAP の seeded execution mode に合わせて `n_jobs=1` を明示することで thread override warning を出さないようにしています。
-- macOS では child-side fork による `SIGSEGV (-11)` を避けるため、Atlas subprocess 起動を Python の `posix_spawn` path に乗る形に固定しています。Atlas command は絶対パスを使い、`Popen` に `cwd` を渡さず、`close_fds=False` を維持してください。
-- バックグラウンドジョブは `src/local_data_studio/server/jobs.py` で管理され、`/api/jobs/*` 経由で進捗、キャンセル、結果、エラー状態を確認できます。
+SQL コンソールでは、DuckDB SQL を使って `data` テーブルを検索・集計できます。
+実行できるのは読み取り専用のクエリです。
 
-## Contribution
+サーバー側で設定した LiteLLM モデルプロファイルを使うと、日本語などの自然言語による指示から SQL を生成できます。
+SQL コンソールでは、設定済みの OpenAI、Anthropic、Gemini、hosted vLLM、その他の LiteLLM 対応モデルを選択できます。
 
-- バグ報告・機能提案は Issue からお願いします。
-- コードの品質管理には pre-commit を使用しており、`uv run pre-commit run --all-files` (あるいは `uvx pre-commit run --all-files`) を実行することで、以下のコマンド実行に相当するフォーマット / Lint / 型チェックが実施されます:
-  - `uv run ruff format` (あるいは `uvx ruff format`)
-  - `uv run ruff check` (あるいは `uvx ruff check`)
-  - `uv run ty check` (あるいは `uvx ty check`)
-- Ruff は application code と test code の両方に、PEP 257 を基本とした Google convention の docstring を適用します。公開 API は型と名前だけでは明確にならない制約、例外、副作用、ownership を記載し、private な実装詳細には処理内容を言い換えるだけの説明を追加しません。
-- 上で指摘された全てのエラーを解消した後に、コミットするようにしてください。
+LLM からはプレーンテキストとして生成された SQL だけを受け取り、ツール呼び出しなどは使用しません。生成される SQL は、単一の `SELECT` 文、または `WITH` 句による共通テーブル式（CTE）を使った `SELECT` 文に制限されます。
+SQL の実行時には、タイムアウト、メモリ制限、大規模なデータ読み込みのリスク検知が適用されます。
+
+<img src="../images/local_data_studio_04.png" alt="SQL コンソールの画面" width="45%">
+
+### 4. EDA レポートを生成する
+
+**Run EDA** を実行すると、データセットから取得した行を対象に EDA レポートを生成します。
+生成したレポートはキャッシュへ保存されるため、同じ条件で再実行した場合に再利用できます。
+
+**Run EDA on Query Results** を使うと、SQL コンソールに表示されている現在のクエリ結果を対象にレポートを生成できます。
+
+行数の上限は、環境変数または `.env` の `EDA_ROW_LIMIT` で指定します。
+この値は UI から変更できません。
+`1` 以上の整数を指定でき、`-1` を指定すると行数制限を解除します。
+
+EDA パネルの **Profile mode** では、分析の詳しさを実行ごとに選択できます。
+初期値は `minimal` です。
+
+<img src="../images/local_data_studio_05.png" alt="EDA の実行画面" width="45%"> <img src="../images/local_data_studio_06.png" alt="生成された EDA レポート" width="45%">
+
+### 5. 埋め込みを可視化する
+
+埋め込みとは、テキストや画像の特徴を、数値の並び（ベクトル）として表したものです。
+埋め込みはそのままでは画面上で確認しにくいため、UMAP、t-SNE、PCA などを使って 2 次元の座標へ変換して表示します。この処理は一般に「次元削減」と呼ばれます。
+設定名や内部コードでは `projection` と表記している箇所がありますが、この README では UMAP、t-SNE、PCA をまとめて「次元削減」と説明します。
+
+はじめに、Hugging Face 形式で保存されたローカルエンコーダーモデルを、`models/embedder` または `--models-dir`／`EMBEDDER_MODELS_DIR` で指定したディレクトリの下へ配置します。
+
+配置例:
+
+```text
+models/embedder/google/siglip2-base-patch16-224
+models/embedder/Qwen/Qwen3-Embedding-0.6B
+models/embedder/Qwen/Qwen3-VL-Embedding-2B
+```
+
+`config.json`、`modules.json`、`tokenizer_config.json`、`preprocessor_config.json` など、モデルを識別するためのファイルを含むディレクトリが **Model** の選択欄に表示されます。
+
+**Visualize Embedding** で、次の項目を選択します。
+
+1. テキスト列または画像列
+2. 使用するモデル
+3. モデルの実行に使用するライブラリ（バックエンド）
+4. 2 次元への次元削減手法
+
+次元削減手法は、**UMAP**（既定）、**t-SNE**、**PCA** から選択できます。
+**Run Atlas** を実行すると、ローカルの Embedding Atlas ページが起動します。
+**Run Atlas on Query Results** を使うと、現在の SQL クエリ結果を対象に可視化できます。
+
+モデルを一覧表示する段階では重みを読み込まず、設定ファイルだけを解析します。
+利用できないバックエンドも一覧には表示されますが、選択はできません。
+Sentence Transformers と Transformers の両方を利用できる場合は、Sentence Transformers が既定で選択されます。
+
+Sentence Transformers を選択すると、モデルへ追加で渡す指示を入力するための **Prompt** 欄が表示されます。
+空欄の場合は、モデルに保存されたデフォルトプロンプトを使用します。
+
+- プレースホルダーを含まない文字列は、選択した列の各値の先頭へ追加されます。
+- `{title}` や `{body}` のようなプレースホルダーは、同じデータ行または SQL 結果行にある対応する列の値へ置き換えられます。
+- `{{` と `}}` は、通常の波括弧として扱われます。
+- 存在しない列、対応していない変換指定、書式指定、正しく閉じられていない波括弧は、モデルを読み込む前にエラーとなります。
+
+処理は、画面の操作を止めずに裏側で進むバックグラウンドジョブとして実行され、画面には進捗が表示されます。
+準備が完了すると、**Open Atlas** リンクが表示されます。
+
+<img src="../images/local_data_studio_07.png" alt="Embedding Atlas の設定画面" width="45%"> <img src="../images/local_data_studio_08.png" alt="Embedding Atlas の可視化画面" width="45%">
+
+### 6. Row Inspector と画像拡大を使う
+
+行をクリックすると、**Row Inspector** に各列の詳しい内容が表示されます。
+長い値は初期状態では省略されますが、**Raw** に切り替えると省略前の値を確認できます。
+
+画像として認識された値は、クリックすると拡大表示できます。
+次の形式に対応しています。
+
+- 画像 URL
+- 相対パスまたは絶対パス
+- `{ "bytes": ..., "path": ... }` 形式の辞書
+
+`bytes` と `path` の両方がある場合は、まず `bytes` の内容を表示します。
+表示できなかった場合は、`path` を代わりに使用します。
+
+<img src="../images/local_data_studio_09.png" alt="Row Inspector の画面" width="45%"> <img src="../images/local_data_studio_10.png" alt="画像の拡大表示画面" width="45%">
+
+## 利用上の注意
+
+- 大規模なデータでは、検索や EDA に時間がかかることがあります。
+- 行数カウント、全体検索、サンプル統計、EDA は、進捗確認とキャンセルが可能なバックグラウンドジョブとして実行されます。
+- `EDA_ROW_LIMIT=-1` を指定すると、選択したすべての行を分析用のメモリへ読み込みます。データ全体が無理なくメモリへ収まる場合だけ使用してください。
+- TB 級の JSON 配列ファイルは推奨しません。大規模データを高速に閲覧する場合は、JSONL または Parquet を推奨します。
+- t-SNE はデータ量が増えると処理時間とメモリ使用量が急増します。大規模なデータでは、`ATLAS_SAMPLE` に現実的な上限を設定してください。
+- **Delete from file** は元のデータファイルを書き換えます。必要に応じて、操作前にバックアップを作成してください。
+- `ALLOW_DELETE_DATA=false` の場合、元のファイルからは削除されません。画面上のセッション内で非表示にする操作だけが可能です。
+- `models/embedder` または設定したモデルディレクトリには、モデル本体を各自で配置してください。配布物にはモデルファイルを含めず、空のディレクトリを維持するためのプレースホルダーだけを含めています。
+
+## 高度な設定と技術仕様
+
+このセクションは、動作の詳細を確認したい利用者や管理者向けです。
+通常の閲覧・分析だけを行う場合は、読み飛ばしても問題ありません。
+
+<details>
+<summary><strong>大規模データのプレビューとバックグラウンド処理</strong></summary>
+
+非常に大きなデータセットでは、対応形式のプレビューに大きな `OFFSET` を使用せず、カーソル形式の `page_token` を使用します。
+行数カウント、全体検索、サンプル統計、EDA は、進捗確認とキャンセルが可能なバックグラウンドジョブとして実行されます。
+
+Count Rows、EDA、Atlas の実行後に表示されるフィードバックは、ほかの操作を妨げない共通のコンパクトなステータス表示に統一されています。
+
+</details>
+
+<details>
+<summary><strong>SQL 生成用 LLM モデルプロファイル</strong></summary>
+
+SQL 生成用のモデルプロファイルは、`local_data_studio.toml` の `[llm]` セクションから読み込みます。
+モデル名には、`openai/`、`anthropic/`、`gemini/`、`hosted_vllm/` など、LiteLLM のプロバイダープレフィックスを明示してください。
+非推奨の `vllm/` は使用できません。
+
+認証情報は、`api_key_env` が参照する環境変数へ保存します。
+`provider_options` は管理者が指定する信頼済みの設定です。
+`reasoning_effort`、`thinking`、トークン上限、`top_k`、`extra_body` などを指定できます。
+一方で、メッセージ、認証情報、ストリーミング、ツール、マルチモーダル入力、構造化レスポンスを置き換える設定は拒否されます。
+
+`OPENAI_MODEL` と `OPENAI_BASE_URL` は、Local Data Studio の設定項目としては使用しません。
+Uvicorn から Local Data Studio のアプリケーション本体を直接起動する場合は、`LOCAL_DATA_STUDIO_CONFIG_FILE` で同じ TOML ファイルを指定できます。
+
+</details>
+
+<details>
+<summary><strong>EDA のキャッシュ</strong></summary>
+
+データセット全体の EDA レポートは、ファイルのフィンガープリント、行数上限、プロファイルモードに基づいて `./cache/eda` へ保存されます。
+ここでいうフィンガープリントは、同じファイルかどうかを識別するための情報です。
+
+SQL クエリ結果のレポートは、ファイルのフィンガープリント、SQL、行数上限、プロファイルモードに基づいて別のキャッシュとして保存されます。
+EDA キャッシュ全体は既定で 1 GiB に制限され、`EDA_CACHE_MAX_BYTES` を超えると古いレポートから削除されます。
+
+**Run EDA on Query Results** では、`rn` や `__rowid` のような内部処理用の補助カラムをレポートから除外します。
+
+</details>
+
+<details>
+<summary><strong>Embedding Atlas の計算とキャッシュ</strong></summary>
+
+Embedding Atlas ジョブは、選択したローカルエンコーダーモデルを使って埋め込みを計算し、その埋め込みに 2 次元への次元削減を行うため、完了まで時間がかかる場合があります。
+
+埋め込みと次元削減後の座標を含む Parquet ファイルは、`./cache/atlas/datasets` に保存されます。
+次の条件がすべて一致する場合だけ、既存のキャッシュを再利用します。
+
+- データセットのフィンガープリント
+- SQL
+- 対象カラム
+- モデル
+- バックエンド
+- プロンプトテンプレート
+- バックエンド対応状況の判定に使ったモデル設定情報
+- 次元削減手法とその設定
+
+画像表示用のカラムは、元の URL、パス、`{bytes, path}` 形式を保持します。
+エンコーダーへ渡す形式へ変換した値は、内部の埋め込み入力用カラムだけに保存します。
+
+`ATLAS_SAMPLE=N` は、SQL による絞り込み後に埋め込み計算と次元削減を行い、キャッシュ Parquet に保存する行数を最大 `N` 行へ制限します。
+ただし、現在の実装では、最初に DataFrame へ読み込む段階の行数までは制限しません。
+
+UMAP は `full` と `anchor_transform` に対応しています。
+t-SNE と PCA は、抽出済みのすべての埋め込みをまとめて次元削減します。
+
+長いテキスト列と展開後のプロンプトは `ATLAS_TEXT_MAX_CHARS`、埋め込みのメモリ使用量は `ATLAS_EMBEDDING_DTYPE=float16`、キャッシュ容量は `ATLAS_CACHE_MAX_BYTES` で調整できます。
+
+</details>
+
+<details>
+<summary><strong>埋め込みモデルのバックエンド判定</strong></summary>
+
+バックエンドへの対応状況はモデル名だけでは判断せず、ローカルにある次の情報を、読み込み量に上限を設けて解析します。
+
+- `modules.json`
+- `config.json`
+- tokenizer／processor の設定
+- pooling の設定
+- normalization のメタデータ
+
+Sentence Transformers は、`native`、`generic_fallback`、`metadata_only`、`unsupported`、`unknown` のいずれかを返します。
+Transformers は、`direct`、`remote_code`、`backbone_only`、`unsupported`、`unknown` のいずれかを返します。
+
+Sentence Transformers の `generic_fallback` を選択できるのは、tokenizer を確認できるテキスト専用の Transformers モデルだけです。
+画像モデルやマルチモーダルモデルを Sentence Transformers で実行するには、ネイティブな `modules.json` が必要です。
+
+そのため、画像専用の DINOv3 チェックポイントでは Transformers だけを選択でき、モデルが宣言する `pooler_output` を使用します。
+ネイティブな Sentence Transformers パイプラインを持つ Qwen3-VL-Embedding では、両方のバックエンドを利用できます。
+
+実行可能なアダプターを確認できたバックエンドだけを選択できます。
+`remote_code` は、`ATLAS_TRUST_REMOTE_CODE=true` を指定し、モデルリポジトリ内のコード実行を明示的に許可した場合だけ利用できます。
+組み込みの Transformer／Pooling／Normalize 構成は、モデルリポジトリ内の Python コードを読み込まず、Transformers アダプターで再現します。
+
+</details>
+
+<details>
+<summary><strong>キャッシュの保存場所と無効化</strong></summary>
+
+キャッシュは用途ごとに、次のディレクトリへ分けて保存されます。
+
+- `./cache/metadata`
+- `./cache/index`
+- `./cache/stats`
+- `./cache/count`
+- `./cache/search`
+- `./cache/eda`
+- `./cache/atlas`
+
+Embedding Atlas のキャッシュは `./cache/atlas` の下へ保存され、次元削減後の座標を含む Parquet ファイルは `./cache/atlas/datasets` に保存されます。
+EDA レポート全体の容量は `EDA_CACHE_MAX_BYTES`、Embedding Atlas 関連キャッシュ全体の容量は `ATLAS_CACHE_MAX_BYTES` で制限されます。上限を超えると、それぞれ古いファイルから削除されます。
+
+フィンガープリントを使用するキャッシュは、対象ファイルのパス、サイズ、更新時刻に基づいて無効化されます。ここでいう無効化とは、元のファイルが変更されたと判断した場合に、古いキャッシュを再利用しないことです。
+
+</details>
+
+## 開発者向け情報
+
+内部構成、主要モジュールの役割、開発時の起動方法、実装上の注意事項については、[IMPLEMENTATION_NOTES_ja.md](IMPLEMENTATION_NOTES_ja.md) を参照してください。
+
+## コントリビューション
+
+バグ報告や機能提案は、GitHub の Issue からお願いします。
+
+コードを変更した場合は、コミット前に pre-commit を実行してください。
+
+```bash
+# すべてのファイルを対象に、自動整形・Lint・型チェックを実行する
+uv run pre-commit run --all-files
+```
+
+pre-commit を環境へインストールせずに実行する場合は、次のコマンドも使用できます。
+
+```bash
+uvx pre-commit run --all-files
+```
+
+これらのコマンドは、主に次の処理をまとめて実行します。
+
+- `uv run ruff format` または `uvx ruff format`: コードを自動整形します。
+- `uv run ruff check` または `uvx ruff check`: コードの問題を検査します。
+- `uv run ty check` または `uvx ty check`: 型の不整合を検査します。
+
+Ruff は、アプリケーションコードとテストコードの両方に対して、PEP 257 を基本とする Google スタイルの docstring を適用します。
+公開 API には、型や名前だけでは分からない制約、例外、副作用、所有権を記載してください。
+一方、非公開の実装には、処理内容をそのまま言い換えるだけの説明を追加しません。
+
+すべてのエラーを解消してからコミットしてください。
 
 ## 謝辞
 
-- [Dataset viewer (Huggingface)](https://github.com/huggingface/dataset-viewer): UI/機能設計の参考にしました。
-- [YData Profiling](https://github.com/ydataai/ydata-profiling): EDA レポート生成に利用しています。
-- [Embedding Atlas](https://github.com/apple/embedding-atlas): Embedding のインタラクティブな可視化に利用しています。
+- [Dataset Viewer（Hugging Face）](https://github.com/huggingface/dataset-viewer): UI と機能設計の参考にしています。
+- [YData Profiling](https://github.com/ydataai/ydata-profiling): EDA レポートの生成に使用しています。
+- [Embedding Atlas](https://github.com/apple/embedding-atlas): 埋め込みのインタラクティブな可視化に使用しています。
 
 ## ライセンス
 

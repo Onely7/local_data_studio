@@ -2,294 +2,542 @@
 
 # Local Data Studio
 
-**GUI Application for Local Dataset Viewing and Analysis**
+**A GUI application for viewing and analyzing local datasets**
 
 English | [日本語](docs/README_ja.md)
 </div>
 
-Local Data Studio is a Web Viewer for browsing and analyzing JSONL/JSON/CSV/TSV/Parquet files locally, inspired by Hugging Face Datasets' [Data Studio](https://huggingface.co/docs/hub/data-studio#data-studio).  
-It provides fast preview, DuckDB SQL execution (with optional LLM-assisted SQL generation), basic statistics, EDA report generation, and Embedding Atlas visualization.
+Local Data Studio is a web-based viewer for local datasets, inspired by [Data Studio](https://huggingface.co/docs/hub/data-studio#data-studio) from Hugging Face Datasets.
+It lets you browse, search, and analyze data in JSONL, JSON, CSV, TSV, and Parquet formats directly in your browser.
+
+Its main features include fast previews, SQL execution with DuckDB, exploratory data analysis (EDA) report generation, and embedding visualization with Embedding Atlas.
+The SQL console can also generate SQL from natural-language instructions using an LLM.
 
 <div align="center">
-<img src="images/local_data_studio_01.png" alt="local data studio 01" width=90%>
+<img src="images/local_data_studio_01.png" alt="Main screen of Local Data Studio" width="90%">
 </div>
 
 ## Key Features
 
-- Fast bounded preview and cursor-style paging for large-scale datasets
-- DuckDB SQL console (read-only) with timeout, memory, and large-scan guards
-- EDA report generation for the whole dataset or SQL query results (cached under `./cache/eda`)
-- Embedding Atlas visualization for selected text/image columns, including SQL query results
-- Row Inspector (copy, delete, highlight)
-- Image rendering from URLs, local paths, and `{bytes, path}` image dictionaries
-- Image zoom and row-level multi-image navigation
-- Drag & drop upload support
-- Hide/delete within the current session
+- Preview large datasets while limiting how much data is loaded at once
+- Cursor-based pagination for efficient navigation between pages
+- Read-only search and aggregation using DuckDB SQL
+- SQL timeouts, memory limits, and warnings for potentially large scans
+- EDA report generation for either an entire dataset or SQL query results
+- Embedding Atlas visualization for text columns, image columns, or SQL query results
+- A **Row Inspector** for viewing complete row contents
+- Image rendering from URLs, local paths, and dictionaries in `{bytes, path}` format
+- Enlarged image previews and navigation between multiple images in the same row
+- Drag-and-drop file uploads
+- Hiding rows within the current session, with optional deletion from the source file
+
+## Supported Environments and Data Formats
+
+- Python 3.11, 3.12, or 3.13
+- Supported formats: `.jsonl`, `.json`, `.csv`, `.tsv`, and `.parquet`
 
 ## Installation
 
-### From PyPI
+Choose the installation method that matches your intended use:
 
-After the package is published, install it with pip:
+- For regular use: **Install from PyPI**
+- For development or source-code changes: **Set up from source**
 
-Local Data Studio supports Python 3.11, 3.12, and 3.13.
+### Install from PyPI
+
+Once the package has been published, install it with the following command:
 
 ```bash
 python -m pip install local-data-studio
 ```
 
-Run the app with either entrypoint:
+After installation, you can start the application with either of the following commands:
 
 ```bash
+# List data files in the specified directory
 local-data-studio --data-dir /local/data/path
+
+# Run the same command through the Python module entry point
 python -m local_data_studio --data-dir /local/data/path
 ```
 
-Use `--data-file` instead of `--data-dir` to open a single dataset file. By default, `.env`, `data`, `cache`, and `models/embedder` are resolved under the current working directory. For repeatable launches, use `--workspace-dir` or `--config`; individual paths can still be overridden with `--data-dir`, `--data-file`, `--cache-dir`, `--models-dir`, `--env-file`, and `--file-serve-roots`.
+Replace `/local/data/path` with the actual directory that contains the data you want to inspect.
 
-Example config file:
+To open a single file instead of a directory, use `--data-file` instead of `--data-dir`:
 
-```toml
-[paths]
-workspace_dir = "/Users/me/local-data-studio"
-env_file = ".env"
-data_dir = "/Users/me/datasets"
-cache_dir = "/Users/me/.cache/local-data-studio"
-models_dir = "/Users/me/models/embedder"
-file_serve_roots = ["/Users/me/datasets", "/Users/me/images"]
-vis_exclude_files = ["/Users/me/datasets/archive.csv"]
-
-[server]
-host = "127.0.0.1"
-port = 8000
-reload = false
-
-[llm]
-default_model = "openai-main"
-timeout_seconds = 60
-
-[[llm.models]]
-id = "openai-main"
-label = "GPT-5.2"
-model = "openai/gpt-5.2"
-api_key_env = "OPENAI_API_KEY"
-provider_options = { max_completion_tokens = 400 }
-
-[[llm.models]]
-id = "claude-main"
-label = "Claude Sonnet"
-model = "anthropic/claude-sonnet-4-5-20250929"
-api_key_env = "ANTHROPIC_API_KEY"
-provider_options = { max_tokens = 400 }
-
-[[llm.models]]
-id = "gemini-main"
-label = "Gemini Flash"
-model = "gemini/gemini-2.5-flash"
-api_key_env = "GEMINI_API_KEY"
-
-[[llm.models]]
-id = "local-qwen"
-label = "Local Qwen"
-model = "hosted_vllm/Qwen/Qwen3-8B"
-base_url = "http://127.0.0.1:8000/v1"
-provider_options = { temperature = 0, extra_body = { top_k = 20 } }
+```bash
+local-data-studio --data-file /local/data/example.parquet
 ```
 
-Run it with:
+After the server starts, open <http://127.0.0.1:8000> in your browser.
+
+### Set Up from Source
+
+Running from source requires Python 3.11–3.13, Git, and uv.
+
+1. **Download the repository**
+
+   ```bash
+   # Download the repository from GitHub
+   git clone https://github.com/Onely7/local_data_studio.git
+
+   # Move into the downloaded directory
+   cd local_data_studio
+   ```
+
+2. **Install the required dependencies**
+
+   ```bash
+   # Prepare the development environment from the project configuration
+   uv sync
+   ```
+
+3. **Create the environment variable file**
+
+   ```bash
+   # Copy the example configuration to create .env
+   cp .env.example .env
+   ```
+
+4. **Edit `.env`**
+
+   At minimum, set `DATA_DIR` to the directory that contains the data you want to inspect.
+   To open a single file, you can use `DATA_FILE` instead of `DATA_DIR`.
+
+   ```dotenv
+   # Dataset location
+   # DATA_FILE=/local/data/example.parquet
+   DATA_DIR=/local/data/path
+   FILE_SERVE_ROOTS=""
+   VIS_EXCLUDE_DIRS=""
+   VIS_EXCLUDE_FILES=""
+
+   # Optional LLM provider credentials
+   # Add only the variables referenced by api_key_env in local_data_studio.toml.
+   # OPENAI_API_KEY=your_openai_api_key
+   # ANTHROPIC_API_KEY=your_anthropic_api_key
+   # GEMINI_API_KEY=your_gemini_api_key
+
+   # EDA settings
+   EDA_ROW_LIMIT=50000
+   EDA_CELL_MAX_CHARS=5000
+   EDA_NESTED_POLICY=stringify
+   EDA_CACHE_MAX_BYTES=1073741824
+
+   # Embedding Atlas settings
+   EMBEDDER_MODELS_DIR=models/embedder
+   ATLAS_HOST=127.0.0.1
+   ATLAS_PORT=5055
+   # ATLAS_SAMPLE=5000
+   # ATLAS_BATCH_SIZE=16
+   ATLAS_CACHE_MAX_BYTES=10737418240
+   ATLAS_TEXT_MAX_CHARS=4096
+   ATLAS_EMBEDDING_DTYPE=float32
+   ATLAS_UMAP_PROJECTION_MODE=full
+   ATLAS_UMAP_ANCHOR_SAMPLE=10000
+   ATLAS_TRUST_REMOTE_CODE=false
+
+   # Whether deletion from source files is allowed
+   ALLOW_DELETE_DATA=false
+   ```
+
+5. **Start Local Data Studio**
+
+   ```bash
+   # Start the application with automatic reload enabled for development
+   uv run local-data-studio --reload
+   ```
+
+6. **Open the application in your browser**
+
+   Startup is complete when output similar to the following appears in the terminal:
+
+   ```text
+   INFO:     Uvicorn running on http://127.0.0.1:8000 (Press CTRL+C to quit)
+   INFO:     Application startup complete.
+   ```
+
+   Open <http://127.0.0.1:8000> in your browser to view Local Data Studio.
+
+   To stop the server, press `Ctrl+C` in the terminal where it is running.
+
+## Paths and Configuration Files
+
+### Default Paths
+
+Unless otherwise specified, the following files and directories are located or created relative to the directory in which you run the command:
+
+- `.env`
+- `data`
+- `cache`
+- `models/embedder`
+
+The directory in which a command is run is called the **current working directory**.
+To use the same base directory every time, specify `--workspace-dir` or `--config`.
+
+You can override individual paths with the following command-line options:
+
+- `--data-dir`
+- `--data-file`
+- `--cache-dir`
+- `--models-dir`
+- `--env-file`
+- `--file-serve-roots`
+
+### Example TOML Configuration File
+
+To manage several settings in one place, you can use a TOML configuration file.
+TOML is a text-based file format for defining configuration keys and values.
+
+The repository includes [local_data_studio.example.toml](local_data_studio.example.toml), which contains paths, server settings, and optional LLM model profiles without credentials.
+Copy it to `local_data_studio.toml`, then edit the paths and the profiles you intend to use:
+
+```bash
+cp local_data_studio.example.toml local_data_studio.toml
+```
+
+Store any API keys in `.env` or your shell environment. The `api_key_env` setting in each model profile specifies the name of the credential variable to use.
+
+Start the application with a configuration file as follows:
 
 ```bash
 local-data-studio --config /path/to/local_data_studio.toml
 ```
 
-Path precedence is: CLI option, OS environment variable, config file, `.env`, workspace default, then current-working-directory default.
+When the same setting is defined in more than one place, the following precedence order applies.
+Items higher in the list take priority over those below them.
 
-### From source
+1. Command-line options
+2. Operating system environment variables
+3. TOML configuration file
+4. `.env`
+5. Workspace-based defaults
+6. Current-working-directory-based defaults
 
-1. **Clone or download the repository**
+### Environment Variables
 
-    ```bash
-    git clone git@github.com:Onely7/local_data_studio.git
-    cd local_data_studio
-    ```
+#### Data and Paths
 
-2. **Install dependencies**
+- `DATA_FILE`: Specifies a single data file directly. When set, it takes precedence over `DATA_DIR`.
+- `DATA_DIR`: Specifies the directory in which datasets are discovered. This is required unless `DATA_FILE` is used.
+- `FILE_SERVE_ROOTS`: A comma-separated list of directories from which local images may be served.
+- `VIS_EXCLUDE_DIRS`: A comma-separated list of directories under `DATA_DIR` to exclude from dataset discovery.
+- `VIS_EXCLUDE_FILES`: A comma-separated list of files under `DATA_DIR` to exclude from dataset discovery. Relative paths are resolved from `DATA_DIR`, and absolute paths are also supported.
 
-    ```bash
-    uv sync
-    ```
+#### LLM Credentials
 
-3. **Configure environment variables**
-   Create or edit `.env` and set the environment variables.
+- `OPENAI_API_KEY`, `ANTHROPIC_API_KEY`, and `GEMINI_API_KEY`: Examples of credential environment variables referenced by `api_key_env` in an LLM model profile. These values are never sent to the browser.
 
-    ```bash
-    cp .env.example .env
-    ```
+#### EDA
 
-    ```bash
-    # Data set specification (if both exist, DATA_FILE takes precedence)
-    # DATA_FILE=
-    DATA_DIR=/local/data/path  # FIXME: data directory path set here (required)
-    FILE_SERVE_ROOTS=""
-    VIS_EXCLUDE_DIRS=""
-    VIS_EXCLUDE_FILES=""
+- `EDA_ROW_LIMIT`: The maximum number of rows loaded into an EDA report from either an entire dataset or SQL query results. This value cannot be changed from the UI. Any integer greater than or equal to `1` is accepted; use `-1` to disable the row limit.
+- `EDA_CELL_MAX_CHARS`: The maximum number of characters retained from a string cell during EDA. Content beyond this limit is replaced with `... (truncated)`.
+- `EDA_NESTED_POLICY`: Controls how nested values such as lists, structs, objects, and binary data are handled. `stringify` converts and retains them as strings, while `drop` removes the affected columns.
+- `EDA_CACHE_MAX_BYTES`: The maximum total size of EDA reports stored in `./cache/eda`. The default is 1 GiB. When the limit is exceeded, the oldest reports are removed first.
 
-    # LLM provider credentials (model profiles belong in local_data_studio.toml)
-    OPENAI_API_KEY=""
-    ANTHROPIC_API_KEY=""
-    GEMINI_API_KEY=""
+#### Embedding Atlas
 
-    # EDA Settings
-    EDA_ROW_LIMIT=50000
-    EDA_CELL_MAX_CHARS=5000
-    EDA_NESTED_POLICY=stringify
-    EDA_CACHE_MAX_BYTES=1073741824
+- `EMBEDDER_MODELS_DIR`: The parent directory containing local Hugging Face encoder models. By default, Local Data Studio uses `models/embedder` under the workspace or current working directory.
+- `ATLAS_HOST`, `ATLAS_PORT`: The host and initial port used for the local Embedding Atlas page. If the selected port is already in use, `embedding-atlas` may choose another port.
+- `ATLAS_SAMPLE`: The maximum number of rows used for embedding computation, dimensionality reduction, and the cached Atlas Parquet file. Sampling is applied after the SQL query, with a fixed random seed of 42 so that the same rows are selected for the same input. When unset or set to `0`, all selected rows are used. Negative values are rejected.
+- `ATLAS_BATCH_SIZE`: The number of rows processed at once during embedding computation. When unset or set to `0`, the Embedding Atlas default is used.
+- `ATLAS_CACHE_MAX_BYTES`: The maximum total size of Embedding Atlas-related files stored in `./cache/atlas`. When the limit is exceeded, the oldest cache files are removed first.
+- `ATLAS_TEXT_MAX_CHARS`: The maximum number of characters retained from a text cell for both embedding input and the cached Atlas Parquet file. Set this to `0` to disable truncation.
+- `ATLAS_EMBEDDING_DTYPE`: The numeric precision used for embedding arrays before dimensionality reduction. Supported values are `float32` and `float16`.
+- `ATLAS_UMAP_PROJECTION_MODE`: Controls how UMAP dimensionality reduction is performed. `full` processes all sampled embeddings together. `anchor_transform` fits UMAP on a representative anchor sample and then places the remaining rows into the same two-dimensional space. t-SNE and PCA always process all sampled rows together.
+- `ATLAS_UMAP_ANCHOR_SAMPLE`: The number of rows used to fit UMAP when `ATLAS_UMAP_PROJECTION_MODE=anchor_transform`.
+- `ATLAS_TRUST_REMOTE_CODE`: When set to `true`, permits the selected local encoder model's repository code to run while Local Data Studio loads the model. Leave this set to `false` unless you trust that model.
 
-    # Embedding Atlas Settings
-    EMBEDDER_MODELS_DIR=models/embedder
-    ATLAS_HOST=127.0.0.1
-    ATLAS_PORT=5055
-    # ATLAS_SAMPLE=5000
-    # ATLAS_BATCH_SIZE=16
-    ATLAS_CACHE_MAX_BYTES=10737418240
-    ATLAS_TEXT_MAX_CHARS=4096
-    ATLAS_EMBEDDING_DTYPE=float32
-    ATLAS_UMAP_PROJECTION_MODE=full
-    ATLAS_UMAP_ANCHOR_SAMPLE=10000
-    ATLAS_TRUST_REMOTE_CODE=false
+#### Data Deletion
 
-    # Delete Permission
-    ALLOW_DELETE_DATA=false
-    ```
-
-   Environment variable details:
-
-   - `DATA_FILE`: Directly specify a single file. If set, it takes precedence over `DATA_DIR`.
-   - `DATA_DIR`: Directory to search for datasets (required if `DATA_FILE` is not used).
-   - `FILE_SERVE_ROOTS`: Comma-separated directories from which local image previews may be served.
-   - `VIS_EXCLUDE_DIRS`: Comma-separated directories to exclude from dataset discovery under `DATA_DIR`.
-   - `VIS_EXCLUDE_FILES`: Comma-separated dataset files to exclude from discovery under `DATA_DIR`. Relative paths are resolved from `DATA_DIR`; absolute paths are also accepted.
-   - `OPENAI_API_KEY`, `ANTHROPIC_API_KEY`, `GEMINI_API_KEY`: Example credential variables referenced by `api_key_env` in an LLM model profile. Profile configuration never exposes their values to the browser.
-   - `EDA_ROW_LIMIT`: Server-side row limit for dataset and query-result EDA reports. Configure it through the environment or `.env`; the UI does not override it. Any integer greater than or equal to `1` is accepted. Set `-1` to load all rows without a row limit.
-   - `EDA_CELL_MAX_CHARS`: Maximum number of characters to display for long strings in EDA. Excess text is truncated as `... (truncated)`.
-   - `EDA_NESTED_POLICY`: How to handle nested types (list/struct/object/binary, etc.). `stringify` keeps them as strings, and `drop` removes the corresponding columns.
-   - `EDA_CACHE_MAX_BYTES`: Maximum combined size of EDA reports stored under `./cache/eda`. The default is 1 GiB; when the limit is exceeded, the oldest reports are removed first.
-   - `EMBEDDER_MODELS_DIR`: Directory containing local HuggingFace encoder model directories. Defaults to `models/embedder` under the workspace/current directory.
-   - `ATLAS_HOST` / `ATLAS_PORT`: Host and starting port for local Embedding Atlas pages. `embedding-atlas` may choose another port if the port is already in use.
-   - `ATLAS_SAMPLE`: Strict maximum number of rows embedded, projected, and written to the cached Atlas parquet. Sampling happens deterministically with seed 42 after applying a SQL query. Leave unset or `0` to use all selected rows; negative values are rejected at startup.
-   - `ATLAS_BATCH_SIZE`: Optional embedding batch size. Leave unset or `0` to use Embedding Atlas defaults.
-   - `ATLAS_CACHE_MAX_BYTES`: Maximum size for Local Data Studio's Embedding Atlas cache under `./cache/atlas`. Old cache files are pruned first.
-   - `ATLAS_TEXT_MAX_CHARS`: Maximum characters kept per text cell for Atlas embedding inputs and cached Atlas parquet output. Set `0` to disable truncation.
-   - `ATLAS_EMBEDDING_DTYPE`: Embedding array precision before projection: `float32` or `float16`.
-   - `ATLAS_UMAP_PROJECTION_MODE`: UMAP-only strategy. `full` computes UMAP on all sampled embeddings, while `anchor_transform` fits UMAP on representative anchors and transforms the remaining sampled rows into the same space. t-SNE and PCA always use full projection.
-   - `ATLAS_UMAP_ANCHOR_SAMPLE`: Number of rows used to fit UMAP when `ATLAS_UMAP_PROJECTION_MODE=anchor_transform`.
-   - `ATLAS_TRUST_REMOTE_CODE`: Passes `--trust-remote-code` to Embedding Atlas when `true`.
-   - `ALLOW_DELETE_DATA`: If `false`, physical file deletion is disabled (session-level hiding is still allowed).
-
-## Run
-
-```bash
-uv run local-data-studio --reload
-```
-
-For direct ASGI development, use:
-
-```bash
-uv run uvicorn local_data_studio.app:app --reload
-```
-
-After running, you will see messages like the following in your terminal:
-
-```
-INFO:     Will watch for changes in these directories: ['local/data_viewer']
-INFO:     Uvicorn running on http://127.0.0.1:8000 (Press CTRL+C to quit)
-INFO:     Started reloader process [00000] using StatReload
-INFO:     Started server process [00000]
-INFO:     Waiting for application startup.
-INFO:     Application startup complete.
-```
-
-The Local Data Studio server is now running.  
-Open [http://127.0.0.1:8000](http://127.0.0.1:8000) to view the Local Data Studio GUI.
+- `ALLOW_DELETE_DATA`: When set to `false`, deletion from the source data file is disabled. Rows may still be hidden temporarily within the current session.
 
 ## Usage
 
-1. **Select a file from DATASETS**
-   Choose a dataset from the DATASETS list on the left. You can also filter by using the search box. Long file names are ellipsized in the list, and file sizes are shown with up to three significant digits using `Bytes`, `kB`, `MB`, `GB`, or `TB`.  
-   <img src="images/local_data_studio_02.png" alt="local data studio 02" width=45%>
+### 1. Select a Data File
 
-2. **Preview / Search / Paging**
-   Use Search at the top to search the data, Rows to change the number of displayed rows, and Prev/Next to move between pages.  
-   <img src="images/local_data_studio_03.png" alt="local data studio 03" width=45%>
+Select the file you want to inspect from the **DATASETS** list on the left.
+You can also use the search box to filter the list by file name.
 
-3. **SQL Console**
-   Run DuckDB SQL queries against the `data` table.  
-   It also supports converting natural-language instructions into SQL through a server-managed LiteLLM profile. Select an available OpenAI, Anthropic, Gemini, hosted vLLM, or other LiteLLM model in the SQL Console. SQL generation accepts plain text completions only, and generated SQL is limited to a single `SELECT`/CTE statement. SQL execution retains its timeout, memory, and large-dataset scan-risk guards.
-   <img src="images/local_data_studio_04.png" alt="local data studio 04" width=45%>
+Long file names are shortened in the list.
+File sizes are shown with up to three significant digits using the most appropriate unit: `Bytes`, `kB`, `MB`, `GB`, or `TB`.
 
-4. **EDA Report**
-   Run EDA to generate and cache a report for the dataset sample. Use **Run EDA on Query Results** to profile the current SQL Console query results instead.  
-   Dataset reports are cached under `./cache/eda` based on {file fingerprint, row limit, profile mode}. Query-result reports are cached separately based on {file fingerprint, SQL, row limit, profile mode}. The combined EDA cache defaults to 1 GiB and removes the oldest reports first when it exceeds `EDA_CACHE_MAX_BYTES`.
-   Configure the row limit with `EDA_ROW_LIMIT` in the environment or `.env`. The UI does not override this server-side setting. Any positive value is accepted, and `-1` removes the row limit. Select **Profile mode** in the EDA panel for each run; the default is `minimal`.
-   <img src="images/local_data_studio_05.png" alt="local data studio 05" width=45%> <img src="images/local_data_studio_06.png" alt="local data studio 06" width=45%>
+<img src="images/local_data_studio_02.png" alt="Selecting a file from the DATASETS list" width="45%">
 
-5. **Visualize Embedding**
-   Put local HuggingFace encoder model directories under `models/embedder` or the directory selected with `--models-dir` / `EMBEDDER_MODELS_DIR` (for example, `models/embedder/google/siglip2-base-patch16-224`, `models/embedder/Qwen/Qwen3-Embedding-0.6B`, or `models/embedder/Qwen/Qwen3-VL-Embedding-2B`). Directories containing model marker files such as `config.json`, `modules.json`, `tokenizer_config.json`, or `preprocessor_config.json` appear in the Model dropdown.
-   Select a text or image column, model, available backend, and projection method in **Visualize Embedding**, then run **Run Atlas** to launch a local Embedding Atlas page. Projection choices are **UMAP** (default), **t-SNE**, and **PCA**. Use **Run Atlas on Query Results** to visualize the current SQL Console query results instead. Model configuration is inspected without loading weights; unavailable backends remain visible but disabled. When both backends are available, Sentence Transformers is selected by default.
-   With Sentence Transformers selected, an optional Prompt field is shown. Leave it blank to use the model's saved default prompt. Text without a placeholder is prepended to every selected value. Exact placeholders such as `{title}` or `{body}` insert values from the same dataset row or SQL result row; `{{` and `}}` produce literal braces. Unknown columns, malformed braces, conversions, and format specifiers are rejected before the model is loaded.
-   The job runs in the background with progress updates, and an **Open Atlas** link appears when the local Atlas page is ready.  
-   <img src="images/local_data_studio_07.png" alt="local data studio 07" width=45%> <img src="images/local_data_studio_08.png" alt="local data studio 08" width=45%>
+### 2. Browse and Search Data
 
-6. **Row Inspector / Image Zoom**
-   Click a row to expand it in the details panel. Long values are compacted by default and can be toggled with Raw. For image columns, click to open a zoomed view. Image candidates are detected from image URLs, relative/absolute image paths, and dictionaries such as `{ "bytes": ..., "path": ... }`; bytes are tried first and path is used as a fallback.  
-   <img src="images/local_data_studio_09.png" alt="local data studio 09" width=45%> <img src="images/local_data_studio_10.png" alt="local data studio 10" width=45%>
+Use the controls at the top of the page to change what is displayed:
 
-## Notes
+- **Search**: Searches the data.
+- **Rows**: Changes the number of rows shown per page.
+- **Prev** / **Next**: Moves to the previous or next page.
 
-- Supported dataset formats: `.jsonl`, `.json`, `.csv`, `.tsv`, `.parquet`.
-- On large datasets, searching and running EDA may take time.
-- For very large datasets, preview uses cursor-style page tokens instead of large `OFFSET` scans where supported. Row counts, global search, sampled statistics, and EDA run through background jobs with progress and cancellation APIs.
-- SQL-generation model profiles are read from the `[llm]` section of `local_data_studio.toml`. Use explicit LiteLLM provider prefixes such as `openai/`, `anthropic/`, `gemini/`, or `hosted_vllm/`; the deprecated `vllm/` prefix is rejected. Credentials stay in environment variables referenced by `api_key_env`. `provider_options` is trusted server configuration for options such as `reasoning_effort`, `thinking`, token limits, `top_k`, or `extra_body`; options that replace messages, credentials, streaming, tools, multimodal input, or structured response shape are rejected. `OPENAI_MODEL` and `OPENAI_BASE_URL` are no longer Local Data Studio settings. Direct ASGI launches can select the same TOML file with `LOCAL_DATA_STUDIO_CONFIG_FILE`.
-- Embedding Atlas jobs use the selected local encoder model and compute embeddings/projections locally. Projected parquet inputs are cached under `./cache/atlas/datasets`; repeated runs reuse the projected parquet only when the dataset fingerprint, SQL, column, model, backend, prompt template, capability fingerprint, projection method, and projection settings match. Image display columns are kept in their original URL/path/`{bytes, path}` shape while a hidden embedding input column is used only for encoder input conversion. `ATLAS_SAMPLE=N` deterministically limits embedding, projection, and cached parquet output to at most `N` rows after SQL filtering; it does not avoid the current initial DataFrame load. UMAP supports `full` and `ATLAS_UMAP_PROJECTION_MODE=anchor_transform`, while t-SNE and PCA always project all sampled embeddings. t-SNE can become expensive quickly and has no separate fixed row cap, so set a practical `ATLAS_SAMPLE`. Use `ATLAS_TEXT_MAX_CHARS` to bound long text and expanded prompts, `ATLAS_EMBEDDING_DTYPE=float16` to reduce embedding memory, and `ATLAS_CACHE_MAX_BYTES` to cap the combined Atlas cache size.
-- Backend support is derived from bounded parsing of local `modules.json`, `config.json`, tokenizer/processor, pooling, and normalization metadata rather than model-name rules. Sentence Transformers reports `native`, `generic_fallback`, `metadata_only`, `unsupported`, or `unknown`; Transformers reports `direct`, `remote_code`, `backbone_only`, `unsupported`, or `unknown`. Sentence Transformers generic fallback is selectable only for tokenizer-backed, text-only Transformers models; image or multimodal models require a native `modules.json`. For example, the image-only DINOv3 checkpoints expose only Transformers and use their declared `pooler_output`, while Qwen3-VL-Embedding exposes both backends through its native Sentence Transformers pipeline. Only capabilities with a verified runnable adapter are selectable, and `remote_code` remains disabled unless `ATLAS_TRUST_REMOTE_CODE=true` explicitly permits repository code at execution time. Built-in Transformer/Pooling/Normalize pipelines can be reproduced by the Transformers adapter without importing Python files from the model repository.
-- Local encoder model files under `models/embedder` or a configured models directory are intentionally not bundled. Only the directory placeholder files are tracked; download or place model files locally on each machine.
-- Cache files are separated under `./cache/metadata`, `./cache/index`, `./cache/stats`, `./cache/count`, `./cache/search`, and `./cache/eda`. EDA reports have a configurable combined capacity (`EDA_CACHE_MAX_BYTES`) and are pruned oldest-first; fingerprint-based caches are invalidated by file path, size, and modification time where applicable.
-- `Run EDA on Query Results` excludes helper columns such as `rn` and `__rowid` from the generated report.
-- Feedback shown after Count Rows, EDA, and Atlas actions uses one compact status style so results remain distinguishable without overpowering the surrounding controls.
-- `EDA_ROW_LIMIT=-1` materializes all selected rows in memory for profiling. Use it only when the complete dataset or query result comfortably fits in memory; large datasets can exhaust system memory.
-- TB-scale `.json` arrays are not recommended. Prefer JSONL or Parquet for responsive preview.
-- `Delete from file` modifies the actual file, so make backups as needed.
-- If `ALLOW_DELETE_DATA=false`, only session-level hiding is allowed (the actual file will not be modified).
+<img src="images/local_data_studio_03.png" alt="Searching data and navigating between pages" width="45%">
 
-## Implementation Notes
+### 3. Use the SQL Console
 
-- The application package lives under `src/local_data_studio`. Static UI assets are packaged in `src/local_data_studio/static`, while runtime `.env`, `data`, `cache`, and `models/embedder` directories default to the selected workspace or current working directory. CLI options override OS environment variables, config-file values, `.env`, and workspace defaults in that order.
-- `src/local_data_studio/app.py` is a small application assembly entrypoint. Request models and API routes are grouped under `src/local_data_studio/server/api` by dataset access, analysis, background jobs, mutations, shared services, and static mounts. Blocking filesystem, DuckDB, EDA, and job routes run in FastAPI's threadpool; only streaming upload handling remains asynchronous.
-- `src/local_data_studio/server/readers.py` remains the compatibility facade for implementations under `src/local_data_studio/server/dataset_readers`. JSONL metadata inference stops at fixed row and byte budgets, and JSONL/CSV/TSV preview uses byte/page tokens with a fingerprinted sparse line index. Completed indexes are reused and checkpoints are saved in batch transactions. CSV/TSV use the same large-field parser for schema, preview, search, and raw rows. Parquet schema reads footer metadata, previews and raw rows use bounded record batches, and compatible offsets are resolved from row-group metadata without row-by-row scans.
-- `src/local_data_studio/server/stats.py` remains the compatibility facade for `src/local_data_studio/server/column_stats`, which separates value inference, per-column accumulation, and DuckDB orchestration. Sample rows are fetched in fixed-size batches and transferred directly into column accumulators instead of retaining both a complete row matrix and column copies.
-- SQL execution is centralized in `src/local_data_studio/server/sql.py`, which validates read-only SQL, applies DuckDB resource limits, and supports cooperative cancellation for background jobs.
-- SQL generation uses the LiteLLM Python SDK through a lazy adapter. `server/llm_profiles.py` validates server-managed model profiles, `server/llm_prompt.py` builds one provider-neutral user message and validates generated SQL, `server/llm_client.py` contains the common completion call, and `server/llm_service.py` orchestrates profile selection. Provider errors are returned without upstream exception bodies or credentials.
-- EDA report orchestration lives in `src/local_data_studio/server/eda_reports.py`; low-level profiling setup and DataFrame sanitization live in `src/local_data_studio/server/eda.py`. Reports are isolated under `./cache/eda` and use the shared oldest-first capacity pruner.
-- `src/local_data_studio/server/atlas.py` remains the compatibility facade for `src/local_data_studio/server/atlas_components`, which separates contracts, capability-driven embedding adapters, safe prompt templates, image conversion, projection, dataset caching, subprocess control, and orchestration. `server/embedder_capabilities.py` performs bounded metadata-only model inspection and fingerprints the relevant configuration. An encoder is created once per Atlas job and reused across anchor/transform batches. Anchor-transform reads only the anchor and current transform batch instead of converting the complete input column to a Python list. Final display sanitization and projection-column attachment share one owned DataFrame copy, while concurrent misses for the same fingerprint/query/column/model/backend/prompt/settings key share one cache generation.
-- Atlas UMAP projection uses a fixed random seed for reproducible cache artifacts and explicitly sets `n_jobs=1`, matching UMAP's seeded execution mode without emitting thread override warnings.
-- On macOS, Atlas subprocess launch is kept compatible with Python's `posix_spawn` path to avoid child-side fork `SIGSEGV (-11)` failures. Keep Atlas commands on absolute paths, do not pass `cwd` to `Popen`, and keep `close_fds=False`.
-- Background jobs are managed by `src/local_data_studio/server/jobs.py` and expose progress, cancellation, result, and error state through `/api/jobs/*`.
+The SQL console lets you search and aggregate the `data` table using DuckDB SQL.
+Only read-only queries are allowed.
 
-## Contribution
+When a LiteLLM model profile has been configured on the server, you can generate SQL from natural-language instructions, including instructions written in Japanese.
+The SQL console can use configured OpenAI, Anthropic, Gemini, hosted vLLM, and other LiteLLM-compatible models.
 
-- Please use Issues for bug reports and feature requests.
-- This repository uses pre-commit for code quality. Running `uv run pre-commit run --all-files` (or `uvx pre-commit run --all-files`) is equivalent to executing the following:
+Local Data Studio accepts only SQL returned by the LLM as plain text and does not use tool calls.
+Generated SQL is restricted to either a single `SELECT` statement or a `SELECT` statement using a common table expression (CTE) introduced by a `WITH` clause.
+SQL execution is subject to timeouts, memory limits, and checks for potentially expensive data scans.
 
-  - `uv run ruff format` (or `uvx ruff format`)
-  - `uv run ruff check` (or `uvx ruff check`)
-  - `uv run ty check` (or `uvx ty check`)
-- Ruff enforces PEP 257 docstrings with the Google convention across application and test code. Public APIs document constraints, exceptions, side effects, and ownership when types and names alone are insufficient; private implementation details should not receive redundant narration.
-- Please make sure to fix all reported errors before committing.
+<img src="images/local_data_studio_04.png" alt="SQL console" width="45%">
 
-## Acknowledgements
+### 4. Generate an EDA Report
 
-- [Dataset viewer (Huggingface)](https://github.com/huggingface/dataset-viewer): Used as a reference for UI/feature design.
-- [YData Profiling](https://github.com/ydataai/ydata-profiling): Used for EDA report generation.
+Select **Run EDA** to generate an EDA report from rows loaded from the dataset.
+Generated reports are stored in the cache and may be reused when the same report is requested again under identical conditions.
+
+Select **Run EDA on Query Results** to generate a report from the current results displayed in the SQL console.
+
+Set the row limit with `EDA_ROW_LIMIT` in the environment or `.env` file.
+This value cannot be changed from the UI.
+Any integer greater than or equal to `1` is accepted; use `-1` to remove the row limit.
+
+The **Profile mode** option in the EDA panel controls the level of detail for each run.
+The default value is `minimal`.
+
+<img src="images/local_data_studio_05.png" alt="Running EDA" width="45%"> <img src="images/local_data_studio_06.png" alt="Generated EDA report" width="45%">
+
+### 5. Visualize Embeddings
+
+An embedding represents the features of text or an image as a sequence of numbers called a vector.
+Because embeddings usually have too many dimensions to display directly, Local Data Studio converts them into two-dimensional coordinates using methods such as UMAP, t-SNE, or PCA. This process is commonly called **dimensionality reduction**.
+Some configuration keys and internal code use the term `projection`, but this README uses **dimensionality reduction** as the general term for UMAP, t-SNE, and PCA.
+
+First, place a local encoder model in Hugging Face format under `models/embedder`, or under the directory specified by `--models-dir` or `EMBEDDER_MODELS_DIR`.
+
+Example locations:
+
+```text
+models/embedder/google/siglip2-base-patch16-224
+models/embedder/Qwen/Qwen3-Embedding-0.6B
+models/embedder/Qwen/Qwen3-VL-Embedding-2B
+```
+
+A directory appears in the **Model** selector when it contains model-identifying files such as `config.json`, `modules.json`, `tokenizer_config.json`, or `preprocessor_config.json`.
+
+Under **Visualize Embedding**, select the following:
+
+1. A text or image column
+2. The model to use
+3. The library used to run the model, referred to as the backend
+4. The dimensionality reduction method used to produce two-dimensional coordinates
+
+Available methods are **UMAP** (default), **t-SNE**, and **PCA**.
+Select **Run Atlas** to start a local Embedding Atlas page.
+Select **Run Atlas on Query Results** to visualize the current SQL query results instead of the full dataset.
+
+When listing models, Local Data Studio inspects configuration files without loading model weights.
+Unavailable backends are still shown in the list but cannot be selected.
+When both Sentence Transformers and Transformers are supported, Sentence Transformers is selected by default.
+
+When Sentence Transformers is selected, a **Prompt** field appears for entering additional instructions for the model.
+If the field is left empty, the default prompt stored with the model is used.
+
+- Text without a placeholder is prepended to each value in the selected column.
+- Placeholders such as `{title}` and `{body}` are replaced with values from the corresponding columns in the same dataset row or SQL result row.
+- `{{` and `}}` are treated as literal braces.
+- Missing columns, unsupported conversions, format specifiers, and unmatched braces are rejected before the model is loaded.
+
+The operation runs as a background job so that the rest of the interface remains responsive, and progress is shown in the UI.
+When processing is complete, an **Open Atlas** link appears.
+
+<img src="images/local_data_studio_07.png" alt="Embedding Atlas settings" width="45%"> <img src="images/local_data_studio_08.png" alt="Embedding Atlas visualization" width="45%">
+
+### 6. Use the Row Inspector and Enlarged Image View
+
+Click a row to display the full contents of each column in the **Row Inspector**.
+Long values are shortened by default. Switch to **Raw** to view the complete value.
+
+Values recognized as images can be clicked to open an enlarged preview.
+The following formats are supported:
+
+- Image URLs
+- Relative or absolute file paths
+- Dictionaries in `{ "bytes": ..., "path": ... }` format
+
+When both `bytes` and `path` are present, Local Data Studio first attempts to display the `bytes` value.
+If that fails, it uses `path` as a fallback.
+
+<img src="images/local_data_studio_09.png" alt="Row Inspector" width="45%"> <img src="images/local_data_studio_10.png" alt="Enlarged image preview" width="45%">
+
+## Usage Notes
+
+- Searching and generating EDA reports may take time for large datasets.
+- Row counting, full-dataset search, sample statistics, and EDA run as background jobs that support progress reporting and cancellation.
+- Setting `EDA_ROW_LIMIT=-1` loads all selected rows into memory for analysis. Use this only when the complete dataset or query result fits comfortably in memory.
+- JSON array files at terabyte scale are not recommended. Use JSONL or Parquet for efficient access to large datasets.
+- t-SNE can become dramatically slower and consume much more memory as the amount of data increases. Set a practical `ATLAS_SAMPLE` limit for large datasets.
+- **Delete from file** modifies the original data file. Create a backup beforehand when necessary.
+- When `ALLOW_DELETE_DATA=false`, rows are not removed from the source file. They can only be hidden within the current session.
+- Place encoder model files yourself under `models/embedder` or the configured model directory. Model weights are not included in the distribution; only a placeholder used to preserve the empty directory is included.
+
+## Advanced Settings and Technical Details
+
+This section is intended for users and administrators who need details about how Local Data Studio works.
+You can skip it if you only need the standard viewing and analysis features.
+
+<details>
+<summary><strong>Large-Dataset Preview and Background Processing</strong></summary>
+
+For supported formats, previews of very large datasets use cursor-based `page_token` values instead of large `OFFSET` values.
+Row counting, full-dataset search, sample statistics, and EDA run as background jobs that support progress reporting and cancellation.
+
+Feedback shown after Count Rows, EDA, and Atlas operations uses a consistent compact status style that does not distract from surrounding controls.
+
+</details>
+
+<details>
+<summary><strong>LLM Model Profiles for SQL Generation</strong></summary>
+
+Model profiles used for SQL generation are loaded from the `[llm]` section of `local_data_studio.toml`.
+Model names must include an explicit LiteLLM provider prefix such as `openai/`, `anthropic/`, `gemini/`, or `hosted_vllm/`.
+The deprecated `vllm/` prefix is not accepted.
+
+Store credentials in the environment variables referenced by `api_key_env`.
+`provider_options` contains trusted administrator-managed settings.
+It may define values such as `reasoning_effort`, `thinking`, token limits, `top_k`, and `extra_body`.
+Settings that attempt to replace messages, credentials, streaming behavior, tools, multimodal input, or structured responses are rejected.
+
+`OPENAI_MODEL` and `OPENAI_BASE_URL` are no longer Local Data Studio configuration options.
+When starting the Local Data Studio application directly through Uvicorn, specify the same TOML file with `LOCAL_DATA_STUDIO_CONFIG_FILE`.
+
+</details>
+
+<details>
+<summary><strong>EDA Cache</strong></summary>
+
+EDA reports for an entire dataset are stored in `./cache/eda` based on the file fingerprint, row limit, and profile mode.
+A fingerprint is identifying information used to determine whether two inputs refer to the same file state.
+
+Reports generated from SQL query results are stored separately based on the file fingerprint, SQL query, row limit, and profile mode.
+The total EDA cache size is limited to 1 GiB by default. When `EDA_CACHE_MAX_BYTES` is exceeded, the oldest reports are removed first.
+
+For **Run EDA on Query Results**, internal helper columns such as `rn` and `__rowid` are excluded from the report.
+
+</details>
+
+<details>
+<summary><strong>Embedding Atlas Computation and Cache</strong></summary>
+
+An Embedding Atlas job computes embeddings with the selected local encoder model and then reduces those embeddings to two dimensions, so processing may take some time.
+
+Parquet files containing embeddings and two-dimensional coordinates are stored in `./cache/atlas/datasets`.
+An existing cache entry is reused only when all of the following match:
+
+- Dataset fingerprint
+- SQL query
+- Selected column
+- Model
+- Backend
+- Prompt template
+- Model configuration information used to determine backend compatibility
+- Dimensionality reduction method and settings
+
+Columns used for image display preserve their original URL, path, or `{bytes, path}` representation.
+Values converted into encoder input format are stored only in an internal embedding-input column.
+
+`ATLAS_SAMPLE=N` limits the number of rows used for embedding computation, dimensionality reduction, and the cached Parquet file to at most `N` after SQL filtering.
+However, in the current implementation, it does not limit the initial number of rows loaded into the DataFrame.
+
+UMAP supports both `full` and `anchor_transform` modes.
+t-SNE and PCA perform dimensionality reduction over all sampled embeddings together.
+
+Use `ATLAS_TEXT_MAX_CHARS` to limit long text columns and expanded prompts, `ATLAS_EMBEDDING_DTYPE=float16` to reduce embedding memory usage, and `ATLAS_CACHE_MAX_BYTES` to control the total cache size.
+
+</details>
+
+<details>
+<summary><strong>Embedding Model Backend Detection</strong></summary>
+
+Backend compatibility is not inferred from the model name alone.
+Local Data Studio inspects a bounded amount of local model metadata, including:
+
+- `modules.json`
+- `config.json`
+- Tokenizer and processor configuration
+- Pooling configuration
+- Normalization metadata
+
+Sentence Transformers reports one of `native`, `generic_fallback`, `metadata_only`, `unsupported`, or `unknown`.
+Transformers reports one of `direct`, `remote_code`, `backbone_only`, `unsupported`, or `unknown`.
+
+Sentence Transformers `generic_fallback` is available only for text-only Transformers models with a detectable tokenizer.
+Image and multimodal models require a native `modules.json` to run through Sentence Transformers.
+
+As a result, image-only DINOv3 checkpoints can use only the Transformers backend and rely on the model-declared `pooler_output`.
+Qwen3-VL-Embedding models with a native Sentence Transformers pipeline can use both backends.
+
+Only backends for which an executable adapter can be confirmed are selectable.
+`remote_code` is available only when `ATLAS_TRUST_REMOTE_CODE=true` explicitly permits execution of code from the model repository.
+Built-in Transformer, Pooling, and Normalize pipelines are reproduced by the Transformers adapter without importing Python code from the model repository.
+
+</details>
+
+<details>
+<summary><strong>Cache Locations and Invalidation</strong></summary>
+
+Caches are separated by purpose and stored in the following directories:
+
+- `./cache/metadata`
+- `./cache/index`
+- `./cache/stats`
+- `./cache/count`
+- `./cache/search`
+- `./cache/eda`
+- `./cache/atlas`
+
+Embedding Atlas caches are stored under `./cache/atlas`, and Parquet files containing dimensionality-reduced coordinates are stored in `./cache/atlas/datasets`.
+The total EDA report size is controlled by `EDA_CACHE_MAX_BYTES`, while the total Embedding Atlas cache size is controlled by `ATLAS_CACHE_MAX_BYTES`. When either limit is exceeded, the oldest files in the corresponding cache are removed first.
+
+Caches that use fingerprints are invalidated based on the source file path, size, and modification time.
+Here, invalidation means that an old cache entry is not reused when the source file is considered to have changed.
+
+</details>
+
+## Developer Information
+
+For details about the internal architecture, the roles of the main modules, development startup commands, and implementation-specific considerations, see [IMPLEMENTATION_NOTES.md](IMPLEMENTATION_NOTES.md).
+
+## Contributing
+
+Please use GitHub Issues to report bugs or propose new features.
+
+After changing the code, run pre-commit before committing:
+
+```bash
+# Run automatic formatting, linting, and type checking on all files
+uv run pre-commit run --all-files
+```
+
+To run pre-commit without installing it into the project environment, you can also use:
+
+```bash
+uvx pre-commit run --all-files
+```
+
+These commands primarily run the following checks:
+
+- `uv run ruff format` or `uvx ruff format`: Automatically formats the code.
+- `uv run ruff check` or `uvx ruff check`: Checks the code for lint errors.
+- `uv run ty check` or `uvx ty check`: Checks for type inconsistencies.
+
+Ruff applies Google-style docstrings based on PEP 257 to both application and test code.
+For public APIs, document constraints, exceptions, side effects, and ownership semantics that are not clear from types and names alone.
+For private implementation details, do not add docstrings that merely restate what the code does.
+
+Resolve all reported errors before committing.
+
+## Acknowledgments
+
+- [Dataset Viewer (Hugging Face)](https://github.com/huggingface/dataset-viewer): Used as a reference for UI and feature design.
+- [YData Profiling](https://github.com/ydataai/ydata-profiling): Used to generate EDA reports.
 - [Embedding Atlas](https://github.com/apple/embedding-atlas): Used for interactive embedding visualization.
 
 ## License
