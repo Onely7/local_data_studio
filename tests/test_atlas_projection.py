@@ -14,6 +14,7 @@ from local_data_studio.server.atlas_components.projection import project_atlas_f
 from local_data_studio.server.atlas_components.reducers import reduce_embeddings
 from local_data_studio.server.atlas_components.sampling import sample_atlas_frame
 from local_data_studio.server.config import Settings
+from local_data_studio.server.jobs import JobCancelledError
 
 
 class AtlasSamplingTests(TestCase):
@@ -135,3 +136,87 @@ class AtlasReducerTests(TestCase):
                 create_session.assert_called_once()
                 full_projection.assert_called_once()
                 anchor_projection.assert_not_called()
+
+    def test_full_projection_reports_embedding_batches(self) -> None:
+        """Expose bounded embedding progress instead of remaining at one phase."""
+
+        class RecordingContext:
+            """Collect progress updates from projection orchestration."""
+
+            def __init__(self) -> None:
+                self.updates: list[tuple[float | None, str | None]] = []
+
+            def check_cancelled(self) -> None:
+                """Allow the projection to continue."""
+
+            def update(self, *, progress=None, message=None):  # noqa: ANN001
+                """Record one user-visible progress update."""
+                self.updates.append((progress, message))
+
+        frame = pd.DataFrame({"vector": [[float(index), 1.0, 2.0] for index in range(130)]})
+        options = AtlasOptions(
+            sample=None,
+            host="127.0.0.1",
+            port=5055,
+            batch_size=32,
+            text_embedder=None,
+            image_embedder=None,
+            trust_remote_code=False,
+            projection_method="pca",
+        )
+        context = RecordingContext()
+
+        coordinates = project_atlas_frame(
+            frame,
+            input_column="vector",
+            modality="vector",
+            model_path=Path(__file__),
+            options=options,
+            context=context,
+        )
+
+        self.assertEqual((130, 2), coordinates.values.shape)
+        messages = [message for _, message in context.updates if message]
+        self.assertIn("Creating embeddings: 0/130 rows", messages)
+        self.assertIn("Creating embeddings: 130/130 rows", messages)
+        self.assertIn("Projection coordinates are ready", messages)
+
+    def test_full_projection_checks_cancellation_between_batches(self) -> None:
+        """Abort embedding work at a bounded batch boundary."""
+
+        class CancellingContext:
+            """Cancel after the first embedding batch completes."""
+
+            def __init__(self) -> None:
+                self.checks = 0
+
+            def check_cancelled(self) -> None:
+                """Raise once projection work reaches a later boundary."""
+                self.checks += 1
+                if self.checks >= 4:
+                    raise JobCancelledError("job was cancelled")
+
+            def update(self, *, progress=None, message=None):  # noqa: ANN001
+                """Ignore progress while testing cancellation."""
+
+        frame = pd.DataFrame({"vector": [[float(index), 1.0] for index in range(100)]})
+        options = AtlasOptions(
+            sample=None,
+            host="127.0.0.1",
+            port=5055,
+            batch_size=16,
+            text_embedder=None,
+            image_embedder=None,
+            trust_remote_code=False,
+            projection_method="pca",
+        )
+
+        with self.assertRaises(JobCancelledError):
+            project_atlas_frame(
+                frame,
+                input_column="vector",
+                modality="vector",
+                model_path=Path(__file__),
+                options=options,
+                context=CancellingContext(),
+            )

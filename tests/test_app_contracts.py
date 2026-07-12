@@ -97,6 +97,9 @@ class ApplicationContractTests(TestCase):
         self.assertIn('<option value="tsne">t-SNE</option>', response.text)
         self.assertIn('<option value="pca">PCA</option>', response.text)
         self.assertIn("projection_method: selectedAtlasProjection()", script)
+        self.assertIn("atlasCancelling: false", script)
+        self.assertIn("Cancellation requested. Waiting for the current Atlas step to stop", script)
+        self.assertIn("const message = job.message", script)
 
     def test_operation_statuses_share_typography_and_eda_rows_are_not_editable(self) -> None:
         """Keep post-action feedback consistent and EDA row limits environment-owned."""

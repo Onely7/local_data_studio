@@ -39,6 +39,7 @@ from local_data_studio.server.atlas import (
 from local_data_studio.server.atlas_cache import prune_cache_dir
 from local_data_studio.server.atlas_components.contracts import AtlasProjectionCoordinates
 from local_data_studio.server.config import BASE_DIR, PACKAGE_DIR
+from local_data_studio.server.jobs import JobCancelledError
 
 VALID_PNG_BYTES = b64decode("iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+/p9sAAAAASUVORK5CYII=")
 
@@ -107,6 +108,8 @@ class AtlasModelDiscoveryTests(TestCase):
 
         self.assertIn("--with", command)
         self.assertIn("local_data_studio.server.atlas_cache_patch", command)
+        self.assertIn("--no-auto-port", command)
+        self.assertNotIn("--auto-port", command)
         self.assertTrue(Path(command[3]).is_absolute())
 
     def test_launch_embedding_atlas_uses_posix_spawn_compatible_popen(self) -> None:
@@ -148,7 +151,10 @@ class AtlasModelDiscoveryTests(TestCase):
                 """Exercise poll behavior."""
                 return None
 
-        with patch("local_data_studio.server.atlas_components.process.subprocess.Popen", return_value=FakeProcess()) as popen:
+        with (
+            patch("local_data_studio.server.atlas_components.process.subprocess.Popen", return_value=FakeProcess()) as popen,
+            patch("local_data_studio.server.atlas_components.process._atlas_url_is_ready", return_value=True) as is_ready,
+        ):
             url, pid = launch_embedding_atlas(["/usr/bin/python3", "-m", "embedding_atlas.cli"], DummyContext())
 
         self.assertEqual("http://127.0.0.1:5055", url)
@@ -156,6 +162,53 @@ class AtlasModelDiscoveryTests(TestCase):
         kwargs = popen.call_args.kwargs
         self.assertFalse(kwargs["close_fds"])
         self.assertNotIn("cwd", kwargs)
+        is_ready.assert_called_with("http://127.0.0.1:5055")
+
+    def test_launch_embedding_atlas_terminates_child_when_cancelled(self) -> None:
+        """Stop the Atlas child promptly after cooperative cancellation."""
+
+        class CancelledContext:
+            """Raise cancellation at the first child supervision boundary."""
+
+            def check_cancelled(self) -> None:
+                """Simulate an already-cancelled job."""
+                raise JobCancelledError("job was cancelled")
+
+            def update(self, *, progress=None, message=None):  # noqa: ANN001
+                """Ignore progress from the child supervisor."""
+                return None
+
+        class FakeProcess:
+            """Record whether child termination was requested."""
+
+            stdout = None
+            returncode = None
+            pid = 12345
+
+            def __init__(self) -> None:
+                """Create a running fake process."""
+                self.terminated = False
+
+            def poll(self) -> None:
+                """Report that the process is still running."""
+                return None
+
+            def terminate(self) -> None:
+                """Record graceful termination."""
+                self.terminated = True
+
+            def wait(self, timeout=None):  # noqa: ANN001
+                """Report successful child shutdown."""
+                return 0
+
+        process = FakeProcess()
+        with (
+            patch("local_data_studio.server.atlas_components.process.spawn_embedding_atlas", return_value=process),
+            self.assertRaises(JobCancelledError),
+        ):
+            launch_embedding_atlas(["/usr/bin/python3", "-m", "embedding_atlas.cli"], CancelledContext())
+
+        self.assertTrue(process.terminated)
 
     def test_embedding_atlas_env_can_import_local_server_package(self) -> None:
         """Verify that embedding atlas env can import local server package."""
@@ -1105,7 +1158,7 @@ class AtlasModelDiscoveryTests(TestCase):
                 options=options,
             )
 
-        self.assertEqual([2, 1, 1], calls)
+        self.assertEqual([1, 1, 1, 1], calls)
         self.assertEqual((4, 2), projected.values.shape)
         factory.assert_called_once()
 
@@ -1166,9 +1219,33 @@ class AtlasModelDiscoveryTests(TestCase):
             image_embedder=None,
             trust_remote_code=False,
         )
-        with patch("local_data_studio.server.atlas_components.service.ATLAS_PORT_STATE", {"next": 5055}):
+        with (
+            patch("local_data_studio.server.atlas_components.ports.ATLAS_PORT_STATE", {}),
+            patch("local_data_studio.server.atlas_components.ports._port_is_available", return_value=True),
+        ):
             first = reserve_atlas_start_port(options)
             second = reserve_atlas_start_port(options)
 
         self.assertEqual(5055, first.port)
         self.assertEqual(5056, second.port)
+
+    def test_reserve_atlas_start_port_skips_browser_restricted_ports(self) -> None:
+        """Never expose an Atlas link on Chromium's blocked SIP ports."""
+        options = AtlasOptions(
+            sample=None,
+            host="127.0.0.1",
+            port=5059,
+            batch_size=None,
+            text_embedder=None,
+            image_embedder=None,
+            trust_remote_code=False,
+        )
+        with (
+            patch("local_data_studio.server.atlas_components.ports.ATLAS_PORT_STATE", {}),
+            patch("local_data_studio.server.atlas_components.ports._port_is_available", return_value=True),
+        ):
+            first = reserve_atlas_start_port(options)
+            second = reserve_atlas_start_port(options)
+
+        self.assertEqual(5059, first.port)
+        self.assertEqual(5062, second.port)

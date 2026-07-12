@@ -45,6 +45,7 @@ const state = {
   edaJobKind: "",
   atlasJobId: null,
   atlasJobKind: "",
+  atlasCancelling: false,
   atlasUrl: "",
   embedderModels: [],
   llmModels: [],
@@ -590,7 +591,8 @@ async function waitForJob(jobId, options = {}) {
 
 function formatJobProgress(job, fallback) {
   if (Number.isFinite(job.progress)) {
-    return `${fallback} ${Math.round(job.progress * 100)}%`;
+    const message = job.message ? ` · ${job.message}` : "";
+    return `${fallback} ${Math.round(job.progress * 100)}%${message}`;
   }
   return job.message || fallback;
 }
@@ -1760,6 +1762,7 @@ async function selectFile(fileName) {
   state.edaJobKind = "";
   state.atlasJobId = null;
   state.atlasJobKind = "";
+  state.atlasCancelling = false;
   state.atlasUrl = "";
   closeImageOverlay();
   closeJsonOverlay();
@@ -2093,20 +2096,25 @@ function setAtlasButtonsRunning(kind) {
   const model = selectedAtlasModelMetadata();
   const backend = selectedAtlasBackend();
   const ready = hasColumn && Boolean(model) && atlasBackendAvailable(model, backend);
+  const cancelling = Boolean(kind && state.atlasCancelling);
   if (elements.runAtlas) {
-    const enabled = kind ? kind === "all" : ready;
+    const enabled = kind ? kind === "all" && !cancelling : ready;
     elements.runAtlas.disabled = !enabled;
     elements.runAtlas.classList.toggle("atlas-button-disabled", !enabled);
     elements.runAtlas.classList.toggle("atlas-button-ready", enabled);
-    elements.runAtlas.textContent = kind === "all" ? "Cancel Atlas" : "Run Atlas";
+    elements.runAtlas.textContent =
+      kind === "all" ? (cancelling ? "Cancelling..." : "Cancel Atlas") : "Run Atlas";
   }
   if (elements.runAtlasQuery) {
-    const enabled = kind ? kind === "query" : ready;
+    const enabled = kind ? kind === "query" && !cancelling : ready;
     elements.runAtlasQuery.disabled = !enabled;
     elements.runAtlasQuery.classList.toggle("atlas-button-disabled", !enabled);
     elements.runAtlasQuery.classList.toggle("atlas-button-ready", enabled);
-    elements.runAtlasQuery.textContent =
-      kind === "query" ? "Cancel Query Atlas" : "Run Atlas on Query Results";
+    elements.runAtlasQuery.textContent = kind === "query"
+      ? cancelling
+        ? "Cancelling..."
+        : "Cancel Query Atlas"
+      : "Run Atlas on Query Results";
   }
 }
 
@@ -2121,12 +2129,21 @@ function atlasProjectionLabel(method) {
 async function runAtlasJob(kind) {
   if (!state.file || !elements.runAtlas) return;
   if (state.atlasJobId) {
-    await cancelJob(state.atlasJobId);
-    state.atlasJobId = null;
-    state.atlasJobKind = "";
-    setAtlasButtonsRunning("");
+    const jobId = state.atlasJobId;
+    state.atlasCancelling = true;
+    setAtlasButtonsRunning(state.atlasJobKind);
     if (elements.atlasStatus) {
-      elements.atlasStatus.textContent = "Atlas job cancelled.";
+      elements.atlasStatus.textContent =
+        "Cancellation requested. Waiting for the current Atlas step to stop...";
+    }
+    try {
+      await cancelJob(jobId);
+    } catch (err) {
+      state.atlasCancelling = false;
+      setAtlasButtonsRunning(state.atlasJobKind);
+      if (elements.atlasStatus) {
+        elements.atlasStatus.textContent = extractErrorMessage(err);
+      }
     }
     return;
   }
@@ -2184,6 +2201,7 @@ async function runAtlasJob(kind) {
   }
 
   state.atlasJobKind = kind;
+  state.atlasCancelling = false;
   setAtlasButtonsRunning(kind);
   if (elements.atlasStatus) {
     elements.atlasStatus.textContent =
@@ -2242,6 +2260,7 @@ async function runAtlasJob(kind) {
   } finally {
     state.atlasJobId = null;
     state.atlasJobKind = "";
+    state.atlasCancelling = false;
     setAtlasButtonsRunning("");
   }
 }
