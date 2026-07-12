@@ -18,6 +18,28 @@ host = "127.0.0.1"
 port = 8000
 reload = false
 
+# These values replace the matching environment variables in .env. The TOML
+# key uses lowercase snake_case: EDA_ROW_LIMIT becomes eda_row_limit, for
+# example. Omit a key to use the value from .env or the application default.
+[settings]
+allow_delete_data = false
+
+eda_row_limit = 100000
+eda_cell_max_chars = 4096
+eda_nested_policy = "stringify"
+eda_cache_max_bytes = 1073741824
+
+atlas_host = "127.0.0.1"
+atlas_port = 5055
+atlas_sample = 0
+atlas_batch_size = 0
+atlas_cache_max_bytes = 10737418240
+atlas_text_max_chars = 4096
+atlas_embedding_dtype = "float32"
+atlas_umap_projection_mode = "full"
+atlas_umap_anchor_sample = 10000
+atlas_trust_remote_code = false
+
 # SQL generation is optional. Add, remove, or edit profiles below to match the
 # providers you use. api_key_env names a variable in your shell or .env file.
 [llm]
@@ -28,10 +50,11 @@ timeout_seconds = 60
 id = "openai-main"
 label = "OpenAI"
 model = [
-  "openai/gpt-5.2",
+  "openai/gpt-5.6-luna",
+  "openai/gpt-5.5",
   "openai/gpt-5.4",
-  "openai/gpt-5.4-nano-2026-03-17",
   "openai/gpt-5.4-mini-2026-03-17",
+  "openai/gpt-5.4-nano-2026-03-17",
 ]
 api_key_env = "OPENAI_API_KEY"
 provider_options = { max_completion_tokens = 400 }
@@ -40,7 +63,7 @@ provider_options = { max_completion_tokens = 400 }
 # [[llm.models]]
 # id = "claude-main"
 # label = "Claude Sonnet"
-# model = ["anthropic/claude-sonnet-4-5-20250929", "anthropic/claude-haiku-4-5-20251001"]
+# model = ["anthropic/claude-sonnet-5", "anthropic/claude-haiku-4-5"]
 # api_key_env = "ANTHROPIC_API_KEY"
 # provider_options = { max_tokens = 400 }
 
@@ -48,13 +71,13 @@ provider_options = { max_completion_tokens = 400 }
 # [[llm.models]]
 # id = "gemini-main"
 # label = "Gemini Flash"
-# model = ["gemini/gemini-2.5-flash", "gemini/gemini-2.5-pro"]
+# model = ["gemini/gemini-3.5-flash", "gemini/gemini-3.1-flash-lite"]
 # api_key_env = "GEMINI_API_KEY"
 
 # Example: vLLM OpenAI-compatible server. Use hosted_vllm/, not vllm/.
 # [[llm.models]]
 # id = "local-qwen"
 # label = "Local Qwen"
-# model = ["hosted_vllm/Qwen/Qwen3-8B", "hosted_vllm/Qwen/Qwen3-14B"]
+# model = ["hosted_vllm/Qwen/Qwen3.6-35B-A3B", "hosted_vllm/Qwen/Qwen3.5-4B", "hosted_vllm/Qwen/Qwen3.5-2B", "hosted_vllm/Qwen/Qwen3.5-0.8B"]
 # base_url = "http://127.0.0.1:8000/v1"
 # provider_options = { temperature = 0, extra_body = { top_k = 20 } }

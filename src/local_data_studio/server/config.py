@@ -8,6 +8,8 @@ from pathlib import Path
 from pydantic import Field, field_validator, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
+from ..runtime_config import apply_settings_environment, read_runtime_config
+
 PACKAGE_DIR: Path = Path(__file__).resolve().parents[1]
 BASE_DIR: Path = Path(os.environ.get("LOCAL_DATA_STUDIO_WORKSPACE_DIR") or Path.cwd()).expanduser().resolve()
 ENV_FILE: Path = Path(os.environ.get("LOCAL_DATA_STUDIO_ENV_FILE") or BASE_DIR / ".env").expanduser().resolve()
@@ -123,6 +125,10 @@ class Settings(BaseSettings):
         return self
 
 
+# This also covers direct Uvicorn/ASGI startup with LOCAL_DATA_STUDIO_CONFIG_FILE.
+# CLI startup applies the same settings before importing this module.
+RUNTIME_CONFIG, _ = read_runtime_config(None)
+apply_settings_environment(RUNTIME_CONFIG)
 SETTINGS = Settings()
 
 DATA_FILE_ENV: str | None = SETTINGS.data_file
