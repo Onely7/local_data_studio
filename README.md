@@ -199,6 +199,8 @@ cp local_data_studio.example.toml local_data_studio.toml
 Store any API keys in `.env` or your shell environment. The `api_key_env` setting in each model profile specifies the name of the credential variable to use.
 The `model` setting accepts either one LiteLLM model string or a list of model strings from the same provider. A list shares that profile's credentials, endpoint, timeout, and `provider_options`; each model appears separately in the SQL Console selector. When `default_model` names the profile, its first listed model is selected by default.
 
+The `[settings]` section configures EDA, Embedding Atlas, and source-file deletion without using `.env`. It uses lowercase snake_case names corresponding to the environment variables described below: for example, `EDA_ROW_LIMIT` becomes `eda_row_limit`, and `ALLOW_DELETE_DATA` becomes `allow_delete_data`. The template lists every supported setting. Omit a key to use the value from `.env` or the application default.
+
 Start the application with a configuration file as follows:
 
 ```bash
@@ -215,7 +217,9 @@ Items higher in the list take priority over those below them.
 5. Workspace-based defaults
 6. Current-working-directory-based defaults
 
-### Environment Variables
+### Environment Variables and TOML Settings
+
+All variables in the following sections can also be set in the TOML `[settings]` section using the lowercase snake_case form. Command-line options and OS environment variables take precedence over TOML, and TOML takes precedence over `.env`.
 
 #### Data and Paths
 
@@ -296,7 +300,7 @@ Generated reports are stored in the cache and may be reused when the same report
 
 Select **Run EDA on Query Results** to generate a report from the current results displayed in the SQL console.
 
-Set the row limit with `EDA_ROW_LIMIT` in the environment or `.env` file.
+Set the row limit with `eda_row_limit` in `[settings]`, or with `EDA_ROW_LIMIT` in the environment or `.env` file.
 This value cannot be changed from the UI.
 Any integer greater than or equal to `1` is accepted; use `-1` to remove the row limit.
 
@@ -409,7 +413,7 @@ It may define values such as `reasoning_effort`, `thinking`, token limits, `top_
 Settings that attempt to replace messages, credentials, streaming behavior, tools, multimodal input, or structured responses are rejected.
 
 `OPENAI_MODEL` and `OPENAI_BASE_URL` are no longer Local Data Studio configuration options.
-When starting the Local Data Studio application directly through Uvicorn, specify the same TOML file with `LOCAL_DATA_STUDIO_CONFIG_FILE`.
+When starting the Local Data Studio application directly through Uvicorn, specify the same TOML file with `LOCAL_DATA_STUDIO_CONFIG_FILE`. Its `[settings]` and `[llm]` sections are both applied.
 
 </details>
 

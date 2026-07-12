@@ -10,7 +10,7 @@ from typing import Any
 
 import uvicorn
 
-from .runtime_config import CONFIG_FILE_ENV, config_section, read_runtime_config
+from .runtime_config import CONFIG_FILE_ENV, apply_settings_environment, config_section, read_runtime_config
 
 PATH_ENV_KEYS: dict[str, str] = {
     "workspace_dir": "LOCAL_DATA_STUDIO_WORKSPACE_DIR",
@@ -87,6 +87,7 @@ def configure_runtime_environment(args: argparse.Namespace) -> tuple[str, int, b
         os.environ[CONFIG_FILE_ENV] = str(config_path)
     workspace_dir = _workspace_from(args, config, config_path)
     _apply_config_environment(config, workspace_dir)
+    apply_settings_environment(config)
 
     _set_path_env("LOCAL_DATA_STUDIO_WORKSPACE_DIR", str(workspace_dir), overwrite=bool(args.workspace_dir))
     _set_path_env("LOCAL_DATA_STUDIO_ENV_FILE", args.env_file)
