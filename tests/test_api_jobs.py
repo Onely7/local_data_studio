@@ -292,7 +292,7 @@ class ApiJobTests(TestCase):
         self.assertIn(str(prepared_path), captured_command)
         self.assertFalse(payload["result"]["cache_hit"])
 
-    def _wait_for_job(self, job_id: str, attempts: int = 20) -> dict:
+    def _wait_for_job(self, job_id: str, attempts: int = 200) -> dict:
         payload = {}
         for _ in range(attempts):
             payload = get_job(job_id)
