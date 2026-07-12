@@ -157,8 +157,7 @@ def _resolve_backend(
     capabilities: ModelCapabilities,
     options: AtlasOptions,
 ) -> BackendName:
-    legacy = options.image_embedder if modality == "image" else options.text_embedder
-    selected = requested or legacy or capabilities.default_backend
+    selected = requested or capabilities.default_backend
     if selected not in {"transformers", "sentence-transformers"}:
         raise HTTPException(status_code=400, detail="no supported embedding backend is available for this model")
     backend = cast(BackendName, selected)

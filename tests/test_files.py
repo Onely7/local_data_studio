@@ -36,6 +36,28 @@ class DatasetDiscoveryTests(TestCase):
 
             self.assertEqual([keep_file], files)
 
+    def test_discover_dataset_files_excludes_configured_files(self) -> None:
+        """Verify that individual dataset files are skipped without pruning siblings."""
+        with TemporaryDirectory() as tmpdir:
+            data_root = Path(tmpdir).resolve()
+            keep_file = data_root / "keep.csv"
+            excluded_root_file = data_root / "omit.jsonl"
+            nested_dir = data_root / "nested"
+            excluded_nested_file = nested_dir / "hidden.parquet"
+            nested_keep_file = nested_dir / "keep.tsv"
+            nested_dir.mkdir()
+            for path in (keep_file, excluded_root_file, excluded_nested_file, nested_keep_file):
+                path.write_text("value\n1\n", encoding="utf-8")
+
+            files = discover_dataset_files(
+                data_root,
+                None,
+                [],
+                [data_root / "omit.jsonl", data_root / "nested" / "hidden.parquet"],
+            )
+
+            self.assertEqual([keep_file, nested_keep_file], files)
+
     def test_resolve_data_file_uses_discovered_name_allowlist(self) -> None:
         """Verify that resolve data file uses discovered name allowlist."""
         with TemporaryDirectory() as tmpdir:
@@ -47,9 +69,11 @@ class DatasetDiscoveryTests(TestCase):
                 patch("local_data_studio.server.files.DATA_ROOT", data_root),
                 patch("local_data_studio.server.files.SINGLE_FILE", None),
                 patch("local_data_studio.server.files.VIS_EXCLUDE_PATHS", []),
+                patch("local_data_studio.server.files.VIS_EXCLUDE_FILE_PATHS", [dataset]),
             ):
                 refresh_dataset_file_catalog()
-                self.assertEqual(dataset, resolve_data_file("example.jsonl"))
+                with self.assertRaises(HTTPException):
+                    resolve_data_file("example.jsonl")
                 with self.assertRaises(HTTPException):
                     resolve_data_file("../outside.jsonl")
 

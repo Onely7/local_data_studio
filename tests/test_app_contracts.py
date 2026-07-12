@@ -136,3 +136,10 @@ class ApplicationContractTests(TestCase):
             self.assertIn("backends", model)
             self.assertIn("default_backend", model)
             self.assertIn("capability_fingerprint", model)
+
+    def test_config_exposes_dataset_exclusion_settings(self) -> None:
+        """Keep directory and individual-file discovery exclusions observable to clients."""
+        payload = TestClient(app).get("/api/config").json()
+
+        self.assertIn("vis_exclude_dirs", payload)
+        self.assertIn("vis_exclude_files", payload)

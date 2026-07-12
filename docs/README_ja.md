@@ -57,6 +57,7 @@ data_dir = "/Users/me/datasets"
 cache_dir = "/Users/me/.cache/local-data-studio"
 models_dir = "/Users/me/models/embedder"
 file_serve_roots = ["/Users/me/datasets", "/Users/me/images"]
+vis_exclude_files = ["/Users/me/datasets/archive.csv"]
 
 [server]
 host = "127.0.0.1"
@@ -100,6 +101,7 @@ local-data-studio --config /path/to/local_data_studio.toml
    DATA_DIR=/local/data/path  # FIXME: data directory path set here (required)
    FILE_SERVE_ROOTS=""
    VIS_EXCLUDE_DIRS=""
+   VIS_EXCLUDE_FILES=""
 
    # LLM SQL Generation Settings
    OPENAI_API_KEY=""  # FIXME: OpenAI API Key set here
@@ -108,7 +110,6 @@ local-data-studio --config /path/to/local_data_studio.toml
 
    # EDA Settings
    EDA_ROW_LIMIT=50000
-   EDA_PROFILE_MODE=minimal
    EDA_CELL_MAX_CHARS=5000
    EDA_NESTED_POLICY=stringify
    EDA_CACHE_MAX_BYTES=1073741824
@@ -124,8 +125,6 @@ local-data-studio --config /path/to/local_data_studio.toml
    ATLAS_EMBEDDING_DTYPE=float32
    ATLAS_PROJECTION_MODE=full
    ATLAS_ANCHOR_SAMPLE=10000
-   # ATLAS_TEXT_EMBEDDER=sentence-transformers
-   # ATLAS_IMAGE_EMBEDDER=transformers
    ATLAS_TRUST_REMOTE_CODE=false
 
    # Delete Permission
@@ -137,11 +136,11 @@ local-data-studio --config /path/to/local_data_studio.toml
    - `DATA_DIR`: データセットの探索対象ディレクトリです（DATA_FILE を使わない場合は必須）。
    - `FILE_SERVE_ROOTS`: ローカル画像プレビューとして配信を許可するディレクトリをカンマ区切りで指定します。
    - `VIS_EXCLUDE_DIRS`: `DATA_DIR` 配下でデータセット探索から除外するディレクトリをカンマ区切りで指定します。
+   - `VIS_EXCLUDE_FILES`: `DATA_DIR` 配下でデータセット探索から除外するファイルをカンマ区切りで指定します。相対パスは `DATA_DIR` から解決し、絶対パスも指定できます。
    - `OPENAI_API_KEY`: LLM による SQL 生成を有効化するための API Key です。
    - `OPENAI_BASE_URL`: OpenAI 互換 API のエンドポイントです。
    - `OPENAI_MODEL`: 使用する OpenAI モデル名です。
    - `EDA_ROW_LIMIT`: データセット全体と SQL クエリ結果の EDA レポートに使うサーバー側の行数上限です。環境変数または `.env` で指定し、UI からは上書きしません。`1` 以上の整数は上限なく指定でき、`-1` を指定すると行数を制限しません。
-   - `EDA_PROFILE_MODE`: API request で `mode` を省略した場合の fallback です。Web UI は `minimal` を初期選択し、実行ごとに `minimal` または `maximal` を選択できます。`maximal` は詳細な統計を含む代わりに時間がかかります。
    - `EDA_CELL_MAX_CHARS`: EDA で文字列が長い場合の最大表示文字数です。超過分は `... (truncated)` として省略されます。
    - `EDA_NESTED_POLICY`: ネスト型（list/struct/object/binary など）の扱い方です。`stringify` は文字列化して残し、`drop` は該当列を除外します。
    - `EDA_CACHE_MAX_BYTES`: `./cache/eda` に保存する EDA レポート cache 全体の最大容量です。既定値は 1 GiB で、超過時は古いレポートから削除されます。
@@ -154,7 +153,6 @@ local-data-studio --config /path/to/local_data_studio.toml
    - `ATLAS_EMBEDDING_DTYPE`: projection 前の embedding 配列精度です。`float32` または `float16` を指定できます。
    - `ATLAS_PROJECTION_MODE`: projection 方式です。`full` は全 embedding に対して UMAP を実行し、`anchor_transform` は代表サンプルで UMAP を fit して残りを同じ空間へ transform します。
    - `ATLAS_ANCHOR_SAMPLE`: `ATLAS_PROJECTION_MODE=anchor_transform` の場合に UMAP fit に使う行数です。
-   - `ATLAS_TEXT_EMBEDDER` / `ATLAS_IMAGE_EMBEDDER`: 任意の Embedding Atlas embedder backend 名です。
    - `ATLAS_TRUST_REMOTE_CODE`: `true` の場合、Embedding Atlas に `--trust-remote-code` を渡します。
    - `ALLOW_DELETE_DATA`: `false` の場合は実ファイル削除を無効にします（セッション内非表示は可）。
 

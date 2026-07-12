@@ -35,8 +35,7 @@ class AtlasEmbeddingBackend:
     ) -> AtlasEmbeddingBackend:
         """Resolve an available backend without model-name special cases."""
         capabilities = analyze_model_capabilities(model_path, allow_remote_code=options.trust_remote_code)
-        legacy = options.image_embedder if modality == "image" else options.text_embedder
-        selected = options.backend or legacy or capabilities.default_backend
+        selected = options.backend or capabilities.default_backend
         if selected not in {"transformers", "sentence-transformers"}:
             raise ValueError("no supported embedding backend is available")
         backend_name = cast(BackendName, selected)
