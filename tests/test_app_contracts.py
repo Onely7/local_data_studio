@@ -171,7 +171,7 @@ class ApplicationContractTests(TestCase):
         self.assertNotIn("provider_options", serialized)
 
     def test_sql_model_selector_and_request_contract_are_packaged(self) -> None:
-        """Keep model choice server-managed and submit only its profile ID."""
+        """Keep model choice server-managed and submit only its selection ID."""
         client = TestClient(app)
         page = client.get("/").text
         script = client.get("/app.js").text

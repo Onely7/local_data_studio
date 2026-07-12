@@ -65,7 +65,7 @@ def nl_query(payload: NLQueryRequest) -> dict[str, Any]:
     with open_connection() as connection:
         columns = describe_relation(connection, relation, params)
     result = generate_sql_request(prompt, columns, payload.sample, payload.model)
-    return {"sql": result.sql, "model": result.profile_id, "model_label": result.profile_label}
+    return {"sql": result.sql, "model": result.model_id, "model_label": result.model_label}
 
 
 @router.get("/api/count")

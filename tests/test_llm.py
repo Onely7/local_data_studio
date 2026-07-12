@@ -92,7 +92,7 @@ class LiteLlmClientTests(TestCase):
                     provider_options=options,
                 )
                 with patch("local_data_studio.server.llm_client._load_litellm", return_value=fake_litellm):
-                    text = complete_text(profile, [{"role": "user", "content": "SQL"}], default_timeout_seconds=60)
+                    text = complete_text(profile.selection(0), [{"role": "user", "content": "SQL"}], default_timeout_seconds=60)
 
                 self.assertEqual("SELECT * FROM data", text)
                 self.assertEqual(model, captured["model"])
@@ -101,6 +101,35 @@ class LiteLlmClientTests(TestCase):
                 if base_url:
                     self.assertEqual(base_url, captured["base_url"])
                 self.assertEqual(options, profile.provider_options)
+
+    def test_uses_the_model_selected_from_a_profile_list(self) -> None:
+        """Keep the selector's model choice separate from shared profile settings."""
+        captured: dict[str, object] = {}
+
+        def completion(**kwargs):  # noqa: ANN003
+            captured.update(kwargs)
+            return {"choices": [{"message": {"content": "SELECT * FROM data"}}]}
+
+        registry = LlmProfileRegistry.model_validate(
+            {
+                "models": [
+                    {
+                        "id": "openai",
+                        "label": "OpenAI",
+                        "model": ["openai/gpt-5.2", "openai/gpt-5.4-mini"],
+                        "provider_options": {"max_completion_tokens": 400},
+                    }
+                ]
+            }
+        )
+        selection = registry.selection("openai:1")
+        fake_litellm = SimpleNamespace(completion=completion, Timeout=type("Timeout", (Exception,), {}))
+
+        with patch("local_data_studio.server.llm_client._load_litellm", return_value=fake_litellm):
+            complete_text(selection, [{"role": "user", "content": "SQL"}], default_timeout_seconds=60)
+
+        self.assertEqual("openai/gpt-5.4-mini", captured["model"])
+        self.assertEqual(400, captured["max_completion_tokens"])
 
     def test_resolves_api_key_without_exposing_its_environment_name(self) -> None:
         """Read a configured credential only when building the provider call."""
@@ -117,7 +146,7 @@ class LiteLlmClientTests(TestCase):
             profile = LlmModelProfile(id="keyed", label="Keyed", model="openai/model", api_key_env=name)
             fake_litellm = SimpleNamespace(completion=completion, Timeout=type("Timeout", (Exception,), {}))
             with patch("local_data_studio.server.llm_client._load_litellm", return_value=fake_litellm):
-                complete_text(profile, [{"role": "user", "content": "SQL"}], default_timeout_seconds=60)
+                complete_text(profile.selection(0), [{"role": "user", "content": "SQL"}], default_timeout_seconds=60)
             self.assertEqual("secret-value", captured["api_key"])
         finally:
             if original is None:
@@ -147,7 +176,7 @@ class LiteLlmClientTests(TestCase):
                 patch("local_data_studio.server.llm_client._load_litellm", return_value=fake_litellm),
                 self.assertRaises(HTTPException) as raised,
             ):
-                complete_text(profile, [{"role": "user", "content": "SQL"}], default_timeout_seconds=60)
+                complete_text(profile.selection(0), [{"role": "user", "content": "SQL"}], default_timeout_seconds=60)
             self.assertEqual(expected_status, raised.exception.status_code)
             self.assertNotIn("contains-secret", str(raised.exception.detail))
 
@@ -159,7 +188,7 @@ class LiteLlmClientTests(TestCase):
             patch("local_data_studio.server.llm_client._load_litellm", return_value=fake_litellm),
             self.assertRaises(HTTPException) as raised,
         ):
-            complete_text(profile, [{"role": "user", "content": "SQL"}], default_timeout_seconds=60)
+            complete_text(profile.selection(0), [{"role": "user", "content": "SQL"}], default_timeout_seconds=60)
         self.assertEqual(502, raised.exception.status_code)
 
 
@@ -172,5 +201,5 @@ class SqlGenerationServiceTests(TestCase):
         with patch("local_data_studio.server.llm_service.complete_text", return_value="```sql\nSELECT * FROM data;\n```"):
             result = generate_sql_request("all rows", [{"name": "id", "type": "INTEGER"}], None, registry=registry)
         self.assertEqual("SELECT * FROM data", result.sql)
-        self.assertEqual("gemini", result.profile_id)
-        self.assertEqual("Gemini", result.profile_label)
+        self.assertEqual("gemini", result.model_id)
+        self.assertEqual("Gemini", result.model_label)

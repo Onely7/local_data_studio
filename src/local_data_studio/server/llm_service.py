@@ -15,8 +15,8 @@ class SqlGenerationResult:
     """Validated SQL and the server-side profile that generated it."""
 
     sql: str
-    profile_id: str
-    profile_label: str
+    model_id: str
+    model_label: str
 
 
 def generate_sql_request(
@@ -29,11 +29,11 @@ def generate_sql_request(
 ) -> SqlGenerationResult:
     """Resolve a profile, call LiteLLM, and validate its SQL text output."""
     selected_registry = registry or LLM_PROFILES
-    profile = selected_registry.profile(model_id)
+    selection = selected_registry.selection(model_id)
     messages = build_sql_generation_messages(prompt, schema, sample)
-    text = complete_text(profile, messages, default_timeout_seconds=selected_registry.timeout_seconds)
+    text = complete_text(selection, messages, default_timeout_seconds=selected_registry.timeout_seconds)
     return SqlGenerationResult(
         sql=clean_generated_sql(text),
-        profile_id=profile.id,
-        profile_label=profile.label,
+        model_id=selection.id,
+        model_label=selection.label,
     )
