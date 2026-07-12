@@ -153,7 +153,7 @@ class AtlasModelDiscoveryTests(TestCase):
 
         with (
             patch("local_data_studio.server.atlas_components.process.subprocess.Popen", return_value=FakeProcess()) as popen,
-            patch("local_data_studio.server.atlas_components.process._atlas_url_is_ready", return_value=True) as is_ready,
+            patch("local_data_studio.server.atlas_components.process._atlas_http_is_ready", return_value=True) as is_ready,
         ):
             url, pid = launch_embedding_atlas(["/usr/bin/python3", "-m", "embedding_atlas.cli"], DummyContext())
 
@@ -162,7 +162,7 @@ class AtlasModelDiscoveryTests(TestCase):
         kwargs = popen.call_args.kwargs
         self.assertFalse(kwargs["close_fds"])
         self.assertNotIn("cwd", kwargs)
-        is_ready.assert_called_with("http://127.0.0.1:5055")
+        self.assertEqual("http://127.0.0.1:5055", is_ready.call_args.args[1])
 
     def test_launch_embedding_atlas_terminates_child_when_cancelled(self) -> None:
         """Stop the Atlas child promptly after cooperative cancellation."""
@@ -203,12 +203,13 @@ class AtlasModelDiscoveryTests(TestCase):
 
         process = FakeProcess()
         with (
-            patch("local_data_studio.server.atlas_components.process.spawn_embedding_atlas", return_value=process),
+            patch("local_data_studio.server.atlas_components.process.spawn_embedding_atlas", return_value=process) as spawn,
             self.assertRaises(JobCancelledError),
         ):
             launch_embedding_atlas(["/usr/bin/python3", "-m", "embedding_atlas.cli"], CancelledContext())
 
-        self.assertTrue(process.terminated)
+        spawn.assert_not_called()
+        self.assertFalse(process.terminated)
 
     def test_embedding_atlas_env_can_import_local_server_package(self) -> None:
         """Verify that embedding atlas env can import local server package."""

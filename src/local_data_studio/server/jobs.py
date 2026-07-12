@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import threading
+import time
 import uuid
 from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass, field
@@ -79,7 +80,9 @@ class JobStore:
         """Create a registry and a bounded worker pool owned by this store."""
         self._executor = ThreadPoolExecutor(max_workers=max_workers, thread_name_prefix="local-data-studio-job")
         self._lock = threading.RLock()
+        self._condition = threading.Condition(self._lock)
         self._jobs: dict[str, JobRecord] = {}
+        self._accepting = True
 
     def submit(self, kind: str, work: JobWork) -> JobRecord:
         """Register work and return its live mutable record immediately.
@@ -89,6 +92,8 @@ class JobStore:
         job_id = uuid.uuid4().hex
         record = JobRecord(job_id=job_id, kind=kind)
         with self._lock:
+            if not self._accepting:
+                raise RuntimeError("job store is shutting down")
             self._jobs[job_id] = record
         self._executor.submit(self._run, job_id, work)
         return record
@@ -125,6 +130,38 @@ class JobStore:
             record.updated_at = _utc_now_iso()
             return record
 
+    def begin_shutdown(self) -> None:
+        """Stop accepting work and request cancellation for every active job."""
+        with self._condition:
+            self._accepting = False
+            for record in self._jobs.values():
+                if record.status not in {"succeeded", "failed", "cancelled"}:
+                    record.cancel_requested = True
+                    if record.status == "queued":
+                        record.status = "cancelled"
+                        record.message = "job was cancelled"
+                    else:
+                        record.message = "Cancellation requested"
+                    record.updated_at = _utc_now_iso()
+            self._condition.notify_all()
+
+    def wait_for_idle(self, timeout: float) -> bool:
+        """Wait up to ``timeout`` seconds for all running work to finish."""
+        deadline = time.monotonic() + max(0.0, timeout)
+        with self._condition:
+            while any(record.status in {"queued", "running"} for record in self._jobs.values()):
+                remaining = deadline - time.monotonic()
+                if remaining <= 0:
+                    return False
+                self._condition.wait(timeout=remaining)
+            return True
+
+    def shutdown(self, *, wait_timeout: float = 10.0) -> None:
+        """Cancel active jobs and release executor resources after a bounded wait."""
+        self.begin_shutdown()
+        self.wait_for_idle(wait_timeout)
+        self._executor.shutdown(wait=False, cancel_futures=True)
+
     def is_cancel_requested(self, job_id: str) -> bool:
         """Return whether a job is missing or has a cancellation request."""
         with self._lock:
@@ -146,33 +183,42 @@ class JobStore:
             record.updated_at = _utc_now_iso()
 
     def _set_running(self, job_id: str) -> None:
-        with self._lock:
+        with self._condition:
             record = self._jobs[job_id]
+            if record.cancel_requested:
+                record.status = "cancelled"
+                record.message = "job was cancelled"
+                record.updated_at = _utc_now_iso()
+                self._condition.notify_all()
+                return
             record.status = "running"
             record.progress = 0.0
             record.updated_at = _utc_now_iso()
 
     def _set_succeeded(self, job_id: str, result: dict[str, Any]) -> None:
-        with self._lock:
+        with self._condition:
             record = self._jobs[job_id]
             record.status = "succeeded"
             record.progress = 1.0
             record.result = result
             record.updated_at = _utc_now_iso()
+            self._condition.notify_all()
 
     def _set_failed(self, job_id: str, error: str) -> None:
-        with self._lock:
+        with self._condition:
             record = self._jobs[job_id]
             record.status = "failed"
             record.error = error
             record.updated_at = _utc_now_iso()
+            self._condition.notify_all()
 
     def _set_cancelled(self, job_id: str, message: str) -> None:
-        with self._lock:
+        with self._condition:
             record = self._jobs[job_id]
             record.status = "cancelled"
             record.message = message
             record.updated_at = _utc_now_iso()
+            self._condition.notify_all()
 
 
 JOB_STORE = JobStore()

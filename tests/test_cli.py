@@ -29,6 +29,7 @@ SETTINGS_ENV_NAMES = {
     "ATLAS_CACHE_MAX_BYTES",
     "ATLAS_EMBEDDING_DTYPE",
     "ATLAS_HOST",
+    "ATLAS_MAX_INSTANCES",
     "ATLAS_PORT",
     "ATLAS_SAMPLE",
     "ATLAS_TEXT_MAX_CHARS",
@@ -87,8 +88,9 @@ eda_cell_max_chars = 4096
 eda_nested_policy = "drop"
 eda_cache_max_bytes = 2147483648
 allow_delete_data = false
-atlas_host = "0.0.0.0"
+atlas_host = "localhost"
 atlas_port = 6060
+atlas_max_instances = 6
 atlas_sample = 5000
 atlas_batch_size = 32
 atlas_cache_max_bytes = 4294967296
@@ -131,6 +133,7 @@ atlas_trust_remote_code = true
             self.assertEqual("drop", os.environ["EDA_NESTED_POLICY"])
             self.assertEqual("false", os.environ["ALLOW_DELETE_DATA"])
             self.assertEqual("6060", os.environ["ATLAS_PORT"])
+            self.assertEqual("6", os.environ["ATLAS_MAX_INSTANCES"])
             self.assertEqual("float16", os.environ["ATLAS_EMBEDDING_DTYPE"])
             self.assertEqual("anchor_transform", os.environ["ATLAS_UMAP_PROJECTION_MODE"])
             self.assertEqual("true", os.environ["ATLAS_TRUST_REMOTE_CODE"])

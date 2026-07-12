@@ -1,14 +1,16 @@
 """Background job API endpoints."""
 
-from typing import Any
+from typing import Any, cast
 
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, HTTPException, Request
 
+from ..atlas_components.runtime import AtlasRuntime
 from ..cache import count_cache_path, search_cache_path
+from ..config import ATLAS_MAX_INSTANCES
 from ..db import normalize_pagination
 from ..deleted_rows import deleted_row_ids_for
 from ..files import resolve_data_file
-from ..jobs import JOB_STORE, JobContext
+from ..jobs import JOB_STORE, JobContext, JobStore
 from ..readers import build_line_index_with_progress, count_rows_with_progress, search_dataset
 from ..sql import execute_query_guarded
 from .schemas import (
@@ -25,10 +27,24 @@ from .schemas import (
 from .services import atlas_service, compute_cached_column_stats, eda_reports_service, load_cached_result, write_cached_result
 
 router = APIRouter()
+DEFAULT_ATLAS_RUNTIME = AtlasRuntime(max_instances=ATLAS_MAX_INSTANCES)
+REQUEST_DEFAULT = cast(Request, None)
+
+
+def _job_store(request: Request | None) -> JobStore:
+    if request is not None:
+        return request.app.state.job_store
+    return JOB_STORE
+
+
+def _atlas_runtime(request: Request | None) -> AtlasRuntime:
+    if request is not None:
+        return request.app.state.atlas_runtime
+    return DEFAULT_ATLAS_RUNTIME
 
 
 @router.post("/api/jobs/count")
-def start_count_job(payload: CountJobRequest) -> dict[str, Any]:
+def start_count_job(payload: CountJobRequest, request: Request = REQUEST_DEFAULT) -> dict[str, Any]:
     """Submit a cancellable row-count job with fingerprinted cache reuse."""
     path = resolve_data_file(payload.file)
     deleted_ids = deleted_row_ids_for(path)
@@ -43,22 +59,22 @@ def start_count_job(payload: CountJobRequest) -> dict[str, Any]:
         write_cached_result(cache_path, result)
         return {**result, "cached": False}
 
-    return JOB_STORE.submit("count", _work).to_response()
+    return _job_store(request).submit("count", _work).to_response()
 
 
 @router.post("/api/jobs/index")
-def start_index_job(payload: IndexJobRequest) -> dict[str, Any]:
+def start_index_job(payload: IndexJobRequest, request: Request = REQUEST_DEFAULT) -> dict[str, Any]:
     """Submit incremental sparse-index construction for a line dataset."""
     path = resolve_data_file(payload.file)
 
     def _work(context: JobContext) -> dict[str, Any]:
         return {"file": payload.file, **build_line_index_with_progress(path, context)}
 
-    return JOB_STORE.submit("index", _work).to_response()
+    return _job_store(request).submit("index", _work).to_response()
 
 
 @router.post("/api/jobs/search")
-def start_search_job(payload: SearchJobRequest) -> dict[str, Any]:
+def start_search_job(payload: SearchJobRequest, request: Request = REQUEST_DEFAULT) -> dict[str, Any]:
     """Submit a cancellable bounded search with fingerprinted cache reuse."""
     path = resolve_data_file(payload.file)
     deleted_ids = deleted_row_ids_for(path)
@@ -75,11 +91,11 @@ def start_search_job(payload: SearchJobRequest) -> dict[str, Any]:
         write_cached_result(cache_path, result)
         return {**result, "cached": False}
 
-    return JOB_STORE.submit("search", _work).to_response()
+    return _job_store(request).submit("search", _work).to_response()
 
 
 @router.post("/api/jobs/query")
-def start_query_job(payload: QueryRequest) -> dict[str, Any]:
+def start_query_job(payload: QueryRequest, request: Request = REQUEST_DEFAULT) -> dict[str, Any]:
     """Submit validated read-only SQL under query resource limits."""
     path = resolve_data_file(payload.file)
 
@@ -93,11 +109,11 @@ def start_query_job(payload: QueryRequest) -> dict[str, Any]:
             context=context,
         )
 
-    return JOB_STORE.submit("query", _work).to_response()
+    return _job_store(request).submit("query", _work).to_response()
 
 
 @router.post("/api/jobs/stats")
-def start_stats_job(payload: StatsJobRequest) -> dict[str, Any]:
+def start_stats_job(payload: StatsJobRequest, request: Request = REQUEST_DEFAULT) -> dict[str, Any]:
     """Submit bounded column sampling with optional cache refresh."""
     path = resolve_data_file(payload.file)
 
@@ -107,11 +123,11 @@ def start_stats_job(payload: StatsJobRequest) -> dict[str, Any]:
         context.update(progress=1.0, message="Stats ready")
         return result
 
-    return JOB_STORE.submit("stats", _work).to_response()
+    return _job_store(request).submit("stats", _work).to_response()
 
 
 @router.post("/api/jobs/eda")
-def start_eda_job(payload: EdaRequest) -> dict[str, Any]:
+def start_eda_job(payload: EdaRequest, request: Request = REQUEST_DEFAULT) -> dict[str, Any]:
     """Submit EDA generation for a bounded dataset sample."""
     path = resolve_data_file(payload.file)
     reports = eda_reports_service()
@@ -126,11 +142,11 @@ def start_eda_job(payload: EdaRequest) -> dict[str, Any]:
             context=context,
         )
 
-    return JOB_STORE.submit("eda", _work).to_response()
+    return _job_store(request).submit("eda", _work).to_response()
 
 
 @router.post("/api/jobs/eda_query")
-def start_eda_query_job(payload: EdaQueryRequest) -> dict[str, Any]:
+def start_eda_query_job(payload: EdaQueryRequest, request: Request = REQUEST_DEFAULT) -> dict[str, Any]:
     """Submit EDA generation for validated SQL query results."""
     path = resolve_data_file(payload.file)
     reports = eda_reports_service()
@@ -146,11 +162,11 @@ def start_eda_query_job(payload: EdaQueryRequest) -> dict[str, Any]:
             context=context,
         )
 
-    return JOB_STORE.submit("eda_query", _work).to_response()
+    return _job_store(request).submit("eda_query", _work).to_response()
 
 
 @router.post("/api/jobs/atlas")
-def start_atlas_job(payload: AtlasRequest) -> dict[str, Any]:
+def start_atlas_job(payload: AtlasRequest, request: Request = REQUEST_DEFAULT) -> dict[str, Any]:
     """Submit embedding and Atlas startup for a dataset column."""
     path = resolve_data_file(payload.file)
     atlas = atlas_service()
@@ -167,13 +183,14 @@ def start_atlas_job(payload: AtlasRequest) -> dict[str, Any]:
             sql=None,
             sample=payload.sample,
             context=context,
+            runtime=_atlas_runtime(request),
         )
 
-    return JOB_STORE.submit("atlas", _work).to_response()
+    return _job_store(request).submit("atlas", _work).to_response()
 
 
 @router.post("/api/jobs/atlas_query")
-def start_atlas_query_job(payload: AtlasQueryRequest) -> dict[str, Any]:
+def start_atlas_query_job(payload: AtlasQueryRequest, request: Request = REQUEST_DEFAULT) -> dict[str, Any]:
     """Submit embedding and Atlas startup for validated SQL results."""
     path = resolve_data_file(payload.file)
     atlas = atlas_service()
@@ -190,24 +207,25 @@ def start_atlas_query_job(payload: AtlasQueryRequest) -> dict[str, Any]:
             sql=payload.sql,
             sample=payload.sample,
             context=context,
+            runtime=_atlas_runtime(request),
         )
 
-    return JOB_STORE.submit("atlas_query", _work).to_response()
+    return _job_store(request).submit("atlas_query", _work).to_response()
 
 
 @router.get("/api/jobs/{job_id}")
-def get_job(job_id: str) -> dict[str, Any]:
+def get_job(job_id: str, request: Request = REQUEST_DEFAULT) -> dict[str, Any]:
     """Return a detached snapshot of a job, or HTTP 404 when unknown."""
-    record = JOB_STORE.get(job_id)
+    record = _job_store(request).get(job_id)
     if record is None:
         raise HTTPException(status_code=404, detail="job not found")
     return record.to_response()
 
 
 @router.post("/api/jobs/{job_id}/cancel")
-def cancel_job(job_id: str) -> dict[str, Any]:
+def cancel_job(job_id: str, request: Request = REQUEST_DEFAULT) -> dict[str, Any]:
     """Request cooperative cancellation, or return HTTP 404 when unknown."""
-    record = JOB_STORE.cancel(job_id)
+    record = _job_store(request).cancel(job_id)
     if record is None:
         raise HTTPException(status_code=404, detail="job not found")
     return record.to_response()

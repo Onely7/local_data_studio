@@ -928,8 +928,12 @@ function atlasBackendAvailable(model, backend) {
 function normalizeAtlasUrl(url) {
   if (!url) return "";
   try {
-    const parsed = new URL(url);
-    if (parsed.protocol !== "http:" && parsed.protocol !== "https:") return "";
+    const parsed = new URL(url, window.location.origin);
+    if (parsed.origin !== window.location.origin) return "";
+    if (parsed.protocol !== window.location.protocol) return "";
+    if (parsed.username || parsed.password) return "";
+    if (!/^\/atlas\/[A-Za-z0-9_-]+\/$/.test(parsed.pathname)) return "";
+    if (parsed.search || parsed.hash) return "";
     return parsed.href;
   } catch (err) {
     return "";
@@ -943,7 +947,7 @@ function openAtlasUrl() {
   if (!url) {
     if (elements.atlasStatus) {
       elements.atlasStatus.textContent =
-        "Atlas is ready, but the Atlas URL is missing. Open http://localhost:5055/ directly.";
+        "Atlas is ready, but its proxy link is invalid. Run Atlas again.";
     }
     return;
   }

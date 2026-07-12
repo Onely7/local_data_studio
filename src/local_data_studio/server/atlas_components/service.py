@@ -19,7 +19,8 @@ from .contracts import AtlasModality, AtlasOptions, AtlasProjectionMethod
 from .dataset import model_label, prepare_atlas_dataset
 from .images import IMAGE_COLUMN_HINTS, is_image_like_value
 from .ports import reserve_atlas_start_port
-from .process import build_atlas_command, launch_embedding_atlas
+from .process import build_atlas_command, start_embedding_atlas
+from .runtime import AtlasCapacityError, AtlasRuntime, AtlasRuntimeClosingError
 
 
 def discover_embedder_models() -> list[dict[str, Any]]:
@@ -74,8 +75,53 @@ def run_atlas_visualization(
     sql: str | None,
     sample: int | None,
     context: JobContext,
+    runtime: AtlasRuntime,
 ) -> dict[str, Any]:
     """Launch Atlas for a selected dataset column or SQL query result."""
+    try:
+        reservation = runtime.reserve_slot()
+    except AtlasCapacityError as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+    except AtlasRuntimeClosingError as exc:
+        raise HTTPException(status_code=503, detail=str(exc)) from exc
+
+    try:
+        return _run_reserved_atlas_visualization(
+            file_name=file_name,
+            path=path,
+            column=column,
+            model=model,
+            backend=backend,
+            prompt=prompt,
+            projection_method=projection_method,
+            sql=sql,
+            sample=sample,
+            context=context,
+            runtime=runtime,
+            reservation=reservation,
+        )
+    finally:
+        runtime.release_slot(reservation)
+
+
+def _run_reserved_atlas_visualization(
+    *,
+    file_name: str,
+    path: Path,
+    column: str,
+    model: str,
+    backend: str | None,
+    prompt: str | None,
+    projection_method: AtlasProjectionMethod,
+    sql: str | None,
+    sample: int | None,
+    context: JobContext,
+    runtime: AtlasRuntime,
+    reservation: str,
+) -> dict[str, Any]:
+    """Run one Atlas job after capacity has been reserved."""
+    runtime.check_open()
+    context.check_cancelled()
     selected_column = column.strip()
     if not selected_column:
         raise HTTPException(status_code=400, detail="column is required")
@@ -121,7 +167,19 @@ def run_atlas_visualization(
     )
     source = "query" if guarded_sql else "dataset"
     context.update(progress=0.96, message=f"Starting Embedding Atlas on port {options.port}")
-    url, pid = launch_embedding_atlas(command, context)
+    launched = start_embedding_atlas(command, context, runtime)
+    runtime.check_open()
+    context.check_cancelled()
+    try:
+        instance = runtime.register(
+            reservation,
+            host=launched.host,
+            port=launched.port,
+            process=launched.process,
+        )
+    except (AtlasRuntimeClosingError, RuntimeError) as exc:
+        runtime.terminate_unregistered(launched.process)
+        raise HTTPException(status_code=503, detail=str(exc)) from exc
     return {
         "file": file_name,
         "column": selected_column,
@@ -130,8 +188,9 @@ def run_atlas_visualization(
         "backend": selected_backend,
         "prompt_applied": normalized_prompt is not None,
         "source": source,
-        "url": url,
-        "pid": pid,
+        "instance_id": instance.instance_id,
+        "url": instance.proxy_path,
+        "pid": instance.pid,
         "sample": options.sample,
         "row_count": prepared.row_count,
         "embedding_dtype": options.embedding_dtype,
