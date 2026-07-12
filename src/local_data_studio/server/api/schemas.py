@@ -2,7 +2,7 @@
 
 from typing import Any, Literal
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, field_validator
 
 
 class QueryRequest(BaseModel):
@@ -29,7 +29,15 @@ class EdaRequest(BaseModel):
     file: str
     sample: int | None = None
     force: bool | None = None
-    mode: str | None = None
+    mode: Literal["minimal", "maximal"] | None = None
+
+    @field_validator("sample")
+    @classmethod
+    def validate_sample(cls, value: int | None) -> int | None:
+        """Accept the unlimited marker or a positive row limit."""
+        if value is None or value == -1 or value >= 1:
+            return value
+        raise ValueError("sample must be -1 or an integer greater than or equal to 1")
 
 
 class EdaQueryRequest(EdaRequest):

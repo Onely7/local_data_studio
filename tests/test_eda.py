@@ -6,10 +6,13 @@ from pathlib import Path
 from unittest.mock import patch
 
 import pandas as pd
+import pytest
+from pydantic import ValidationError
 
 from local_data_studio.server import eda, eda_reports
-from local_data_studio.server.eda import build_eda_report, eda_cache_key, sanitize_eda_dataframe
-from local_data_studio.server.eda_reports import generate_dataset_eda_report
+from local_data_studio.server.config import Settings
+from local_data_studio.server.eda import build_eda_report, eda_cache_key, load_eda_dataframe, sanitize_eda_dataframe
+from local_data_studio.server.eda_reports import EdaReportOptions, generate_dataset_eda_report
 
 
 def test_runtime_dependencies_keep_pkg_resources_available_for_eda() -> None:
@@ -54,6 +57,32 @@ def test_build_eda_report_uses_ydata_minimal_option() -> None:
         build_eda_report(frame, title="Example", minimal=True)
 
     profile_report.assert_called_once_with(frame, title="Example", minimal=True)
+
+
+@pytest.mark.parametrize("row_limit", [1, 50_001, -1])
+def test_eda_row_limit_accepts_positive_values_and_unlimited(row_limit: int) -> None:
+    """Accept any positive environment limit and the explicit unlimited marker."""
+    settings = Settings(_env_file=None, EDA_ROW_LIMIT=row_limit)
+
+    assert settings.default_eda_sample == row_limit
+    assert EdaReportOptions.from_request(sample=row_limit, mode="minimal", force=False).sample == row_limit
+
+
+@pytest.mark.parametrize("row_limit", [0, -2])
+def test_eda_row_limit_rejects_other_non_positive_values(row_limit: int) -> None:
+    """Reject ambiguous or unsupported non-positive EDA row limits."""
+    with pytest.raises(ValidationError, match="EDA_ROW_LIMIT must be -1"):
+        Settings(_env_file=None, EDA_ROW_LIMIT=row_limit)
+
+
+def test_unlimited_eda_loads_the_complete_dataset(tmp_path: Path) -> None:
+    """Omit the SQL limit when EDA_ROW_LIMIT uses the unlimited marker."""
+    dataset = tmp_path / "dataset.csv"
+    dataset.write_text("value\n1\n2\n3\n", encoding="utf-8")
+
+    frame = load_eda_dataframe(dataset, -1, [])
+
+    assert frame["value"].tolist() == [1, 2, 3]
 
 
 def test_eda_reports_use_dedicated_cache_and_prune_oldest(tmp_path: Path) -> None:

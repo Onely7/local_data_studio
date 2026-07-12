@@ -156,6 +156,17 @@ class ApiJobTests(TestCase):
         self.assertEqual("DataFrame", type(dataframe).__name__)
         self.assertFalse(dataframe.empty)
 
+    def test_query_eda_loader_accepts_unlimited_rows(self) -> None:
+        """Verify that query EDA omits its outer limit when explicitly requested."""
+        dataframe = load_query_dataframe_guarded(
+            path=Path.cwd() / "data" / "example.jsonl",
+            sql="SELECT object FROM data",
+            sample=-1,
+            context=None,
+        )
+
+        self.assertEqual(10, len(dataframe))
+
     def test_eda_job_completes_for_dataset_sample(self) -> None:
         """Verify that eda job completes for dataset sample."""
         started = start_eda_job(EdaRequest(file="example.jsonl", sample=100, force=True, mode="minimal"))
