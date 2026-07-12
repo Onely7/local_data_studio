@@ -1,9 +1,11 @@
 """Shared configuration helpers and environment-backed settings."""
 
+from __future__ import annotations
+
 import os
 from pathlib import Path
 
-from pydantic import Field, field_validator
+from pydantic import Field, field_validator, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 PACKAGE_DIR: Path = Path(__file__).resolve().parents[1]
@@ -35,8 +37,10 @@ class Settings(BaseSettings):
     atlas_cache_max_bytes: int = Field(default=10 * 1024 * 1024 * 1024, validation_alias="ATLAS_CACHE_MAX_BYTES")
     atlas_text_max_chars: int = Field(default=4096, validation_alias="ATLAS_TEXT_MAX_CHARS")
     atlas_embedding_dtype: str = Field(default="float32", validation_alias="ATLAS_EMBEDDING_DTYPE")
-    atlas_projection_mode: str = Field(default="full", validation_alias="ATLAS_PROJECTION_MODE")
-    atlas_anchor_sample: int = Field(default=10000, validation_alias="ATLAS_ANCHOR_SAMPLE")
+    atlas_umap_projection_mode: str = Field(default="full", validation_alias="ATLAS_UMAP_PROJECTION_MODE")
+    atlas_umap_anchor_sample: int = Field(default=10000, validation_alias="ATLAS_UMAP_ANCHOR_SAMPLE")
+    legacy_atlas_projection_mode: str | None = Field(default=None, validation_alias="ATLAS_PROJECTION_MODE", exclude=True)
+    legacy_atlas_anchor_sample: int | None = Field(default=None, validation_alias="ATLAS_ANCHOR_SAMPLE", exclude=True)
     atlas_trust_remote_code: bool = Field(default=False, validation_alias="ATLAS_TRUST_REMOTE_CODE")
     file_serve_roots: str | None = Field(
         default=None,
@@ -87,14 +91,39 @@ class Settings(BaseSettings):
             raise ValueError("ATLAS_EMBEDDING_DTYPE must be float32 or float16")
         return normalized
 
-    @field_validator("atlas_projection_mode", mode="before")
+    @field_validator("atlas_sample")
     @classmethod
-    def normalize_atlas_projection_mode(cls, value: str | None) -> str:
+    def validate_atlas_sample(cls, value: int) -> int:
+        """Accept zero for all rows or a positive projection row limit."""
+        if value >= 0:
+            return value
+        raise ValueError("ATLAS_SAMPLE must be greater than or equal to 0")
+
+    @field_validator("atlas_umap_projection_mode", mode="before")
+    @classmethod
+    def normalize_atlas_umap_projection_mode(cls, value: str | None) -> str:
         """Accept full UMAP or shared-space anchor transform projection."""
         normalized = (value or "full").strip().lower().replace("-", "_")
         if normalized not in {"full", "anchor_transform"}:
-            raise ValueError("ATLAS_PROJECTION_MODE must be full or anchor_transform")
+            raise ValueError("ATLAS_UMAP_PROJECTION_MODE must be full or anchor_transform")
         return normalized
+
+    @field_validator("atlas_umap_anchor_sample")
+    @classmethod
+    def validate_atlas_umap_anchor_sample(cls, value: int) -> int:
+        """Require a non-negative UMAP anchor count."""
+        if value >= 0:
+            return value
+        raise ValueError("ATLAS_UMAP_ANCHOR_SAMPLE must be greater than or equal to 0")
+
+    @model_validator(mode="after")
+    def reject_legacy_umap_settings(self) -> Settings:
+        """Reject removed UMAP setting names with explicit migration guidance."""
+        if self.legacy_atlas_projection_mode is not None:
+            raise ValueError("ATLAS_PROJECTION_MODE was removed; use ATLAS_UMAP_PROJECTION_MODE")
+        if self.legacy_atlas_anchor_sample is not None:
+            raise ValueError("ATLAS_ANCHOR_SAMPLE was removed; use ATLAS_UMAP_ANCHOR_SAMPLE")
+        return self
 
 
 SETTINGS = Settings()
@@ -209,6 +238,6 @@ ATLAS_CACHE_DIR.mkdir(parents=True, exist_ok=True)
 ATLAS_CACHE_MAX_BYTES: int = max(0, SETTINGS.atlas_cache_max_bytes)
 ATLAS_TEXT_MAX_CHARS: int = max(0, SETTINGS.atlas_text_max_chars)
 ATLAS_EMBEDDING_DTYPE: str = SETTINGS.atlas_embedding_dtype
-ATLAS_PROJECTION_MODE: str = SETTINGS.atlas_projection_mode
-ATLAS_ANCHOR_SAMPLE: int = max(0, SETTINGS.atlas_anchor_sample)
+ATLAS_UMAP_PROJECTION_MODE: str = SETTINGS.atlas_umap_projection_mode
+ATLAS_UMAP_ANCHOR_SAMPLE: int = SETTINGS.atlas_umap_anchor_sample
 ATLAS_TRUST_REMOTE_CODE: bool = SETTINGS.atlas_trust_remote_code

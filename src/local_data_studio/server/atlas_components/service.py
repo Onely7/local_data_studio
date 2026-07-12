@@ -16,7 +16,7 @@ from ..deleted_rows import deleted_row_ids_for
 from ..embedder_capabilities import BackendName, ModelCapabilities, analyze_model_capabilities
 from ..jobs import JobContext
 from ..sql import configure_duckdb_limits, create_data_view, guard_select_sql_for_dataset
-from .contracts import AtlasModality, AtlasOptions
+from .contracts import AtlasModality, AtlasOptions, AtlasProjectionMethod
 from .dataset import model_label, prepare_atlas_dataset
 from .images import IMAGE_COLUMN_HINTS, is_image_like_value
 from .process import build_atlas_command, launch_embedding_atlas
@@ -81,6 +81,7 @@ def run_atlas_visualization(
     model: str,
     backend: str | None = None,
     prompt: str | None = None,
+    projection_method: AtlasProjectionMethod = "umap",
     sql: str | None,
     sample: int | None,
     context: JobContext,
@@ -90,7 +91,7 @@ def run_atlas_visualization(
     if not selected_column:
         raise HTTPException(status_code=400, detail="column is required")
     model_path = resolve_embedder_model(model)
-    base_options = AtlasOptions.from_request(sample=sample)
+    base_options = AtlasOptions.from_request(sample=sample, projection_method=projection_method)
     capabilities = analyze_model_capabilities(
         model_path,
         allow_remote_code=base_options.trust_remote_code,
@@ -143,9 +144,11 @@ def run_atlas_visualization(
         "url": url,
         "pid": pid,
         "sample": options.sample,
+        "row_count": prepared.row_count,
         "embedding_dtype": options.embedding_dtype,
-        "projection_mode": options.projection_mode,
-        "anchor_sample": options.anchor_sample,
+        "projection_method": options.projection_method,
+        "umap_projection_mode": options.umap_projection_mode,
+        "umap_anchor_sample": options.umap_anchor_sample,
         "cache_hit": prepared.cache_hit,
         "cache_path": str(prepared.path),
     }

@@ -35,6 +35,7 @@ dependencies = [
   "python-dotenv",
   "python-multipart",
   "scipy>=1.12.0,<1.17.0",
+  "scikit-learn>=1.7.0,<2",
   "pyarrow>=24.0.0",
   "matplotlib>=3.8.0,<3.11.0",
   "embedding-atlas>=0.20.0,<0.22.0",
