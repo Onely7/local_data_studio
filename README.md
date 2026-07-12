@@ -154,6 +154,14 @@ Running from source requires Python 3.11–3.13, Git, and uv.
 
    To stop the server, press `Ctrl+C` in the terminal where it is running.
 
+   When Local Data Studio runs on a remote server, forward only its port:
+
+   ```bash
+   ssh -N -L 8000:127.0.0.1:8000 user@example-server
+   ```
+
+   Open the same local URL afterward. Atlas pages are served through Local Data Studio, so separate SSH forwarding for the internal Atlas ports is unnecessary.
+
 ## Paths and Configuration Files
 
 ### Recommended Configuration Location
@@ -248,7 +256,8 @@ All variables in the following sections can also be set in the TOML `[settings]`
 #### Embedding Atlas
 
 - `EMBEDDER_MODELS_DIR`: The parent directory containing local Hugging Face encoder models. By default, Local Data Studio uses `models/embedder` under the workspace or current working directory.
-- `ATLAS_HOST`, `ATLAS_PORT`: The host and first candidate port used for the local Embedding Atlas page. Local Data Studio selects the next available port itself, skips ports that browsers block for HTTP, and disables Embedding Atlas's independent auto-port search.
+- `ATLAS_HOST`, `ATLAS_PORT`: The IPv4 loopback host and first internal candidate port used for an Embedding Atlas child process. `localhost` is normalized to `127.0.0.1`; IPv6 and externally reachable hosts are rejected. Browsers do not connect to this port directly.
+- `ATLAS_MAX_INSTANCES`: The maximum number of pending and running Atlas child processes. The default is `4`, and the value must be at least `1`.
 - `ATLAS_SAMPLE`: The maximum number of rows used for embedding computation, dimensionality reduction, and the cached Atlas Parquet file. Sampling is applied after the SQL query, with a fixed random seed of 42 so that the same rows are selected for the same input. When unset or set to `0`, all selected rows are used. Negative values are rejected.
 - `ATLAS_BATCH_SIZE`: The number of rows processed at once during embedding computation. When unset or set to `0`, the Embedding Atlas default is used.
 - `ATLAS_CACHE_MAX_BYTES`: The maximum total size of Embedding Atlas-related files stored in `./cache/atlas`. When the limit is exceeded, the oldest cache files are removed first.
@@ -356,7 +365,7 @@ If the field is left empty, the default prompt stored with the model is used.
 - Missing columns, unsupported conversions, format specifiers, and unmatched braces are rejected before the model is loaded.
 
 The operation runs as a background job so that the rest of the interface remains responsive. Progress includes the current phase and advances after embedding batches; cancellation takes effect at the next cooperative batch or phase boundary.
-An **Open Atlas** link appears only after the Atlas server has started accepting connections on a browser-safe port.
+An **Open Atlas** link appears only after the Atlas page and metadata endpoint are ready. The link uses `/atlas/{instance_id}/` on the same Local Data Studio origin, so internal child ports are never exposed to the browser.
 
 <img src="images/local_data_studio_07.png" alt="Embedding Atlas settings" width="45%"> <img src="images/local_data_studio_08.png" alt="Embedding Atlas visualization" width="45%">
 
@@ -463,6 +472,14 @@ t-SNE and PCA perform dimensionality reduction over all sampled embeddings toget
 
 Use `ATLAS_TEXT_MAX_CHARS` to limit long text columns and expanded prompts, `ATLAS_EMBEDDING_DTYPE=float16` to reduce embedding memory usage, and `ATLAS_CACHE_MAX_BYTES` to control the total cache size.
 
+Local Data Studio keeps at most `ATLAS_MAX_INSTANCES` pending or running Atlas processes. A running instance can be stopped without restarting the application:
+
+```bash
+curl -X DELETE http://127.0.0.1:8000/api/atlas/instances/INSTANCE_ID
+```
+
+The instance ID is the value between `/atlas/` and the final `/` in the **Open Atlas** URL. It is an unguessable routing identifier, not an authentication mechanism. Do not expose an unauthenticated Local Data Studio server directly to an untrusted network; bind it to loopback or access it through an SSH tunnel.
+
 </details>
 
 <details>
@@ -515,7 +532,7 @@ Here, invalidation means that an old cache entry is not reused when the source f
 
 ## Developer Information
 
-For details about the internal architecture, the roles of the main modules, development startup commands, and implementation-specific considerations, see [IMPLEMENTATION_NOTES.md](IMPLEMENTATION_NOTES.md).
+For details about the internal architecture, the roles of the main modules, development startup commands, and implementation-specific considerations, see [IMPLEMENTATION_NOTES.md](docs/IMPLEMENTATION_NOTES.md).
 
 ## Contributing
 

@@ -31,6 +31,7 @@ eda_cache_max_bytes = 1073741824
 
 atlas_host = "127.0.0.1"
 atlas_port = 5055
+atlas_max_instances = 4
 atlas_sample = 0
 atlas_batch_size = 0
 atlas_cache_max_bytes = 10737418240
