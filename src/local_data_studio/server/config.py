@@ -22,9 +22,6 @@ class Settings(BaseSettings):
     data_dir: str = Field(default=str(BASE_DIR / "data"), validation_alias="DATA_DIR")
     cache_dir: str = Field(default=str(BASE_DIR / "cache"), validation_alias="CACHE_DIR")
     embedder_models_dir: str = Field(default=str(BASE_DIR / "models" / "embedder"), validation_alias="EMBEDDER_MODELS_DIR")
-    openai_api_key: str | None = Field(default=None, validation_alias="OPENAI_API_KEY")
-    openai_base_url: str = Field(default="https://api.openai.com/v1", validation_alias="OPENAI_BASE_URL")
-    openai_model: str = Field(default="gpt-5.2", validation_alias="OPENAI_MODEL")
     default_eda_sample: int = Field(default=5000, validation_alias="EDA_ROW_LIMIT")
     allow_delete_data: bool = Field(default=True, validation_alias="ALLOW_DELETE_DATA")
     eda_cell_max_chars: int = Field(default=5000, validation_alias="EDA_CELL_MAX_CHARS")
@@ -193,10 +190,6 @@ VIS_EXCLUDE_FILES: list[str] = _split_comma_separated_setting(SETTINGS.vis_exclu
 VIS_EXCLUDE_FILE_PATHS: list[Path] = _resolve_excluded_dataset_dirs(DATA_ROOT, VIS_EXCLUDE_FILES)
 CACHE_DIR: Path = Path(SETTINGS.cache_dir).resolve()
 CACHE_DIR.mkdir(parents=True, exist_ok=True)
-OPENAI_API_KEY: str | None = SETTINGS.openai_api_key
-OPENAI_BASE_URL: str = SETTINGS.openai_base_url
-OPENAI_MODEL: str = SETTINGS.openai_model
-
 ALLOWED_EXTENSIONS: set[str] = {".jsonl", ".json", ".csv", ".tsv", ".parquet"}
 UPLOAD_EXTENSIONS: set[str] = {".jsonl", ".csv", ".tsv", ".parquet"}
 DEFAULT_LIMIT: int = 100

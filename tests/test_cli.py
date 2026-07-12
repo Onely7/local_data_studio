@@ -141,7 +141,8 @@ cache_dir = "config-cache"
                 (
                     "import sys; import local_data_studio.app; "
                     "assert 'local_data_studio.server.atlas' not in sys.modules; "
-                    "assert 'local_data_studio.server.eda_reports' not in sys.modules"
+                    "assert 'local_data_studio.server.eda_reports' not in sys.modules; "
+                    "assert 'litellm' not in sys.modules"
                 ),
             ],
             cwd=repository_root,

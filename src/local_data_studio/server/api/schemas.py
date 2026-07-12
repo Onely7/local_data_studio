@@ -112,5 +112,6 @@ class NLQueryRequest(BaseModel):
     """Input for natural-language SQL generation with optional sample context."""
 
     file: str
-    prompt: str
+    prompt: str = Field(max_length=16_384)
     sample: dict[str, Any] | None = None
+    model: str | None = Field(default=None, max_length=64)

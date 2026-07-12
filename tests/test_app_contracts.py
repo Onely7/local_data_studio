@@ -2,6 +2,7 @@
 
 import inspect
 from unittest import TestCase
+from unittest.mock import patch
 
 from fastapi.testclient import TestClient
 
@@ -10,6 +11,7 @@ from local_data_studio.server.api.analysis import run_query
 from local_data_studio.server.api.datasets import get_schema, preview, upload_files
 from local_data_studio.server.api.jobs import get_job, start_atlas_job
 from local_data_studio.server.api.schemas import AtlasQueryRequest, AtlasRequest
+from local_data_studio.server.llm_service import SqlGenerationResult
 
 EXPECTED_API_OPERATIONS = {
     ("/api/column_sample", "get"),
@@ -32,6 +34,7 @@ EXPECTED_API_OPERATIONS = {
     ("/api/jobs/stats", "post"),
     ("/api/jobs/{job_id}", "get"),
     ("/api/jobs/{job_id}/cancel", "post"),
+    ("/api/llm_models", "get"),
     ("/api/nl_query", "post"),
     ("/api/preview", "get"),
     ("/api/query", "post"),
@@ -156,3 +159,30 @@ class ApplicationContractTests(TestCase):
 
         self.assertIn("vis_exclude_dirs", payload)
         self.assertIn("vis_exclude_files", payload)
+
+    def test_llm_model_endpoint_does_not_expose_connection_settings(self) -> None:
+        """Keep SQL model discovery browser-safe."""
+        payload = TestClient(app).get("/api/llm_models").json()
+
+        self.assertEqual({"models": [], "default_model": None}, payload)
+        serialized = str(payload).lower()
+        self.assertNotIn("api_key", serialized)
+        self.assertNotIn("base_url", serialized)
+        self.assertNotIn("provider_options", serialized)
+
+    def test_nl_query_returns_selected_model_metadata(self) -> None:
+        """Return generated SQL with the server-side profile identity."""
+        with patch(
+            "local_data_studio.server.api.analysis.generate_sql_request",
+            return_value=SqlGenerationResult("SELECT * FROM data", "model-id", "Model Label"),
+        ):
+            response = TestClient(app).post(
+                "/api/nl_query",
+                json={"file": "example.jsonl", "prompt": "all rows", "model": "model-id"},
+            )
+
+        self.assertEqual(200, response.status_code)
+        self.assertEqual(
+            {"sql": "SELECT * FROM data", "model": "model-id", "model_label": "Model Label"},
+            response.json(),
+        )
