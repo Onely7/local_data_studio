@@ -123,8 +123,8 @@ local-data-studio --config /path/to/local_data_studio.toml
    ATLAS_CACHE_MAX_BYTES=10737418240
    ATLAS_TEXT_MAX_CHARS=4096
    ATLAS_EMBEDDING_DTYPE=float32
-   ATLAS_PROJECTION_MODE=full
-   ATLAS_ANCHOR_SAMPLE=10000
+   ATLAS_UMAP_PROJECTION_MODE=full
+   ATLAS_UMAP_ANCHOR_SAMPLE=10000
    ATLAS_TRUST_REMOTE_CODE=false
 
    # Delete Permission
@@ -146,13 +146,13 @@ local-data-studio --config /path/to/local_data_studio.toml
    - `EDA_CACHE_MAX_BYTES`: `./cache/eda` に保存する EDA レポート cache 全体の最大容量です。既定値は 1 GiB で、超過時は古いレポートから削除されます。
    - `EMBEDDER_MODELS_DIR`: ローカル HuggingFace encoder model ディレクトリを含むディレクトリです。デフォルトは workspace/current directory 配下の `models/embedder` です。
    - `ATLAS_HOST` / `ATLAS_PORT`: ローカル Embedding Atlas ページの host と開始 port です。port が使用中の場合、`embedding-atlas` が別 port を選ぶことがあります。
-   - `ATLAS_SAMPLE`: Embedding Atlas に渡す任意のランダムサンプル数です。未設定または `0` の場合は全行を対象にします。
+   - `ATLAS_SAMPLE`: embedding、projection、Atlas cache parquet に含める行数の厳密な上限です。SQL query 適用後に seed 42 で決定的に抽出します。未設定または `0` は全選択行を使用し、負数は起動時に拒否されます。
    - `ATLAS_BATCH_SIZE`: 任意の embedding batch size です。未設定または `0` の場合は Embedding Atlas のデフォルトを使用します。
    - `ATLAS_CACHE_MAX_BYTES`: `./cache/atlas` に保存する Embedding Atlas cache 全体の最大容量です。超過時は古い cache file から削除されます。
    - `ATLAS_TEXT_MAX_CHARS`: Atlas の embedding input と cached Atlas parquet output に残すテキストセルの最大文字数です。`0` で省略を無効化します。
    - `ATLAS_EMBEDDING_DTYPE`: projection 前の embedding 配列精度です。`float32` または `float16` を指定できます。
-   - `ATLAS_PROJECTION_MODE`: projection 方式です。`full` は全 embedding に対して UMAP を実行し、`anchor_transform` は代表サンプルで UMAP を fit して残りを同じ空間へ transform します。
-   - `ATLAS_ANCHOR_SAMPLE`: `ATLAS_PROJECTION_MODE=anchor_transform` の場合に UMAP fit に使う行数です。
+   - `ATLAS_UMAP_PROJECTION_MODE`: UMAP 専用の方式です。`full` は抽出後の全 embedding に UMAP を実行し、`anchor_transform` は代表 anchor で UMAP を fit して残りを同じ空間へ transform します。t-SNE と PCA は常に full projection です。
+   - `ATLAS_UMAP_ANCHOR_SAMPLE`: `ATLAS_UMAP_PROJECTION_MODE=anchor_transform` の場合に UMAP fit に使う行数です。
    - `ATLAS_TRUST_REMOTE_CODE`: `true` の場合、Embedding Atlas に `--trust-remote-code` を渡します。
    - `ALLOW_DELETE_DATA`: `false` の場合は実ファイル削除を無効にします（セッション内非表示は可）。
 
@@ -205,7 +205,7 @@ INFO:     Application startup complete.
 
 5. **Embedding 可視化**  
    HuggingFace 形式のローカル encoder model ディレクトリを `models/embedder` または `--models-dir` / `EMBEDDER_MODELS_DIR` で指定したディレクトリ配下に配置します（例: `models/embedder/google/siglip2-base-patch16-224`, `models/embedder/Qwen/Qwen3-Embedding-0.6B`, `models/embedder/Qwen/Qwen3-VL-Embedding-2B`）。`config.json`, `modules.json`, `tokenizer_config.json`, `preprocessor_config.json` などの model marker file を含むディレクトリが Model プルダウンに表示されます。
-   **Visualize Embedding** でテキストまたは画像カラム、モデル、利用可能な backend を選択し、**Run Atlas** を実行するとローカルの Embedding Atlas ページが起動します。**Run Atlas on Query Results** を使うと、SQL Console の現在のクエリ結果を対象に可視化できます。モデル探索では weight をロードせず設定だけを解析し、利用できない backend も選択不可の状態で表示します。両 backend を利用できる場合は Sentence Transformers が既定で選択されます。
+   **Visualize Embedding** でテキストまたは画像カラム、モデル、利用可能な backend、projection 手法を選択し、**Run Atlas** を実行するとローカルの Embedding Atlas ページが起動します。projection は **UMAP**（既定）、**t-SNE**、**PCA** から選べます。**Run Atlas on Query Results** を使うと、SQL Console の現在のクエリ結果を対象に可視化できます。モデル探索では weight をロードせず設定だけを解析し、利用できない backend も選択不可の状態で表示します。両 backend を利用できる場合は Sentence Transformers が既定で選択されます。
    Sentence Transformers を選択すると任意の Prompt 入力欄が表示されます。空欄の場合はモデルに保存された default prompt を使用します。placeholder を含まないテキストは選択列の各値へ prefix として付加されます。`{title}` や `{body}` のような正確な placeholder は、同じ dataset 行または SQL 結果行の値へ置換されます。`{{` / `}}` は通常の波括弧として扱われます。存在しないカラム、壊れた波括弧、conversion、format specifier はモデルをロードする前に拒否されます。
    処理はバックグラウンドジョブとして進捗表示され、準備が完了すると **Open Atlas** リンクが表示されます。  
    <img src="../images/local_data_studio_07.png" alt="local data studio 07" width=45%> <img src="../images/local_data_studio_08.png" alt="local data studio 08" width=45%>
@@ -219,7 +219,7 @@ INFO:     Application startup complete.
 - サポートしているデータフォーマット: `.jsonl`, `.json`, `.csv`, `.tsv`, `.parquet`.
 - 大規模データでは検索・EDA の実行に時間がかかることがあります。
 - 非常に大きなデータセットでは、対応形式のプレビューに大きな `OFFSET` ではなくカーソル形式の `page_token` を使用します。行数カウント、全体検索、サンプル統計、EDA は進捗確認とキャンセルが可能なバックグラウンドジョブとして実行されます。
-- Embedding Atlas ジョブは選択したローカル encoder model で embedding/projection 計算を行うため、時間がかかる場合があります。投影済み parquet input は `./cache/atlas/datasets` に保存され、dataset fingerprint、SQL、column、model、backend、prompt template、capability fingerprint、projection 設定が一致する場合だけ再利用されます。画像表示カラムは元の URL/path/`{bytes, path}` 形式を保持し、encoder 入力変換には hidden embedding input column だけを使います。大規模データで素早く試す場合は `ATLAS_SAMPLE` を指定し、長文テキスト列と展開後 prompt は `ATLAS_TEXT_MAX_CHARS` で上限を調整し、embedding メモリは `ATLAS_EMBEDDING_DTYPE=float16` で削減できます。`ATLAS_PROJECTION_MODE=anchor_transform` を使うと代表サンプルで UMAP を fit し、残りを transform します。容量上限は `ATLAS_CACHE_MAX_BYTES` で調整してください。
+- Embedding Atlas ジョブは選択したローカル encoder model で embedding/projection 計算を行うため、時間がかかる場合があります。投影済み parquet input は `./cache/atlas/datasets` に保存され、dataset fingerprint、SQL、column、model、backend、prompt template、capability fingerprint、projection 手法・設定が一致する場合だけ再利用されます。画像表示カラムは元の URL/path/`{bytes, path}` 形式を保持し、encoder 入力変換には hidden embedding input column だけを使います。`ATLAS_SAMPLE=N` は SQL filter 後の embedding、projection、cache parquet を最大 `N` 行へ決定的に制限しますが、現状の最初の DataFrame 読み込み自体は制限しません。UMAP は `full` と `ATLAS_UMAP_PROJECTION_MODE=anchor_transform` に対応し、t-SNE と PCA は抽出済み全 embedding を常に full projection します。t-SNE には別の固定上限がなく、大規模時は時間・メモリ消費が急増するため、実用的な `ATLAS_SAMPLE` を設定してください。長文テキスト列と展開後 prompt は `ATLAS_TEXT_MAX_CHARS`、embedding メモリは `ATLAS_EMBEDDING_DTYPE=float16`、容量上限は `ATLAS_CACHE_MAX_BYTES` で調整できます。
 - backend 対応状況はモデル名ではなく、ローカルの `modules.json`、`config.json`、tokenizer/processor、pooling、normalization metadata を上限付きで解析して判定します。Sentence Transformers は `native`, `generic_fallback`, `metadata_only`, `unsupported`, `unknown`、Transformers は `direct`, `remote_code`, `backbone_only`, `unsupported`, `unknown` の状態を返します。Sentence Transformers の generic fallback は tokenizer を確認できるテキスト専用 Transformers model だけで選択でき、画像・multimodal model には native な `modules.json` が必要です。そのため画像専用 DINOv3 checkpoint は Transformers のみを選択でき、宣言された `pooler_output` を利用します。native Sentence Transformers pipeline を持つ Qwen3-VL-Embedding は両 backend を利用できます。実行可能な adapter を確認できた backend だけを選択でき、`remote_code` は `ATLAS_TRUST_REMOTE_CODE=true` で repository code の実行を明示許可した場合だけ利用できます。組み込み Transformer/Pooling/Normalize 構成は、モデルリポジトリ内の Python を import せず Transformers adapter で再現します。
 - `models/embedder` または設定した models directory 配下のローカル encoder model 実体は配布物に含めません。リポジトリにはディレクトリ用の placeholder のみを含め、モデルファイルは各環境で配置してください。
 - キャッシュは `./cache/metadata`, `./cache/index`, `./cache/stats`, `./cache/count`, `./cache/search`, `./cache/eda` に分離されます。EDA レポートは `EDA_CACHE_MAX_BYTES` で全体容量を制限し、超過時は古いものから削除します。fingerprint を使う cache は該当するファイルパス・サイズ・更新時刻に基づいて無効化されます。
