@@ -10,7 +10,7 @@ from typing import Any
 from fastapi import HTTPException
 
 from .cache import prune_cache_dir
-from .config import CACHE_DIR, DEFAULT_EDA_MODE, DEFAULT_EDA_SAMPLE, EDA_CACHE_DIR, EDA_CACHE_MAX_BYTES
+from .config import CACHE_DIR, DEFAULT_EDA_SAMPLE, EDA_CACHE_DIR, EDA_CACHE_MAX_BYTES
 from .deleted_rows import deleted_row_ids_for
 from .eda import build_eda_report, eda_cache_path, load_eda_dataframe, sanitize_eda_dataframe
 from .jobs import JobContext
@@ -39,7 +39,7 @@ class EdaReportOptions:
         requested_sample = DEFAULT_EDA_SAMPLE if sample is None else sample
         if requested_sample != -1 and requested_sample < 1:
             raise HTTPException(status_code=400, detail="EDA row limit must be -1 or an integer greater than or equal to 1")
-        normalized_mode = (mode or DEFAULT_EDA_MODE or "minimal").strip().lower()
+        normalized_mode = (mode or "minimal").strip().lower()
         if normalized_mode not in {"minimal", "maximal"}:
             raise HTTPException(status_code=400, detail="EDA profile mode must be minimal or maximal")
         return cls(sample=requested_sample, mode=normalized_mode, force=bool(force))

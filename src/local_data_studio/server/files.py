@@ -2,12 +2,12 @@
 
 import os
 import threading
-from collections.abc import Sequence
+from collections.abc import Collection, Sequence
 from pathlib import Path
 
 from fastapi import HTTPException
 
-from .config import ALLOWED_EXTENSIONS, DATA_ROOT, SINGLE_FILE, VIS_EXCLUDE_PATHS
+from .config import ALLOWED_EXTENSIONS, DATA_ROOT, SINGLE_FILE, VIS_EXCLUDE_FILE_PATHS, VIS_EXCLUDE_PATHS
 
 IMAGE_PREVIEW_EXTENSIONS: set[str] = {".png", ".jpg", ".jpeg", ".gif", ".webp", ".svg"}
 
@@ -35,6 +35,10 @@ def _is_excluded_directory(path: Path, excluded_dirs: Sequence[Path]) -> bool:
     return any(_is_path_within(path, excluded_dir) for excluded_dir in excluded_dirs)
 
 
+def _is_excluded_file(path: Path, excluded_files: Collection[Path]) -> bool:
+    return any(path == excluded_file for excluded_file in excluded_files)
+
+
 def _is_supported_dataset_file(path: Path) -> bool:
     return path.is_file() and path.suffix.lower() in ALLOWED_EXTENSIONS
 
@@ -43,8 +47,13 @@ def discover_dataset_files(
     data_root: Path,
     single_file: Path | None,
     excluded_dirs: Sequence[Path],
+    excluded_files: Sequence[Path] = (),
 ) -> list[Path]:
-    """Return supported dataset files while pruning configured excluded directories."""
+    """Return supported datasets while excluding configured directories and files.
+
+    Relative exclusion entries are resolved from ``data_root`` before discovery.
+    ``single_file`` bypasses discovery and is therefore not filtered.
+    """
     if single_file is not None:
         return [single_file] if _is_supported_dataset_file(single_file) else []
 
@@ -52,6 +61,7 @@ def discover_dataset_files(
         return []
 
     resolved_excluded_dirs = [_resolve_path_best_effort(path) for path in excluded_dirs]
+    resolved_excluded_files = {_resolve_path_best_effort(path) for path in excluded_files}
     discovered: list[Path] = []
 
     for dirpath, dirnames, filenames in os.walk(data_root):
@@ -70,8 +80,8 @@ def discover_dataset_files(
         ]
 
         for filename in filenames:
-            candidate = current_dir / filename
-            if _is_supported_dataset_file(candidate):
+            candidate = _resolve_path_best_effort(current_dir / filename)
+            if _is_supported_dataset_file(candidate) and not _is_excluded_file(candidate, resolved_excluded_files):
                 discovered.append(candidate)
 
     return sorted(discovered)
@@ -79,7 +89,7 @@ def discover_dataset_files(
 
 def refresh_dataset_file_catalog() -> dict[str, Path]:
     """Discover datasets and cache an allowlist keyed by their displayed names."""
-    files = discover_dataset_files(DATA_ROOT, SINGLE_FILE, VIS_EXCLUDE_PATHS)
+    files = discover_dataset_files(DATA_ROOT, SINGLE_FILE, VIS_EXCLUDE_PATHS, VIS_EXCLUDE_FILE_PATHS)
     catalog: dict[str, Path] = {}
     for path in files:
         resolved = _resolve_path_best_effort(path)

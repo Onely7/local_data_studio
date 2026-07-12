@@ -17,6 +17,7 @@ PATH_ENV_NAMES = {
     "CACHE_DIR",
     "EMBEDDER_MODELS_DIR",
     "FILE_SERVE_ROOTS",
+    "VIS_EXCLUDE_FILES",
     "LOCAL_DATA_STUDIO_HOST",
     "LOCAL_DATA_STUDIO_PORT",
     "LOCAL_DATA_STUDIO_RELOAD",
@@ -54,6 +55,7 @@ data_dir = "datasets"
 cache_dir = "cache-store"
 models_dir = "models/custom"
 file_serve_roots = ["datasets", "images"]
+vis_exclude_files = ["datasets/ignore.csv", "datasets/archive/old.parquet"]
 
 [server]
 host = "0.0.0.0"
@@ -78,6 +80,15 @@ reload = true
             self.assertEqual(
                 ",".join([str((workspace / "datasets").resolve()), str((workspace / "images").resolve())]),
                 os.environ["FILE_SERVE_ROOTS"],
+            )
+            self.assertEqual(
+                ",".join(
+                    [
+                        str((workspace / "datasets/ignore.csv").resolve()),
+                        str((workspace / "datasets/archive/old.parquet").resolve()),
+                    ]
+                ),
+                os.environ["VIS_EXCLUDE_FILES"],
             )
 
     def test_environment_overrides_config_and_cli_overrides_environment(self) -> None:

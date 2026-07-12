@@ -10,11 +10,9 @@ from ..config import (
     ATLAS_BATCH_SIZE,
     ATLAS_EMBEDDING_DTYPE,
     ATLAS_HOST,
-    ATLAS_IMAGE_EMBEDDER,
     ATLAS_PORT,
     ATLAS_PROJECTION_MODE,
     ATLAS_SAMPLE,
-    ATLAS_TEXT_EMBEDDER,
     ATLAS_TRUST_REMOTE_CODE,
 )
 
@@ -56,8 +54,8 @@ class AtlasOptions:
             host=ATLAS_HOST,
             port=ATLAS_PORT,
             batch_size=ATLAS_BATCH_SIZE if ATLAS_BATCH_SIZE > 0 else None,
-            text_embedder=ATLAS_TEXT_EMBEDDER,
-            image_embedder=ATLAS_IMAGE_EMBEDDER,
+            text_embedder=None,
+            image_embedder=None,
             trust_remote_code=ATLAS_TRUST_REMOTE_CODE,
             embedding_dtype=ATLAS_EMBEDDING_DTYPE,
             projection_mode=ATLAS_PROJECTION_MODE,

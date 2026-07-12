@@ -57,6 +57,7 @@ data_dir = "/Users/me/datasets"
 cache_dir = "/Users/me/.cache/local-data-studio"
 models_dir = "/Users/me/models/embedder"
 file_serve_roots = ["/Users/me/datasets", "/Users/me/images"]
+vis_exclude_files = ["/Users/me/datasets/archive.csv"]
 
 [server]
 host = "127.0.0.1"
@@ -100,6 +101,7 @@ Path precedence is: CLI option, OS environment variable, config file, `.env`, wo
     DATA_DIR=/local/data/path  # FIXME: data directory path set here (required)
     FILE_SERVE_ROOTS=""
     VIS_EXCLUDE_DIRS=""
+    VIS_EXCLUDE_FILES=""
 
     # LLM SQL Generation Settings
     OPENAI_API_KEY=""  # FIXME: OpenAI API Key set here
@@ -108,7 +110,6 @@ Path precedence is: CLI option, OS environment variable, config file, `.env`, wo
 
     # EDA Settings
     EDA_ROW_LIMIT=50000
-    EDA_PROFILE_MODE=minimal
     EDA_CELL_MAX_CHARS=5000
     EDA_NESTED_POLICY=stringify
     EDA_CACHE_MAX_BYTES=1073741824
@@ -124,8 +125,6 @@ Path precedence is: CLI option, OS environment variable, config file, `.env`, wo
     ATLAS_EMBEDDING_DTYPE=float32
     ATLAS_PROJECTION_MODE=full
     ATLAS_ANCHOR_SAMPLE=10000
-    # ATLAS_TEXT_EMBEDDER=sentence-transformers
-    # ATLAS_IMAGE_EMBEDDER=transformers
     ATLAS_TRUST_REMOTE_CODE=false
 
     # Delete Permission
@@ -138,11 +137,11 @@ Path precedence is: CLI option, OS environment variable, config file, `.env`, wo
    - `DATA_DIR`: Directory to search for datasets (required if `DATA_FILE` is not used).
    - `FILE_SERVE_ROOTS`: Comma-separated directories from which local image previews may be served.
    - `VIS_EXCLUDE_DIRS`: Comma-separated directories to exclude from dataset discovery under `DATA_DIR`.
+   - `VIS_EXCLUDE_FILES`: Comma-separated dataset files to exclude from discovery under `DATA_DIR`. Relative paths are resolved from `DATA_DIR`; absolute paths are also accepted.
    - `OPENAI_API_KEY`: API key to enable LLM-based SQL generation.
    - `OPENAI_BASE_URL`: Endpoint for an OpenAI-compatible API.
    - `OPENAI_MODEL`: OpenAI model name to use.
    - `EDA_ROW_LIMIT`: Server-side row limit for dataset and query-result EDA reports. Configure it through the environment or `.env`; the UI does not override it. Any integer greater than or equal to `1` is accepted. Set `-1` to load all rows without a row limit.
-   - `EDA_PROFILE_MODE`: Fallback profile mode for API requests that omit `mode`. The web UI starts with `minimal` and lets you select `minimal` or `maximal` for each run. `maximal` includes more detailed statistics but takes longer.
    - `EDA_CELL_MAX_CHARS`: Maximum number of characters to display for long strings in EDA. Excess text is truncated as `... (truncated)`.
    - `EDA_NESTED_POLICY`: How to handle nested types (list/struct/object/binary, etc.). `stringify` keeps them as strings, and `drop` removes the corresponding columns.
    - `EDA_CACHE_MAX_BYTES`: Maximum combined size of EDA reports stored under `./cache/eda`. The default is 1 GiB; when the limit is exceeded, the oldest reports are removed first.
@@ -155,7 +154,6 @@ Path precedence is: CLI option, OS environment variable, config file, `.env`, wo
    - `ATLAS_EMBEDDING_DTYPE`: Embedding array precision before projection: `float32` or `float16`.
    - `ATLAS_PROJECTION_MODE`: Projection strategy: `full` computes UMAP on all embeddings, while `anchor_transform` fits UMAP on a representative sample and transforms the remaining rows into the same space.
    - `ATLAS_ANCHOR_SAMPLE`: Number of rows used to fit UMAP when `ATLAS_PROJECTION_MODE=anchor_transform`.
-   - `ATLAS_TEXT_EMBEDDER` / `ATLAS_IMAGE_EMBEDDER`: Optional Embedding Atlas embedder backend names.
    - `ATLAS_TRUST_REMOTE_CODE`: Passes `--trust-remote-code` to Embedding Atlas when `true`.
    - `ALLOW_DELETE_DATA`: If `false`, physical file deletion is disabled (session-level hiding is still allowed).
 

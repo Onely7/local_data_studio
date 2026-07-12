@@ -20,6 +20,7 @@ PATH_ENV_KEYS: dict[str, str] = {
     "models_dir": "EMBEDDER_MODELS_DIR",
     "file_serve_roots": "FILE_SERVE_ROOTS",
     "vis_exclude_dirs": "VIS_EXCLUDE_DIRS",
+    "vis_exclude_files": "VIS_EXCLUDE_FILES",
 }
 
 

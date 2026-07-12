@@ -25,7 +25,6 @@ class Settings(BaseSettings):
     openai_model: str = Field(default="gpt-5.2", validation_alias="OPENAI_MODEL")
     default_eda_sample: int = Field(default=5000, validation_alias="EDA_ROW_LIMIT")
     allow_delete_data: bool = Field(default=True, validation_alias="ALLOW_DELETE_DATA")
-    default_eda_mode: str = Field(default="minimal", validation_alias="EDA_PROFILE_MODE")
     eda_cell_max_chars: int = Field(default=5000, validation_alias="EDA_CELL_MAX_CHARS")
     eda_nested_policy: str = Field(default="stringify", validation_alias="EDA_NESTED_POLICY")
     eda_cache_max_bytes: int = Field(default=1024 * 1024 * 1024, validation_alias="EDA_CACHE_MAX_BYTES")
@@ -38,8 +37,6 @@ class Settings(BaseSettings):
     atlas_embedding_dtype: str = Field(default="float32", validation_alias="ATLAS_EMBEDDING_DTYPE")
     atlas_projection_mode: str = Field(default="full", validation_alias="ATLAS_PROJECTION_MODE")
     atlas_anchor_sample: int = Field(default=10000, validation_alias="ATLAS_ANCHOR_SAMPLE")
-    atlas_text_embedder: str | None = Field(default=None, validation_alias="ATLAS_TEXT_EMBEDDER")
-    atlas_image_embedder: str | None = Field(default=None, validation_alias="ATLAS_IMAGE_EMBEDDER")
     atlas_trust_remote_code: bool = Field(default=False, validation_alias="ATLAS_TRUST_REMOTE_CODE")
     file_serve_roots: str | None = Field(
         default=None,
@@ -51,6 +48,11 @@ class Settings(BaseSettings):
         validation_alias="VIS_EXCLUDE_DIRS",
         description="Comma-separated list of directories to exclude from dataset discovery under DATA_DIR.",
     )
+    vis_exclude_files: str | None = Field(
+        default=None,
+        validation_alias="VIS_EXCLUDE_FILES",
+        description="Comma-separated list of files to exclude from dataset discovery under DATA_DIR.",
+    )
 
     @field_validator("data_file", mode="before")
     @classmethod
@@ -61,15 +63,6 @@ class Settings(BaseSettings):
         if isinstance(value, str) and not value.strip():
             return None
         return value
-
-    @field_validator("default_eda_mode", mode="before")
-    @classmethod
-    def normalize_eda_mode(cls, value: str | None) -> str:
-        """Normalize the EDA mode to a lowercase non-empty value."""
-        normalized = (value or "minimal").strip().lower()
-        if normalized not in {"minimal", "maximal"}:
-            raise ValueError("EDA_PROFILE_MODE must be minimal or maximal")
-        return normalized
 
     @field_validator("default_eda_sample")
     @classmethod
@@ -84,15 +77,6 @@ class Settings(BaseSettings):
     def normalize_nested_policy(cls, value: str | None) -> str:
         """Normalize the nested-value policy to a lowercase non-empty value."""
         return (value or "stringify").strip().lower()
-
-    @field_validator("atlas_text_embedder", "atlas_image_embedder", mode="before")
-    @classmethod
-    def normalize_optional_atlas_setting(cls, value: str | None) -> str | None:
-        """Treat blank optional embedder names as unset."""
-        if value is None:
-            return None
-        normalized = value.strip()
-        return normalized or None
 
     @field_validator("atlas_embedding_dtype", mode="before")
     @classmethod
@@ -176,6 +160,8 @@ def _resolve_excluded_dataset_dirs(data_root: Path, entries: list[str]) -> list[
 FILE_SERVE_ROOTS: list[Path] = _resolve_file_serve_roots(DATA_SERVE_ROOT, SETTINGS.file_serve_roots)
 VIS_EXCLUDE_DIRS: list[str] = _split_comma_separated_setting(SETTINGS.vis_exclude_dirs)
 VIS_EXCLUDE_PATHS: list[Path] = _resolve_excluded_dataset_dirs(DATA_ROOT, VIS_EXCLUDE_DIRS)
+VIS_EXCLUDE_FILES: list[str] = _split_comma_separated_setting(SETTINGS.vis_exclude_files)
+VIS_EXCLUDE_FILE_PATHS: list[Path] = _resolve_excluded_dataset_dirs(DATA_ROOT, VIS_EXCLUDE_FILES)
 CACHE_DIR: Path = Path(SETTINGS.cache_dir).resolve()
 CACHE_DIR.mkdir(parents=True, exist_ok=True)
 OPENAI_API_KEY: str | None = SETTINGS.openai_api_key
@@ -204,8 +190,6 @@ COLUMN_LIMIT_WARNING: str = f"Only the first {MAX_COLUMNS} columns are returned 
 DEFAULT_EDA_SAMPLE: int = SETTINGS.default_eda_sample
 ALLOW_DELETE_DATA: bool = SETTINGS.allow_delete_data
 
-# EDA profile mode: "minimal" or "maximal"
-DEFAULT_EDA_MODE: str = SETTINGS.default_eda_mode
 EDA_CELL_MAX_CHARS: int = SETTINGS.eda_cell_max_chars
 EDA_NESTED_POLICY: str = SETTINGS.eda_nested_policy
 EDA_CACHE_DIR: Path = CACHE_DIR / "eda"
@@ -227,6 +211,4 @@ ATLAS_TEXT_MAX_CHARS: int = max(0, SETTINGS.atlas_text_max_chars)
 ATLAS_EMBEDDING_DTYPE: str = SETTINGS.atlas_embedding_dtype
 ATLAS_PROJECTION_MODE: str = SETTINGS.atlas_projection_mode
 ATLAS_ANCHOR_SAMPLE: int = max(0, SETTINGS.atlas_anchor_sample)
-ATLAS_TEXT_EMBEDDER: str | None = SETTINGS.atlas_text_embedder
-ATLAS_IMAGE_EMBEDDER: str | None = SETTINGS.atlas_image_embedder
 ATLAS_TRUST_REMOTE_CODE: bool = SETTINGS.atlas_trust_remote_code

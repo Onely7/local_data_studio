@@ -17,6 +17,7 @@ from ..config import (
     SINGLE_FILE,
     UPLOAD_EXTENSIONS,
     VIS_EXCLUDE_DIRS,
+    VIS_EXCLUDE_FILES,
 )
 from ..db import open_connection, quote_ident, relation_sql
 from ..deleted_rows import deleted_row_ids_for
@@ -56,6 +57,7 @@ def get_config() -> dict[str, Any]:
         "allow_delete_data": ALLOW_DELETE_DATA,
         "file_serve_roots": [str(path) for path in FILE_SERVE_ROOTS],
         "vis_exclude_dirs": VIS_EXCLUDE_DIRS,
+        "vis_exclude_files": VIS_EXCLUDE_FILES,
     }
 
 
