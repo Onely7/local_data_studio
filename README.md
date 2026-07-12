@@ -92,63 +92,56 @@ Running from source requires Python 3.11–3.13, Git, and uv.
    uv sync
    ```
 
-3. **Create the environment variable file**
+3. **Create the main configuration file**
 
    ```bash
-   # Copy the example configuration to create .env
+   # Copy the template, then keep the project settings in this file
+   cp local_data_studio.example.toml local_data_studio.toml
+   ```
+
+4. **Edit `local_data_studio.toml`**
+
+   This is the normal place for Local Data Studio settings. Set `[paths].data_dir`
+   to the directory that contains the data you want to inspect. To open one file,
+   use `[paths].data_file` instead. The `[server]`, `[settings]`, and `[llm]`
+   sections keep the remaining application, EDA, Atlas, deletion, and SQL model
+   settings together.
+
+   ```toml
+   [paths]
+   data_dir = "/local/data/path"
+
+   [settings]
+   eda_row_limit = 50000
+   ```
+
+5. **Create `.env` only when needed**
+
+   `.env` is for provider credentials and exceptional local overrides, not for
+   the regular application configuration. Copy the example only when you need
+   one of those values:
+
+   ```bash
    cp .env.example .env
    ```
 
-4. **Edit `.env`**
-
-   At minimum, set `DATA_DIR` to the directory that contains the data you want to inspect.
-   To open a single file, you can use `DATA_FILE` instead of `DATA_DIR`.
+   For example, add the credential named by an LLM profile's `api_key_env`:
 
    ```dotenv
-   # Dataset location
-   # DATA_FILE=/local/data/example.parquet
-   DATA_DIR=/local/data/path
-   FILE_SERVE_ROOTS=""
-   VIS_EXCLUDE_DIRS=""
-   VIS_EXCLUDE_FILES=""
-
-   # Optional LLM provider credentials
-   # Add only the variables referenced by api_key_env in local_data_studio.toml.
-   # OPENAI_API_KEY=your_openai_api_key
-   # ANTHROPIC_API_KEY=your_anthropic_api_key
-   # GEMINI_API_KEY=your_gemini_api_key
-
-   # EDA settings
-   EDA_ROW_LIMIT=50000
-   EDA_CELL_MAX_CHARS=5000
-   EDA_NESTED_POLICY=stringify
-   EDA_CACHE_MAX_BYTES=1073741824
-
-   # Embedding Atlas settings
-   EMBEDDER_MODELS_DIR=models/embedder
-   ATLAS_HOST=127.0.0.1
-   ATLAS_PORT=5055
-   # ATLAS_SAMPLE=5000
-   # ATLAS_BATCH_SIZE=16
-   ATLAS_CACHE_MAX_BYTES=10737418240
-   ATLAS_TEXT_MAX_CHARS=4096
-   ATLAS_EMBEDDING_DTYPE=float32
-   ATLAS_UMAP_PROJECTION_MODE=full
-   ATLAS_UMAP_ANCHOR_SAMPLE=10000
-   ATLAS_TRUST_REMOTE_CODE=false
-
-   # Whether deletion from source files is allowed
-   ALLOW_DELETE_DATA=false
+   OPENAI_API_KEY=your_openai_api_key
    ```
 
-5. **Start Local Data Studio**
+   `.env` is ignored by Git. Operating-system environment variables and command
+   line options can also override TOML values for a single launch.
+
+6. **Start Local Data Studio**
 
    ```bash
-   # Start the application with automatic reload enabled for development
-   uv run local-data-studio --reload
+   # Start with the project configuration and automatic reload for development
+   uv run local-data-studio --config ./local_data_studio.toml --reload
    ```
 
-6. **Open the application in your browser**
+7. **Open the application in your browser**
 
    Startup is complete when output similar to the following appears in the terminal:
 
@@ -162,6 +155,18 @@ Running from source requires Python 3.11–3.13, Git, and uv.
    To stop the server, press `Ctrl+C` in the terminal where it is running.
 
 ## Paths and Configuration Files
+
+### Recommended Configuration Location
+
+Keep one `local_data_studio.toml` in the workspace that contains the data,
+cache, and local models for a project. This is the normal configuration file
+for paths, server options, EDA, Atlas, deletion controls, and SQL model
+profiles. Start the application with `--config ./local_data_studio.toml` so the
+selected file is explicit and its relative paths resolve from that workspace.
+
+Use `.env` only for API keys and occasional machine-specific overrides. It is
+not a second required configuration file: when no credentials or overrides are
+needed, you do not need to create it.
 
 ### Default Paths
 
@@ -184,10 +189,10 @@ You can override individual paths with the following command-line options:
 - `--env-file`
 - `--file-serve-roots`
 
-### Example TOML Configuration File
+### TOML Configuration File
 
-To manage several settings in one place, you can use a TOML configuration file.
-TOML is a text-based file format for defining configuration keys and values.
+Use `local_data_studio.toml` as the usual place to manage settings. TOML is a
+text-based file format for defining configuration keys and values.
 
 The repository includes [local_data_studio.example.toml](local_data_studio.example.toml), which contains paths, server settings, and optional LLM model profiles without credentials.
 Copy it to `local_data_studio.toml`, then edit the paths and the profiles you intend to use:
@@ -196,10 +201,10 @@ Copy it to `local_data_studio.toml`, then edit the paths and the profiles you in
 cp local_data_studio.example.toml local_data_studio.toml
 ```
 
-Store any API keys in `.env` or your shell environment. The `api_key_env` setting in each model profile specifies the name of the credential variable to use.
+Store API keys in `.env` or your shell environment. The `api_key_env` setting in each model profile specifies the name of the credential variable to use. Keep routine paths and feature settings in TOML; use `.env` only when a credential or local override is needed.
 The `model` setting accepts either one LiteLLM model string or a list of model strings from the same provider. A list shares that profile's credentials, endpoint, timeout, and `provider_options`; each model appears separately in the SQL Console selector. When `default_model` names the profile, its first listed model is selected by default.
 
-The `[settings]` section configures EDA, Embedding Atlas, and source-file deletion without using `.env`. It uses lowercase snake_case names corresponding to the environment variables described below: for example, `EDA_ROW_LIMIT` becomes `eda_row_limit`, and `ALLOW_DELETE_DATA` becomes `allow_delete_data`. The template lists every supported setting. Omit a key to use the value from `.env` or the application default.
+The `[settings]` section configures EDA, Embedding Atlas, and source-file deletion. It uses lowercase snake_case names corresponding to the environment variables described below: for example, `EDA_ROW_LIMIT` becomes `eda_row_limit`, and `ALLOW_DELETE_DATA` becomes `allow_delete_data`. The template lists every supported setting. Omit a key to use a `.env` value or the application default.
 
 Start the application with a configuration file as follows:
 
@@ -243,7 +248,7 @@ All variables in the following sections can also be set in the TOML `[settings]`
 #### Embedding Atlas
 
 - `EMBEDDER_MODELS_DIR`: The parent directory containing local Hugging Face encoder models. By default, Local Data Studio uses `models/embedder` under the workspace or current working directory.
-- `ATLAS_HOST`, `ATLAS_PORT`: The host and initial port used for the local Embedding Atlas page. If the selected port is already in use, `embedding-atlas` may choose another port.
+- `ATLAS_HOST`, `ATLAS_PORT`: The host and first candidate port used for the local Embedding Atlas page. Local Data Studio selects the next available port itself, skips ports that browsers block for HTTP, and disables Embedding Atlas's independent auto-port search.
 - `ATLAS_SAMPLE`: The maximum number of rows used for embedding computation, dimensionality reduction, and the cached Atlas Parquet file. Sampling is applied after the SQL query, with a fixed random seed of 42 so that the same rows are selected for the same input. When unset or set to `0`, all selected rows are used. Negative values are rejected.
 - `ATLAS_BATCH_SIZE`: The number of rows processed at once during embedding computation. When unset or set to `0`, the Embedding Atlas default is used.
 - `ATLAS_CACHE_MAX_BYTES`: The maximum total size of Embedding Atlas-related files stored in `./cache/atlas`. When the limit is exceeded, the oldest cache files are removed first.
@@ -350,8 +355,8 @@ If the field is left empty, the default prompt stored with the model is used.
 - `{{` and `}}` are treated as literal braces.
 - Missing columns, unsupported conversions, format specifiers, and unmatched braces are rejected before the model is loaded.
 
-The operation runs as a background job so that the rest of the interface remains responsive, and progress is shown in the UI.
-When processing is complete, an **Open Atlas** link appears.
+The operation runs as a background job so that the rest of the interface remains responsive. Progress includes the current phase and advances after embedding batches; cancellation takes effect at the next cooperative batch or phase boundary.
+An **Open Atlas** link appears only after the Atlas server has started accepting connections on a browser-safe port.
 
 <img src="images/local_data_studio_07.png" alt="Embedding Atlas settings" width="45%"> <img src="images/local_data_studio_08.png" alt="Embedding Atlas visualization" width="45%">
 
