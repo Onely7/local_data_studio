@@ -63,6 +63,37 @@ vis_exclude_files = ["/Users/me/datasets/archive.csv"]
 host = "127.0.0.1"
 port = 8000
 reload = false
+
+[llm]
+default_model = "openai-main"
+timeout_seconds = 60
+
+[[llm.models]]
+id = "openai-main"
+label = "GPT-5.2"
+model = "openai/gpt-5.2"
+api_key_env = "OPENAI_API_KEY"
+provider_options = { max_completion_tokens = 400 }
+
+[[llm.models]]
+id = "claude-main"
+label = "Claude Sonnet"
+model = "anthropic/claude-sonnet-4-5-20250929"
+api_key_env = "ANTHROPIC_API_KEY"
+provider_options = { max_tokens = 400 }
+
+[[llm.models]]
+id = "gemini-main"
+label = "Gemini Flash"
+model = "gemini/gemini-2.5-flash"
+api_key_env = "GEMINI_API_KEY"
+
+[[llm.models]]
+id = "local-qwen"
+label = "Local Qwen"
+model = "hosted_vllm/Qwen/Qwen3-8B"
+base_url = "http://127.0.0.1:8000/v1"
+provider_options = { temperature = 0, extra_body = { top_k = 20 } }
 ```
 
 Run it with:
@@ -103,10 +134,10 @@ Path precedence is: CLI option, OS environment variable, config file, `.env`, wo
     VIS_EXCLUDE_DIRS=""
     VIS_EXCLUDE_FILES=""
 
-    # LLM SQL Generation Settings
-    OPENAI_API_KEY=""  # FIXME: OpenAI API Key set here
-    OPENAI_BASE_URL=https://api.openai.com/v1
-    OPENAI_MODEL=gpt-5.2
+    # LLM provider credentials (model profiles belong in local_data_studio.toml)
+    OPENAI_API_KEY=""
+    ANTHROPIC_API_KEY=""
+    GEMINI_API_KEY=""
 
     # EDA Settings
     EDA_ROW_LIMIT=50000
@@ -138,9 +169,7 @@ Path precedence is: CLI option, OS environment variable, config file, `.env`, wo
    - `FILE_SERVE_ROOTS`: Comma-separated directories from which local image previews may be served.
    - `VIS_EXCLUDE_DIRS`: Comma-separated directories to exclude from dataset discovery under `DATA_DIR`.
    - `VIS_EXCLUDE_FILES`: Comma-separated dataset files to exclude from discovery under `DATA_DIR`. Relative paths are resolved from `DATA_DIR`; absolute paths are also accepted.
-   - `OPENAI_API_KEY`: API key to enable LLM-based SQL generation.
-   - `OPENAI_BASE_URL`: Endpoint for an OpenAI-compatible API.
-   - `OPENAI_MODEL`: OpenAI model name to use.
+   - `OPENAI_API_KEY`, `ANTHROPIC_API_KEY`, `GEMINI_API_KEY`: Example credential variables referenced by `api_key_env` in an LLM model profile. Profile configuration never exposes their values to the browser.
    - `EDA_ROW_LIMIT`: Server-side row limit for dataset and query-result EDA reports. Configure it through the environment or `.env`; the UI does not override it. Any integer greater than or equal to `1` is accepted. Set `-1` to load all rows without a row limit.
    - `EDA_CELL_MAX_CHARS`: Maximum number of characters to display for long strings in EDA. Excess text is truncated as `... (truncated)`.
    - `EDA_NESTED_POLICY`: How to handle nested types (list/struct/object/binary, etc.). `stringify` keeps them as strings, and `drop` removes the corresponding columns.
@@ -195,7 +224,7 @@ Open [http://127.0.0.1:8000](http://127.0.0.1:8000) to view the Local Data Studi
 
 3. **SQL Console**
    Run DuckDB SQL queries against the `data` table.  
-   It also supports converting natural-language instructions into SQL using an LLM. SQL execution is limited to a single `SELECT`/CTE statement and runs with timeout, memory, and large-dataset scan-risk guards.  
+   It also supports converting natural-language instructions into SQL through a server-managed LiteLLM profile. Select an available OpenAI, Anthropic, Gemini, hosted vLLM, or other LiteLLM model in the SQL Console. SQL generation accepts plain text completions only, and generated SQL is limited to a single `SELECT`/CTE statement. SQL execution retains its timeout, memory, and large-dataset scan-risk guards.
    <img src="images/local_data_studio_04.png" alt="local data studio 04" width=45%>
 
 4. **EDA Report**
@@ -220,6 +249,7 @@ Open [http://127.0.0.1:8000](http://127.0.0.1:8000) to view the Local Data Studi
 - Supported dataset formats: `.jsonl`, `.json`, `.csv`, `.tsv`, `.parquet`.
 - On large datasets, searching and running EDA may take time.
 - For very large datasets, preview uses cursor-style page tokens instead of large `OFFSET` scans where supported. Row counts, global search, sampled statistics, and EDA run through background jobs with progress and cancellation APIs.
+- SQL-generation model profiles are read from the `[llm]` section of `local_data_studio.toml`. Use explicit LiteLLM provider prefixes such as `openai/`, `anthropic/`, `gemini/`, or `hosted_vllm/`; the deprecated `vllm/` prefix is rejected. Credentials stay in environment variables referenced by `api_key_env`. `provider_options` is trusted server configuration for options such as `reasoning_effort`, `thinking`, token limits, `top_k`, or `extra_body`; options that replace messages, credentials, streaming, tools, multimodal input, or structured response shape are rejected. `OPENAI_MODEL` and `OPENAI_BASE_URL` are no longer Local Data Studio settings. Direct ASGI launches can select the same TOML file with `LOCAL_DATA_STUDIO_CONFIG_FILE`.
 - Embedding Atlas jobs use the selected local encoder model and compute embeddings/projections locally. Projected parquet inputs are cached under `./cache/atlas/datasets`; repeated runs reuse the projected parquet only when the dataset fingerprint, SQL, column, model, backend, prompt template, capability fingerprint, projection method, and projection settings match. Image display columns are kept in their original URL/path/`{bytes, path}` shape while a hidden embedding input column is used only for encoder input conversion. `ATLAS_SAMPLE=N` deterministically limits embedding, projection, and cached parquet output to at most `N` rows after SQL filtering; it does not avoid the current initial DataFrame load. UMAP supports `full` and `ATLAS_UMAP_PROJECTION_MODE=anchor_transform`, while t-SNE and PCA always project all sampled embeddings. t-SNE can become expensive quickly and has no separate fixed row cap, so set a practical `ATLAS_SAMPLE`. Use `ATLAS_TEXT_MAX_CHARS` to bound long text and expanded prompts, `ATLAS_EMBEDDING_DTYPE=float16` to reduce embedding memory, and `ATLAS_CACHE_MAX_BYTES` to cap the combined Atlas cache size.
 - Backend support is derived from bounded parsing of local `modules.json`, `config.json`, tokenizer/processor, pooling, and normalization metadata rather than model-name rules. Sentence Transformers reports `native`, `generic_fallback`, `metadata_only`, `unsupported`, or `unknown`; Transformers reports `direct`, `remote_code`, `backbone_only`, `unsupported`, or `unknown`. Sentence Transformers generic fallback is selectable only for tokenizer-backed, text-only Transformers models; image or multimodal models require a native `modules.json`. For example, the image-only DINOv3 checkpoints expose only Transformers and use their declared `pooler_output`, while Qwen3-VL-Embedding exposes both backends through its native Sentence Transformers pipeline. Only capabilities with a verified runnable adapter are selectable, and `remote_code` remains disabled unless `ATLAS_TRUST_REMOTE_CODE=true` explicitly permits repository code at execution time. Built-in Transformer/Pooling/Normalize pipelines can be reproduced by the Transformers adapter without importing Python files from the model repository.
 - Local encoder model files under `models/embedder` or a configured models directory are intentionally not bundled. Only the directory placeholder files are tracked; download or place model files locally on each machine.
@@ -238,6 +268,7 @@ Open [http://127.0.0.1:8000](http://127.0.0.1:8000) to view the Local Data Studi
 - `src/local_data_studio/server/readers.py` remains the compatibility facade for implementations under `src/local_data_studio/server/dataset_readers`. JSONL metadata inference stops at fixed row and byte budgets, and JSONL/CSV/TSV preview uses byte/page tokens with a fingerprinted sparse line index. Completed indexes are reused and checkpoints are saved in batch transactions. CSV/TSV use the same large-field parser for schema, preview, search, and raw rows. Parquet schema reads footer metadata, previews and raw rows use bounded record batches, and compatible offsets are resolved from row-group metadata without row-by-row scans.
 - `src/local_data_studio/server/stats.py` remains the compatibility facade for `src/local_data_studio/server/column_stats`, which separates value inference, per-column accumulation, and DuckDB orchestration. Sample rows are fetched in fixed-size batches and transferred directly into column accumulators instead of retaining both a complete row matrix and column copies.
 - SQL execution is centralized in `src/local_data_studio/server/sql.py`, which validates read-only SQL, applies DuckDB resource limits, and supports cooperative cancellation for background jobs.
+- SQL generation uses the LiteLLM Python SDK through a lazy adapter. `server/llm_profiles.py` validates server-managed model profiles, `server/llm_prompt.py` builds one provider-neutral user message and validates generated SQL, `server/llm_client.py` contains the common completion call, and `server/llm_service.py` orchestrates profile selection. Provider errors are returned without upstream exception bodies or credentials.
 - EDA report orchestration lives in `src/local_data_studio/server/eda_reports.py`; low-level profiling setup and DataFrame sanitization live in `src/local_data_studio/server/eda.py`. Reports are isolated under `./cache/eda` and use the shared oldest-first capacity pruner.
 - `src/local_data_studio/server/atlas.py` remains the compatibility facade for `src/local_data_studio/server/atlas_components`, which separates contracts, capability-driven embedding adapters, safe prompt templates, image conversion, projection, dataset caching, subprocess control, and orchestration. `server/embedder_capabilities.py` performs bounded metadata-only model inspection and fingerprints the relevant configuration. An encoder is created once per Atlas job and reused across anchor/transform batches. Anchor-transform reads only the anchor and current transform batch instead of converting the complete input column to a Python list. Final display sanitization and projection-column attachment share one owned DataFrame copy, while concurrent misses for the same fingerprint/query/column/model/backend/prompt/settings key share one cache generation.
 - Atlas UMAP projection uses a fixed random seed for reproducible cache artifacts and explicitly sets `n_jobs=1`, matching UMAP's seeded execution mode without emitting thread override warnings.
