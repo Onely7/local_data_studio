@@ -12,6 +12,7 @@ from local_data_studio.cli import build_parser, configure_runtime_environment
 PATH_ENV_NAMES = {
     "LOCAL_DATA_STUDIO_WORKSPACE_DIR",
     "LOCAL_DATA_STUDIO_ENV_FILE",
+    "LOCAL_DATA_STUDIO_CONFIG_FILE",
     "DATA_DIR",
     "DATA_FILE",
     "CACHE_DIR",
@@ -73,6 +74,7 @@ reload = true
             self.assertEqual(8765, port)
             self.assertTrue(reload)
             self.assertEqual(str(workspace.resolve()), os.environ["LOCAL_DATA_STUDIO_WORKSPACE_DIR"])
+            self.assertEqual(str(config.resolve()), os.environ["LOCAL_DATA_STUDIO_CONFIG_FILE"])
             self.assertEqual(str((workspace / ".env.local").resolve()), os.environ["LOCAL_DATA_STUDIO_ENV_FILE"])
             self.assertEqual(str((workspace / "datasets").resolve()), os.environ["DATA_DIR"])
             self.assertEqual(str((workspace / "cache-store").resolve()), os.environ["CACHE_DIR"])

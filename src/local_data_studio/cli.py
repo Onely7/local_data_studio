@@ -4,12 +4,13 @@ from __future__ import annotations
 
 import argparse
 import os
-import tomllib
 from collections.abc import Mapping, Sequence
 from pathlib import Path
 from typing import Any
 
 import uvicorn
+
+from .runtime_config import CONFIG_FILE_ENV, config_section, read_runtime_config
 
 PATH_ENV_KEYS: dict[str, str] = {
     "workspace_dir": "LOCAL_DATA_STUDIO_WORKSPACE_DIR",
@@ -49,22 +50,8 @@ def _coerce_path_setting(value: Any, base_dir: Path) -> str | None:
     return str(value)
 
 
-def _read_config(path: str | None) -> tuple[dict[str, Any], Path | None]:
-    if not path:
-        return {}, None
-    config_path = Path(path).expanduser().resolve()
-    with config_path.open("rb") as handle:
-        loaded = tomllib.load(handle)
-    return loaded, config_path
-
-
-def _section(config: Mapping[str, Any], name: str) -> Mapping[str, Any]:
-    value = config.get(name)
-    return value if isinstance(value, Mapping) else {}
-
-
 def _workspace_from(args: argparse.Namespace, config: Mapping[str, Any], config_path: Path | None) -> Path:
-    paths = _section(config, "paths")
+    paths = config_section(config, "paths")
     raw_workspace = args.workspace_dir or os.environ.get("LOCAL_DATA_STUDIO_WORKSPACE_DIR") or paths.get("workspace_dir")
     if raw_workspace:
         base_dir = config_path.parent if config_path else Path.cwd()
@@ -73,7 +60,7 @@ def _workspace_from(args: argparse.Namespace, config: Mapping[str, Any], config_
 
 
 def _apply_config_environment(config: Mapping[str, Any], workspace_dir: Path) -> None:
-    paths = _section(config, "paths")
+    paths = config_section(config, "paths")
     _set_path_env("LOCAL_DATA_STUDIO_WORKSPACE_DIR", str(workspace_dir), overwrite=False)
     for key, env_name in PATH_ENV_KEYS.items():
         if key == "workspace_dir":
@@ -95,7 +82,9 @@ def configure_runtime_environment(args: argparse.Namespace) -> tuple[str, int, b
         OSError: The requested config file cannot be read.
         tomllib.TOMLDecodeError: The config file is not valid TOML.
     """
-    config, config_path = _read_config(args.config)
+    config, config_path = read_runtime_config(args.config)
+    if config_path:
+        os.environ[CONFIG_FILE_ENV] = str(config_path)
     workspace_dir = _workspace_from(args, config, config_path)
     _apply_config_environment(config, workspace_dir)
 
@@ -108,7 +97,7 @@ def configure_runtime_environment(args: argparse.Namespace) -> tuple[str, int, b
     if args.file_serve_roots:
         os.environ["FILE_SERVE_ROOTS"] = ",".join(str(Path(item).expanduser()) for item in args.file_serve_roots)
 
-    server = _section(config, "server")
+    server = config_section(config, "server")
     host = args.host or os.environ.get("LOCAL_DATA_STUDIO_HOST") or str(server.get("host") or "127.0.0.1")
     port = args.port or int(os.environ.get("LOCAL_DATA_STUDIO_PORT") or server.get("port") or 8000)
     reload = bool(args.reload if args.reload is not None else _coerce_bool(os.environ.get("LOCAL_DATA_STUDIO_RELOAD"), server.get("reload", False)))
