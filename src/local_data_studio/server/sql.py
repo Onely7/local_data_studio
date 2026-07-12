@@ -239,7 +239,8 @@ def _load_query_dataframe_worker(
         # YData Profiling expects pandas (and otherwise attempts its Spark path,
         # which requires an ``rdd`` attribute). Keep query EDA aligned with the
         # full-dataset EDA loader in ``eda.py``.
-        return connection.execute(f"SELECT * FROM ({sql}) AS q LIMIT {sample}").df()
+        limit_clause = "" if sample == -1 else f" LIMIT {sample}"
+        return connection.execute(f"SELECT * FROM ({sql}) AS q{limit_clause}").df()
 
 
 def load_query_dataframe_guarded(
@@ -249,7 +250,10 @@ def load_query_dataframe_guarded(
     sample: int,
     context: JobContext | None,
 ) -> Any:
-    """Materialize bounded SQL query results for EDA with timeout, memory, and cancellation guards."""
+    """Materialize configured SQL query results with resource and cancellation guards.
+
+    A sample value of ``-1`` intentionally materializes all query rows.
+    """
     guarded_sql = guard_select_sql_for_dataset(path, sql)
     deleted_ids = deleted_row_ids_for(path)
     connection_holder: dict[str, Any] = {}

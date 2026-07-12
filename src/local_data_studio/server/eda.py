@@ -35,10 +35,14 @@ def eda_cache_path(path: Path, sample_rows: int, mode: str) -> Path:
 
 
 def load_eda_dataframe(path: Path, sample_rows: int, deleted_ids: list[int]) -> Any:
-    """Load a bounded pandas sample suitable for YData Profiling."""
+    """Load a configured pandas sample suitable for YData Profiling.
+
+    A row limit of ``-1`` intentionally materializes the complete relation.
+    """
     with open_connection() as con:
         rel_sql, params = relation_with_rowid_sql(path, deleted_ids)
-        query = f"SELECT * EXCLUDE(__rowid) FROM ({rel_sql}) LIMIT {sample_rows}"
+        limit_clause = "" if sample_rows == -1 else f" LIMIT {sample_rows}"
+        query = f"SELECT * EXCLUDE(__rowid) FROM ({rel_sql}){limit_clause}"
         return con.execute(query, params).df()
 
 

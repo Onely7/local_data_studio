@@ -66,7 +66,18 @@ class Settings(BaseSettings):
     @classmethod
     def normalize_eda_mode(cls, value: str | None) -> str:
         """Normalize the EDA mode to a lowercase non-empty value."""
-        return (value or "minimal").strip().lower()
+        normalized = (value or "minimal").strip().lower()
+        if normalized not in {"minimal", "maximal"}:
+            raise ValueError("EDA_PROFILE_MODE must be minimal or maximal")
+        return normalized
+
+    @field_validator("default_eda_sample")
+    @classmethod
+    def validate_eda_row_limit(cls, value: int) -> int:
+        """Accept an unlimited marker or any positive EDA row limit."""
+        if value == -1 or value >= 1:
+            return value
+        raise ValueError("EDA_ROW_LIMIT must be -1 or an integer greater than or equal to 1")
 
     @field_validator("eda_nested_policy", mode="before")
     @classmethod
@@ -191,7 +202,6 @@ DUCKDB_QUERY_POLL_SECONDS: float = 0.1
 COLUMN_LIMIT_WARNING: str = f"Only the first {MAX_COLUMNS} columns are returned to keep API responses bounded."
 
 DEFAULT_EDA_SAMPLE: int = SETTINGS.default_eda_sample
-MAX_EDA_SAMPLE: int = 50000
 ALLOW_DELETE_DATA: bool = SETTINGS.allow_delete_data
 
 # EDA profile mode: "minimal" or "maximal"
