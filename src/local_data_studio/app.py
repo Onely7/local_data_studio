@@ -2,7 +2,7 @@
 
 from fastapi import FastAPI
 
-from .server.api.analysis import column_stats, count_rows, nl_query, run_eda, run_query, search
+from .server.api.analysis import column_stats, count_rows, llm_models, nl_query, run_eda, run_query, search
 from .server.api.analysis import router as analysis_router
 from .server.api.datasets import (
     column_sample,
@@ -100,6 +100,7 @@ __all__ = [
     "get_job",
     "get_schema",
     "list_files",
+    "llm_models",
     "nl_query",
     "preview",
     "raw_file",

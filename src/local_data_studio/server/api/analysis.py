@@ -18,13 +18,19 @@ from ..db import (
 )
 from ..deleted_rows import deleted_row_ids_for
 from ..files import resolve_data_file
-from ..llm import generate_sql_from_prompt
+from ..llm import generate_sql_request, public_llm_models
 from ..sql import execute_query_guarded
 from ..stats import compute_column_stats
 from .schemas import EdaRequest, NLQueryRequest, QueryRequest
 from .services import eda_reports_service, reject_large_sync_operation
 
 router = APIRouter()
+
+
+@router.get("/api/llm_models")
+def llm_models() -> dict[str, Any]:
+    """Return server-managed model profiles without secrets or endpoints."""
+    return public_llm_models()
 
 
 @router.get("/api/column_stats")
@@ -58,7 +64,8 @@ def nl_query(payload: NLQueryRequest) -> dict[str, Any]:
     relation, params = relation_sql(path)
     with open_connection() as connection:
         columns = describe_relation(connection, relation, params)
-    return {"sql": generate_sql_from_prompt(prompt, columns, payload.sample)}
+    result = generate_sql_request(prompt, columns, payload.sample, payload.model)
+    return {"sql": result.sql, "model": result.profile_id, "model_label": result.profile_label}
 
 
 @router.get("/api/count")
