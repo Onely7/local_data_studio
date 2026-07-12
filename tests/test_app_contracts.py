@@ -16,6 +16,7 @@ from local_data_studio.server.llm_service import SqlGenerationResult
 EXPECTED_API_OPERATIONS = {
     ("/api/column_sample", "get"),
     ("/api/column_stats", "get"),
+    ("/api/atlas/instances/{instance_id}", "delete"),
     ("/api/config", "get"),
     ("/api/count", "get"),
     ("/api/delete_column", "post"),
@@ -100,6 +101,9 @@ class ApplicationContractTests(TestCase):
         self.assertIn("atlasCancelling: false", script)
         self.assertIn("Cancellation requested. Waiting for the current Atlas step to stop", script)
         self.assertIn("const message = job.message", script)
+        self.assertIn("new URL(url, window.location.origin)", script)
+        self.assertIn("/^\\/atlas\\/[A-Za-z0-9_-]+\\/$/", script)
+        self.assertNotIn("Open http://localhost:5055/ directly", script)
 
     def test_operation_statuses_share_typography_and_eda_rows_are_not_editable(self) -> None:
         """Keep post-action feedback consistent and EDA row limits environment-owned."""

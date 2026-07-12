@@ -21,6 +21,7 @@ SETTINGS_ENV_KEYS: dict[str, str] = {
     "eda_cache_max_bytes": "EDA_CACHE_MAX_BYTES",
     "atlas_host": "ATLAS_HOST",
     "atlas_port": "ATLAS_PORT",
+    "atlas_max_instances": "ATLAS_MAX_INSTANCES",
     "atlas_sample": "ATLAS_SAMPLE",
     "atlas_batch_size": "ATLAS_BATCH_SIZE",
     "atlas_cache_max_bytes": "ATLAS_CACHE_MAX_BYTES",

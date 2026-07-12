@@ -37,3 +37,29 @@ class JobStoreTests(TestCase):
         self.assertEqual("cancelled", snapshot.status)
         self.assertEqual("job was cancelled", snapshot.message)
         self.assertNotEqual("late progress", snapshot.message)
+        store.shutdown(wait_timeout=1)
+
+    def test_shutdown_rejects_new_jobs_and_cancels_queued_work(self) -> None:
+        """Close job admission before the application releases runtime resources."""
+        store = JobStore(max_workers=1)
+        worker_started = Event()
+        release_worker = Event()
+
+        def blocking_work(context):  # noqa: ANN001
+            worker_started.set()
+            release_worker.wait(timeout=2)
+            context.check_cancelled()
+            return {}
+
+        running = store.submit("atlas", blocking_work)
+        self.assertTrue(worker_started.wait(timeout=2))
+        queued = store.submit("atlas", lambda context: {})  # noqa: ARG005
+        store.begin_shutdown()
+        release_worker.set()
+        self.assertTrue(store.wait_for_idle(2))
+
+        self.assertEqual("cancelled", store.get(running.job_id).status)
+        self.assertEqual("cancelled", store.get(queued.job_id).status)
+        with self.assertRaisesRegex(RuntimeError, "shutting down"):
+            store.submit("count", lambda context: {})  # noqa: ARG005
+        store.shutdown(wait_timeout=0)

@@ -32,7 +32,23 @@ from local_data_studio.app import (
     start_stats_job,
 )
 from local_data_studio.server.atlas import AtlasPreparedDataset
+from local_data_studio.server.atlas_components.process import LaunchedAtlasProcess
 from local_data_studio.server.sql import load_query_dataframe_guarded
+
+
+class _FakeAtlasProcess:
+    """Minimal live process used by Atlas orchestration tests."""
+
+    def __init__(self, pid: int) -> None:
+        self.pid = pid
+
+    def poll(self) -> None:
+        """Report a live process through registration."""
+        return None
+
+    def wait(self, timeout=None):  # noqa: ANN001
+        """Let the registry watcher finish without blocking the test suite."""
+        return 0
 
 
 class ApiJobTests(TestCase):
@@ -181,14 +197,15 @@ class ApiJobTests(TestCase):
         model_path = (Path.cwd() / "models" / "embedder" / "test-image-model").resolve()
         prepared_path = (Path.cwd() / "cache" / "atlas" / "datasets" / "prepared.parquet").resolve()
 
-        def fake_launch(command, context):  # noqa: ANN001
+        def fake_launch(command, context, runtime):  # noqa: ANN001
             """Exercise fake launch behavior."""
             self.assertIn("--image", command)
             self.assertIn("image", command)
             self.assertIn("--disable-projection", command)
             self.assertIn(str(prepared_path), command)
             context.update(progress=1.0, message="ready")
-            return "http://127.0.0.1:5055/", 12345
+            process = _FakeAtlasProcess(12345)
+            return LaunchedAtlasProcess("http://127.0.0.1:5055/", "127.0.0.1", 5055, process)
 
         with (
             patch("local_data_studio.server.atlas_components.service.resolve_embedder_model", return_value=model_path),
@@ -205,7 +222,7 @@ class ApiJobTests(TestCase):
                     row_count=3,
                 ),
             ),
-            patch("local_data_studio.server.atlas_components.service.launch_embedding_atlas", side_effect=fake_launch),
+            patch("local_data_studio.server.atlas_components.service.start_embedding_atlas", side_effect=fake_launch),
         ):
             analyze_capabilities.return_value.fingerprint = "test-capability"
             started = start_atlas_job(AtlasRequest(file="example.jsonl", column="image", model="test-image-model"))
@@ -215,7 +232,8 @@ class ApiJobTests(TestCase):
         self.assertEqual("dataset", payload["result"]["source"])
         self.assertEqual("image", payload["result"]["modality"])
         self.assertEqual("test-image-model", payload["result"]["model"])
-        self.assertEqual("http://127.0.0.1:5055/", payload["result"]["url"])
+        self.assertRegex(payload["result"]["url"], r"^/atlas/[A-Za-z0-9_-]+/$")
+        self.assertIn("instance_id", payload["result"])
         self.assertTrue(payload["result"]["cache_hit"])
         self.assertEqual("umap", payload["result"]["projection_method"])
         self.assertEqual(3, payload["result"]["row_count"])
@@ -227,11 +245,12 @@ class ApiJobTests(TestCase):
         prepared_path = (Path.cwd() / "cache" / "atlas" / "datasets" / "prepared-query.parquet").resolve()
         captured_command: list[str] = []
 
-        def fake_launch(command, context):  # noqa: ANN001
+        def fake_launch(command, context, runtime):  # noqa: ANN001
             """Exercise fake launch behavior."""
             captured_command.extend(command)
             context.update(progress=1.0, message="ready")
-            return "http://127.0.0.1:5056/", 12346
+            process = _FakeAtlasProcess(12346)
+            return LaunchedAtlasProcess("http://127.0.0.1:5056/", "127.0.0.1", 5056, process)
 
         with (
             patch("local_data_studio.server.atlas_components.service.resolve_embedder_model", return_value=model_path),
@@ -248,7 +267,7 @@ class ApiJobTests(TestCase):
                     row_count=2,
                 ),
             ),
-            patch("local_data_studio.server.atlas_components.service.launch_embedding_atlas", side_effect=fake_launch),
+            patch("local_data_studio.server.atlas_components.service.start_embedding_atlas", side_effect=fake_launch),
         ):
             analyze_capabilities.return_value.fingerprint = "test-capability"
             started = start_atlas_query_job(

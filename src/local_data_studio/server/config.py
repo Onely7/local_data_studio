@@ -31,6 +31,7 @@ class Settings(BaseSettings):
     eda_cache_max_bytes: int = Field(default=1024 * 1024 * 1024, validation_alias="EDA_CACHE_MAX_BYTES")
     atlas_host: str = Field(default="127.0.0.1", validation_alias="ATLAS_HOST")
     atlas_port: int = Field(default=5055, validation_alias="ATLAS_PORT")
+    atlas_max_instances: int = Field(default=4, validation_alias="ATLAS_MAX_INSTANCES")
     atlas_sample: int = Field(default=0, validation_alias="ATLAS_SAMPLE")
     atlas_batch_size: int = Field(default=0, validation_alias="ATLAS_BATCH_SIZE")
     atlas_cache_max_bytes: int = Field(default=10 * 1024 * 1024 * 1024, validation_alias="ATLAS_CACHE_MAX_BYTES")
@@ -97,6 +98,31 @@ class Settings(BaseSettings):
         if value >= 0:
             return value
         raise ValueError("ATLAS_SAMPLE must be greater than or equal to 0")
+
+    @field_validator("atlas_host", mode="before")
+    @classmethod
+    def normalize_atlas_host(cls, value: str | None) -> str:
+        """Restrict child Atlas servers to the supported IPv4 loopback host."""
+        normalized = (value or "127.0.0.1").strip().lower()
+        if normalized in {"localhost", "127.0.0.1"}:
+            return "127.0.0.1"
+        raise ValueError("ATLAS_HOST must be localhost or 127.0.0.1")
+
+    @field_validator("atlas_port")
+    @classmethod
+    def validate_atlas_port(cls, value: int) -> int:
+        """Require a valid TCP port as the Atlas allocation starting point."""
+        if 1 <= value <= 65535:
+            return value
+        raise ValueError("ATLAS_PORT must be between 1 and 65535")
+
+    @field_validator("atlas_max_instances")
+    @classmethod
+    def validate_atlas_max_instances(cls, value: int) -> int:
+        """Require a positive bound for concurrent Atlas child processes."""
+        if value >= 1:
+            return value
+        raise ValueError("ATLAS_MAX_INSTANCES must be greater than or equal to 1")
 
     @field_validator("atlas_umap_projection_mode", mode="before")
     @classmethod
@@ -226,6 +252,7 @@ EDA_CACHE_MAX_BYTES: int = max(0, SETTINGS.eda_cache_max_bytes)
 
 ATLAS_HOST: str = SETTINGS.atlas_host
 ATLAS_PORT: int = SETTINGS.atlas_port
+ATLAS_MAX_INSTANCES: int = SETTINGS.atlas_max_instances
 ATLAS_SAMPLE: int = SETTINGS.atlas_sample
 ATLAS_BATCH_SIZE: int = SETTINGS.atlas_batch_size
 ATLAS_CACHE_ROOT: Path = CACHE_DIR / "atlas"

@@ -68,6 +68,22 @@ class AtlasProjectionSettingsTests(TestCase):
         with self.assertRaises(ValidationError):
             AtlasRequest(file="example.jsonl", column="text", model="model", sample=-1)
 
+    def test_atlas_runtime_host_port_and_capacity_are_validated(self) -> None:
+        """Normalize localhost and reject unsafe process-listener settings."""
+        settings = Settings(_env_file=None, ATLAS_HOST="localhost", ATLAS_PORT=65535, ATLAS_MAX_INSTANCES=4)
+
+        self.assertEqual("127.0.0.1", settings.atlas_host)
+        self.assertEqual(65535, settings.atlas_port)
+        self.assertEqual(4, settings.atlas_max_instances)
+        for invalid_host in ("::1", "0.0.0.0", "example.com"):
+            with self.subTest(host=invalid_host), self.assertRaises(ValidationError):
+                Settings(_env_file=None, ATLAS_HOST=invalid_host)
+        for invalid_port in (0, 65536):
+            with self.subTest(port=invalid_port), self.assertRaises(ValidationError):
+                Settings(_env_file=None, ATLAS_PORT=invalid_port)
+        with self.assertRaises(ValidationError):
+            Settings(_env_file=None, ATLAS_MAX_INSTANCES=0)
+
     def test_removed_umap_environment_names_report_replacements(self) -> None:
         """Fail fast when a removed UMAP setting name is still configured."""
         for old_name, new_name in (
