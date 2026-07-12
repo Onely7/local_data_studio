@@ -726,6 +726,21 @@ tr.expanded {
   margin-bottom: 8px;
 }
 
+.eda-controls {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr);
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 10px;
+  color: var(--muted);
+  font-size: 12px;
+}
+
+.eda-controls select {
+  min-width: 0;
+  width: 100%;
+}
+
 #run-eda-query {
   background: #509483;
 }
@@ -915,7 +930,7 @@ tr.expanded {
 
 .operation-status {
   display: none;
-  margin: 8px 0 0;
+  margin: 12px 0;
   padding: 6px 8px;
   border-left: 2px solid rgba(42, 157, 143, 0.55);
   border-radius: 4px;

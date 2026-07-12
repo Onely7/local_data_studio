@@ -85,6 +85,7 @@ const elements = {
   rowInspectorRaw: document.getElementById("row-inspector-raw"),
   runEda: document.getElementById("run-eda"),
   runEdaQuery: document.getElementById("run-eda-query"),
+  edaProfileMode: document.getElementById("eda-profile-mode"),
   edaStatus: document.getElementById("eda-status"),
   edaLink: document.getElementById("eda-link"),
   atlasColumn: document.getElementById("atlas-column"),
@@ -1931,6 +1932,9 @@ function setEdaButtonsRunning(kind) {
     elements.runEdaQuery.textContent =
       kind === "query" ? "Cancel Query EDA" : "Run EDA on Query Results";
   }
+  if (elements.edaProfileMode) {
+    elements.edaProfileMode.disabled = Boolean(kind);
+  }
 }
 
 async function runEdaJob(kind) {
@@ -1946,7 +1950,8 @@ async function runEdaJob(kind) {
     return;
   }
 
-  const payload = { file: state.file };
+  const mode = elements.edaProfileMode?.value || "minimal";
+  const payload = { file: state.file, mode };
   let jobKind = "eda";
   let sourceLabel = "EDA report";
   if (kind === "query") {
@@ -1989,9 +1994,12 @@ async function runEdaJob(kind) {
     });
     if (state.file !== fileAtStart || state.edaJobId !== job.id) return;
     if (elements.edaStatus) {
-      const sampleNote = data.sample
-        ? ` Row limit: ${data.sample.toLocaleString()}.`
-        : "";
+      const sampleNote =
+        data.sample === -1
+          ? " Row limit: Unlimited."
+          : data.sample
+            ? ` Row limit: ${data.sample.toLocaleString()}.`
+            : "";
       elements.edaStatus.textContent = data.cached
         ? `Cached ${sourceLabel} ready.${sampleNote}`
         : `${sourceLabel} generated.${sampleNote}`;
