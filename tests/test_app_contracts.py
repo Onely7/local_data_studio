@@ -170,6 +170,20 @@ class ApplicationContractTests(TestCase):
         self.assertNotIn("base_url", serialized)
         self.assertNotIn("provider_options", serialized)
 
+    def test_sql_model_selector_and_request_contract_are_packaged(self) -> None:
+        """Keep model choice server-managed and submit only its profile ID."""
+        client = TestClient(app)
+        page = client.get("/").text
+        script = client.get("/app.js").text
+        stylesheet = client.get("/styles.css").text
+
+        self.assertIn('id="nl-model"', page)
+        self.assertIn('id="nl-generate"', page)
+        self.assertIn("/api/llm_models", script)
+        self.assertIn("JSON.stringify({ file: state.file, prompt, sample: sampleRow, model })", script)
+        self.assertIn(".nl-model-control", stylesheet)
+        self.assertIn(".nl-send:disabled", stylesheet)
+
     def test_nl_query_returns_selected_model_metadata(self) -> None:
         """Return generated SQL with the server-side profile identity."""
         with patch(

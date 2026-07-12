@@ -4,7 +4,7 @@
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <title>Data Viewer</title>
-    <link rel="stylesheet" href="styles.css?v=20260713-atlas-backend-detection" />
+    <link rel="stylesheet" href="styles.css?v=20260712-litellm-models" />
   </head>
   <body>
     <div class="app">
@@ -88,6 +88,12 @@
         <aside class="inspector">
           <section class="panel">
             <h3>SQL Console</h3>
+            <div class="nl-model-control">
+              <label for="nl-model">Model</label>
+              <select id="nl-model" disabled>
+                <option value="">No models configured</option>
+              </select>
+            </div>
             <div class="nl-query">
               <textarea
                 id="nl-input"
@@ -98,6 +104,7 @@
                 class="nl-send"
                 id="nl-generate"
                 aria-label="Generate SQL"
+                disabled
               >
                 ↑
               </button>
@@ -362,6 +369,6 @@ Select a row to inspect</pre
       </div>
     </div>
 
-    <script src="app.js?v=20260712-atlas-projections"></script>
+    <script src="app.js?v=20260712-litellm-models"></script>
   </body>
 </html>
