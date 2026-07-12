@@ -1,7 +1,6 @@
 """LLM-backed SQL generation helpers."""
 
 import json
-import re
 import urllib.error
 import urllib.request
 from typing import Any
@@ -9,6 +8,7 @@ from typing import Any
 from fastapi import HTTPException
 
 from .config import OPENAI_API_KEY, OPENAI_BASE_URL, OPENAI_MODEL
+from .llm_prompt import clean_generated_sql
 
 
 def _post_json(url: str, payload: dict[str, Any], headers: dict[str, str]) -> dict[str, Any]:
@@ -42,19 +42,7 @@ def _extract_openai_text(payload: dict[str, Any]) -> str:
 
 def _clean_sql(text: str) -> str:
     """Strip markdown and validate the SQL is a single SELECT/CTE."""
-    text = text.strip()
-    if text.startswith("```"):
-        text = re.sub(r"^```[a-zA-Z]*\\n", "", text)
-        text = re.sub(r"```$", "", text).strip()
-    text = text.strip()
-    if text.endswith(";"):
-        text = text[:-1].strip()
-    if ";" in text:
-        raise HTTPException(status_code=400, detail="multi-statement sql is not allowed")
-    sql_lower = text.lower()
-    if not (sql_lower.startswith("select") or sql_lower.startswith("with")):
-        raise HTTPException(status_code=400, detail="only SELECT queries are allowed")
-    return text
+    return clean_generated_sql(text)
 
 
 def generate_sql_from_prompt(
