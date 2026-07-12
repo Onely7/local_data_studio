@@ -4,7 +4,8 @@ from __future__ import annotations
 
 import os
 import re
-from collections.abc import Mapping
+from collections.abc import Mapping, Sequence
+from dataclasses import dataclass
 from typing import Any
 from urllib.parse import urlsplit
 
@@ -59,14 +60,43 @@ def _forbidden_provider_option(value: JsonValue, path: tuple[str, ...] = ()) -> 
     return None
 
 
-class LlmModelProfile(BaseModel):
-    """One selectable LiteLLM model without resolved credential values."""
+def _normalize_model_name(value: Any) -> str:
+    """Validate one explicit LiteLLM model name."""
+    normalized = str(value or "").strip()
+    if "/" not in normalized or normalized.startswith("/") or normalized.endswith("/"):
+        raise ValueError("model must include an explicit LiteLLM provider prefix")
+    if normalized.startswith("vllm/"):
+        raise ValueError("vllm/ is not supported; use hosted_vllm/")
+    return normalized
 
-    model_config = ConfigDict(extra="forbid", frozen=True)
+
+@dataclass(frozen=True, slots=True)
+class LlmModelSelection:
+    """One selectable model derived from a server-managed profile.
+
+    A selection keeps the concrete LiteLLM model separate from shared profile
+    settings such as credentials, provider options, timeouts, and base URLs.
+    """
 
     id: str
     label: str
     model: str
+    profile: LlmModelProfile
+
+    @property
+    def provider(self) -> str:
+        """Return the model's explicit LiteLLM provider prefix."""
+        return self.model.split("/", 1)[0]
+
+
+class LlmModelProfile(BaseModel):
+    """Shared configuration for one or more selectable LiteLLM models."""
+
+    model_config = ConfigDict(extra="forbid", frozen=True, populate_by_name=True)
+
+    id: str
+    label: str
+    models: tuple[str, ...] = Field(validation_alias="model")
     base_url: str | None = None
     api_key_env: str | None = None
     timeout_seconds: float | None = Field(default=None, gt=0)
@@ -90,15 +120,24 @@ class LlmModelProfile(BaseModel):
             raise ValueError("label must not be empty")
         return normalized
 
-    @field_validator("model", mode="before")
+    @field_validator("models", mode="before")
     @classmethod
-    def validate_model(cls, value: Any) -> str:
-        """Require an explicit LiteLLM provider prefix and current vLLM name."""
-        normalized = str(value or "").strip()
-        if "/" not in normalized or normalized.startswith("/") or normalized.endswith("/"):
-            raise ValueError("model must include an explicit LiteLLM provider prefix")
-        if normalized.startswith("vllm/"):
-            raise ValueError("vllm/ is not supported; use hosted_vllm/")
+    def validate_models(cls, value: Any) -> tuple[str, ...]:
+        """Accept one model or a same-provider list without duplicates."""
+        if isinstance(value, str):
+            raw_models = (value,)
+        elif isinstance(value, Sequence) and not isinstance(value, (bytes, bytearray, str)):
+            raw_models = tuple(value)
+        else:
+            raise ValueError("model must be a LiteLLM model string or a non-empty list of model strings")
+        if not raw_models:
+            raise ValueError("model must contain at least one LiteLLM model")
+        normalized = tuple(_normalize_model_name(item) for item in raw_models)
+        if len(normalized) != len(set(normalized)):
+            raise ValueError("model must not contain duplicates")
+        providers = {item.split("/", 1)[0] for item in normalized}
+        if len(providers) != 1:
+            raise ValueError("all models in one profile must use the same LiteLLM provider")
         return normalized
 
     @field_validator("base_url", mode="before")
@@ -135,8 +174,28 @@ class LlmModelProfile(BaseModel):
 
     @property
     def provider(self) -> str:
-        """Return the explicit LiteLLM provider prefix."""
-        return self.model.split("/", 1)[0]
+        """Return the shared explicit LiteLLM provider prefix."""
+        return self.models[0].split("/", 1)[0]
+
+    @property
+    def model(self) -> str:
+        """Return the first model for legacy Python callers."""
+        return self.models[0]
+
+    def selection(self, index: int) -> LlmModelSelection:
+        """Return one configured model with this profile's shared settings.
+
+        Args:
+            index: Zero-based index in the configured ``model`` list.
+
+        Raises:
+            IndexError: The requested index is outside the configured model list.
+        """
+        model = self.models[index]
+        selection_id = self.id if len(self.models) == 1 else f"{self.id}:{index}"
+        model_label = model.split("/", 1)[1]
+        label = self.label if len(self.models) == 1 else f"{self.label}: {model_label}"
+        return LlmModelSelection(id=selection_id, label=label, model=model, profile=self)
 
     def api_key(self) -> str | None:
         """Resolve the configured credential from the OS environment or .env."""
@@ -159,51 +218,72 @@ class LlmProfileRegistry(BaseModel):
 
     @model_validator(mode="after")
     def validate_registry(self) -> LlmProfileRegistry:
-        """Require unique IDs and a default that references an existing profile."""
+        """Require unique profile IDs and a valid default selection."""
         ids = [profile.id for profile in self.models]
         if len(ids) != len(set(ids)):
             raise ValueError("llm model profile ids must be unique")
-        if self.default_model and self.default_model not in ids:
-            raise ValueError("llm.default_model must reference a configured model profile")
+        selection_ids = {selection.id for selection in self.selections}
+        if self.default_model and self.default_model not in {*ids, *selection_ids}:
+            raise ValueError("llm.default_model must reference a configured profile or model selection")
         return self
 
     @property
-    def effective_default_model(self) -> str | None:
-        """Return the explicit default or the first configured profile ID."""
-        if self.default_model:
-            return self.default_model
-        return self.models[0].id if self.models else None
+    def selections(self) -> tuple[LlmModelSelection, ...]:
+        """Return all concrete models expanded from server-managed profiles."""
+        return tuple(selection for profile in self.models for index in range(len(profile.models)) for selection in (profile.selection(index),))
 
-    def profile(self, profile_id: str | None) -> LlmModelProfile:
-        """Resolve a requested profile and enforce configured credential presence.
+    @property
+    def effective_default_model(self) -> str | None:
+        """Return the default selection ID, choosing each profile's first model."""
+        if self.default_model:
+            for selection in self.selections:
+                if selection.id == self.default_model:
+                    return selection.id
+            profile = next((item for item in self.models if item.id == self.default_model), None)
+            if profile is not None:
+                return profile.selection(0).id
+        return self.selections[0].id if self.selections else None
+
+    def selection(self, selection_id: str | None) -> LlmModelSelection:
+        """Resolve an allowed model selection and enforce credential availability.
+
+        The legacy profile ID continues to resolve to that profile's first model.
 
         Raises:
-            HTTPException: No model exists, the ID is unknown, or its explicit
-                credential environment variable is unset.
+            HTTPException: No model exists, the ID is unknown, or the selected
+                profile's explicit credential environment variable is unset.
         """
-        selected = profile_id or self.effective_default_model
+        selected = selection_id or self.effective_default_model
         if selected is None:
             raise HTTPException(status_code=503, detail="no SQL generation model is configured")
-        profile = next((item for item in self.models if item.id == selected), None)
-        if profile is None:
+        selection = next((item for item in self.selections if item.id == selected), None)
+        if selection is None:
+            profile = next((item for item in self.models if item.id == selected), None)
+            selection = profile.selection(0) if profile is not None else None
+        if selection is None:
             raise HTTPException(status_code=400, detail="unknown SQL generation model")
+        profile = selection.profile
         if profile.api_key_env and profile.api_key() is None:
             raise HTTPException(status_code=503, detail=f"credential environment variable for {profile.label} is not set")
-        return profile
+        return selection
+
+    def profile(self, profile_id: str | None) -> LlmModelProfile:
+        """Return the profile for a selection, preserving the previous API."""
+        return self.selection(profile_id).profile
 
     def public_models(self) -> list[dict[str, Any]]:
         """Return browser-safe model metadata without endpoints or options."""
         default = self.effective_default_model
         return [
             {
-                "id": profile.id,
-                "label": profile.label,
-                "provider": profile.provider,
-                "available": not profile.api_key_env or profile.api_key() is not None,
-                "reason": "" if not profile.api_key_env or profile.api_key() is not None else "credential is not configured",
-                "default": profile.id == default,
+                "id": selection.id,
+                "label": selection.label,
+                "provider": selection.provider,
+                "available": not selection.profile.api_key_env or selection.profile.api_key() is not None,
+                "reason": "" if not selection.profile.api_key_env or selection.profile.api_key() is not None else "credential is not configured",
+                "default": selection.id == default,
             }
-            for profile in self.models
+            for selection in self.selections
         ]
 
 

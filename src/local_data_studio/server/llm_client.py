@@ -9,7 +9,7 @@ from typing import Any
 
 from fastapi import HTTPException
 
-from .llm_profiles import LlmModelProfile
+from .llm_profiles import LlmModelSelection
 
 
 def _load_litellm() -> Any:
@@ -47,30 +47,31 @@ def extract_completion_text(response: Any) -> str:
     return _content_text(getattr(message, "content", None))
 
 
-def _provider_failure(exc: Exception, litellm: Any, profile: LlmModelProfile) -> HTTPException:
+def _provider_failure(exc: Exception, litellm: Any, selection: LlmModelSelection) -> HTTPException:
     timeout_type = getattr(litellm, "Timeout", ())
     if timeout_type and isinstance(exc, timeout_type):
-        return HTTPException(status_code=504, detail=f"SQL generation timed out for {profile.label}")
-    return HTTPException(status_code=502, detail=f"SQL generation provider failed for {profile.label}")
+        return HTTPException(status_code=504, detail=f"SQL generation timed out for {selection.label}")
+    return HTTPException(status_code=502, detail=f"SQL generation provider failed for {selection.label}")
 
 
 def complete_text(
-    profile: LlmModelProfile,
+    selection: LlmModelSelection,
     messages: list[dict[str, str]],
     *,
     default_timeout_seconds: float,
 ) -> str:
-    """Run one non-streaming text completion through a validated model profile.
+    """Run one non-streaming text completion through a validated model selection.
 
     Raises:
         HTTPException: LiteLLM times out, the provider fails, or no assistant
             text is returned. Provider exception details are intentionally hidden.
     """
     litellm = _load_litellm()
+    profile = selection.profile
     request: dict[str, Any] = copy.deepcopy(profile.provider_options)
     request.update(
         {
-            "model": profile.model,
+            "model": selection.model,
             "messages": messages,
             "timeout": profile.timeout_seconds or default_timeout_seconds,
         }
@@ -83,8 +84,8 @@ def complete_text(
     try:
         response = litellm.completion(**request)
     except Exception as exc:
-        raise _provider_failure(exc, litellm, profile) from exc
+        raise _provider_failure(exc, litellm, selection) from exc
     text = extract_completion_text(response).strip()
     if not text:
-        raise HTTPException(status_code=502, detail=f"SQL generation provider returned no text for {profile.label}")
+        raise HTTPException(status_code=502, detail=f"SQL generation provider returned no text for {selection.label}")
     return text

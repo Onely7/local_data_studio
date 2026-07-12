@@ -21,6 +21,35 @@ def _write_config(root: Path, llm_config: str) -> Path:
 class LlmProfileTests(TestCase):
     """Validate model selection without exposing credential values."""
 
+    def test_expands_multiple_models_with_shared_profile_settings(self) -> None:
+        """Expose every configured model while sharing one profile's credentials."""
+        registry = LlmProfileRegistry.model_validate(
+            {
+                "default_model": "openai-main",
+                "models": [
+                    {
+                        "id": "openai-main",
+                        "label": "OpenAI",
+                        "model": ["openai/gpt-5.2", "openai/gpt-5.4-mini"],
+                        "provider_options": {"max_completion_tokens": 400},
+                    }
+                ],
+            }
+        )
+
+        self.assertEqual(("openai/gpt-5.2", "openai/gpt-5.4-mini"), registry.models[0].models)
+        self.assertEqual("openai/gpt-5.2", registry.models[0].model)
+        self.assertEqual("openai-main:0", registry.effective_default_model)
+        self.assertEqual("openai/gpt-5.4-mini", registry.selection("openai-main:1").model)
+        self.assertEqual("openai-main:0", registry.selection("openai-main").id)
+
+        public = registry.public_models()
+        self.assertEqual(["openai-main:0", "openai-main:1"], [item["id"] for item in public])
+        self.assertEqual(["OpenAI: gpt-5.2", "OpenAI: gpt-5.4-mini"], [item["label"] for item in public])
+        self.assertTrue(public[0]["default"])
+        self.assertNotIn("api_key_env", str(public))
+        self.assertNotIn("provider_options", str(public))
+
     def test_loads_supported_provider_profiles(self) -> None:
         """Load OpenAI, Anthropic, Gemini, and hosted vLLM profiles."""
         with TemporaryDirectory() as tmp:
@@ -91,6 +120,9 @@ provider_options = { temperature = 0, extra_body = { top_k = 20 } }
                     }
                 ]
             },
+            {"models": [{"id": "empty", "label": "Empty", "model": []}]},
+            {"models": [{"id": "duplicate", "label": "Duplicate", "model": ["openai/one", "openai/one"]}]},
+            {"models": [{"id": "mixed", "label": "Mixed", "model": ["openai/one", "gemini/two"]}]},
         )
         for config in invalid_configs:
             with self.subTest(config=config), self.assertRaises(ValidationError):
