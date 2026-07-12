@@ -197,6 +197,7 @@ cp local_data_studio.example.toml local_data_studio.toml
 ```
 
 Store any API keys in `.env` or your shell environment. The `api_key_env` setting in each model profile specifies the name of the credential variable to use.
+The `model` setting accepts either one LiteLLM model string or a list of model strings from the same provider. A list shares that profile's credentials, endpoint, timeout, and `provider_options`; each model appears separately in the SQL Console selector. When `default_model` names the profile, its first listed model is selected by default.
 
 Start the application with a configuration file as follows:
 
@@ -399,6 +400,8 @@ Feedback shown after Count Rows, EDA, and Atlas operations uses a consistent com
 Model profiles used for SQL generation are loaded from the `[llm]` section of `local_data_studio.toml`.
 Model names must include an explicit LiteLLM provider prefix such as `openai/`, `anthropic/`, `gemini/`, or `hosted_vllm/`.
 The deprecated `vllm/` prefix is not accepted.
+
+Set `model` to one model string or a list of model strings from one provider. The SQL Console exposes each listed model as a separate choice. Profiles must not mix providers because all models in a profile share the same credentials, optional endpoint, timeout, and `provider_options`.
 
 Store credentials in the environment variables referenced by `api_key_env`.
 `provider_options` contains trusted administrator-managed settings.

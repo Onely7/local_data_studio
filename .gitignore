@@ -119,6 +119,10 @@ dmypy.json
 .env.*
 !.env.example
 
+# User-specific runtime configuration. Keep the tracked template available.
+local_data_studio.toml
+!local_data_studio.example.toml
+
 .venv/
 env/
 venv/
