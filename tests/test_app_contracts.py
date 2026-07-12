@@ -105,7 +105,9 @@ class ApplicationContractTests(TestCase):
         script = client.get("/app.js").text
         stylesheet = client.get("/styles.css").text
 
-        self.assertEqual(3, response.text.count('class="operation-status"'))
+        self.assertEqual(4, response.text.count("operation-status"))
+        self.assertIn('class="operation-status nl-query-status"', response.text)
+        self.assertIn('id="nl-status"', response.text)
         self.assertNotIn('id="eda-sample"', response.text)
         self.assertIn('id="eda-profile-mode"', response.text)
         self.assertIn('<option value="minimal" selected>Minimal</option>', response.text)
@@ -114,6 +116,8 @@ class ApplicationContractTests(TestCase):
         self.assertIn("const payload = { file: state.file, mode };", script)
         self.assertIn(".operation-status:not(:empty)", stylesheet)
         self.assertIn("font-size: 12px", stylesheet)
+        self.assertIn(".nl-query-status", stylesheet)
+        self.assertIn("font-size: 11px", stylesheet)
         self.assertIn("margin: 12px 0", stylesheet)
 
     def test_blocking_routes_run_in_fastapi_threadpool(self) -> None:
