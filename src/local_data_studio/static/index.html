@@ -124,6 +124,13 @@ SELECT * FROM data LIMIT 100</textarea
                 Run EDA on Query Results
               </button>
             </div>
+            <div class="eda-controls">
+              <label for="eda-profile-mode">Profile mode</label>
+              <select id="eda-profile-mode">
+                <option value="minimal" selected>Minimal</option>
+                <option value="maximal">Maximal</option>
+              </select>
+            </div>
             <div
               class="operation-status"
               id="row-count"
@@ -131,8 +138,8 @@ SELECT * FROM data LIMIT 100</textarea
               aria-live="polite"
             ></div>
             <div class="hint">
-              EDA rows are configured with <code>EDA_ROW_LIMIT</code>. Reports
-              are cached under <code>./cache/eda</code>.
+              EDA rows use <code>EDA_ROW_LIMIT</code> (<code>-1</code> for all
+              rows). Reports are cached under <code>./cache/eda</code>.
             </div>
             <div
               class="operation-status"

@@ -92,11 +92,14 @@ class ApplicationContractTests(TestCase):
 
         self.assertEqual(3, response.text.count('class="operation-status"'))
         self.assertNotIn('id="eda-sample"', response.text)
+        self.assertIn('id="eda-profile-mode"', response.text)
+        self.assertIn('<option value="minimal" selected>Minimal</option>', response.text)
         self.assertIn("EDA_ROW_LIMIT", response.text)
         self.assertNotIn("edaSampleRequest", script)
-        self.assertIn("const payload = { file: state.file };", script)
+        self.assertIn("const payload = { file: state.file, mode };", script)
         self.assertIn(".operation-status:not(:empty)", stylesheet)
         self.assertIn("font-size: 12px", stylesheet)
+        self.assertIn("margin: 12px 0", stylesheet)
 
     def test_blocking_routes_run_in_fastapi_threadpool(self) -> None:
         """Verify that blocking routes run in fastapi threadpool."""
