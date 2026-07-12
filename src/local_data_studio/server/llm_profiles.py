@@ -8,10 +8,12 @@ from collections.abc import Mapping
 from typing import Any
 from urllib.parse import urlsplit
 
+from dotenv import dotenv_values
 from fastapi import HTTPException
 from pydantic import BaseModel, ConfigDict, Field, JsonValue, field_validator, model_validator
 
 from ..runtime_config import config_section, read_runtime_config
+from .config import ENV_FILE
 
 PROFILE_ID_PATTERN = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$")
 ENV_NAME_PATTERN = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*$")
@@ -137,10 +139,12 @@ class LlmModelProfile(BaseModel):
         return self.model.split("/", 1)[0]
 
     def api_key(self) -> str | None:
-        """Resolve the configured credential at request time."""
+        """Resolve the configured credential from the OS environment or .env."""
         if not self.api_key_env:
             return None
         value = os.environ.get(self.api_key_env)
+        if value is None and ENV_FILE.is_file():
+            value = dotenv_values(ENV_FILE).get(self.api_key_env)
         return value.strip() if value and value.strip() else None
 
 

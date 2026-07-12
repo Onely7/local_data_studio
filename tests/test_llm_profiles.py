@@ -4,6 +4,7 @@ import os
 from pathlib import Path
 from tempfile import TemporaryDirectory
 from unittest import TestCase
+from unittest.mock import patch
 
 from fastapi import HTTPException
 from pydantic import ValidationError
@@ -134,3 +135,20 @@ provider_options = { temperature = 0, extra_body = { top_k = 20 } }
         with self.assertRaises(HTTPException) as unavailable:
             LlmProfileRegistry().profile(None)
         self.assertEqual(503, unavailable.exception.status_code)
+
+    def test_resolves_credentials_from_selected_dotenv_file(self) -> None:
+        """Keep .env credentials usable without exporting them into the process."""
+        name = "LOCAL_DATA_STUDIO_DOTENV_LLM_KEY"
+        original = os.environ.pop(name, None)
+        try:
+            with TemporaryDirectory() as tmp:
+                env_file = Path(tmp) / ".env"
+                env_file.write_text(f'{name}="dotenv-secret"\n', encoding="utf-8")
+                profile = LlmProfileRegistry.model_validate(
+                    {"models": [{"id": "model", "label": "Model", "model": "openai/model", "api_key_env": name}]}
+                ).models[0]
+                with patch("local_data_studio.server.llm_profiles.ENV_FILE", env_file):
+                    self.assertEqual("dotenv-secret", profile.api_key())
+        finally:
+            if original is not None:
+                os.environ[name] = original
