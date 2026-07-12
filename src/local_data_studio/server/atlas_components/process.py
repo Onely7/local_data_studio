@@ -6,12 +6,14 @@ import os
 import queue
 import re
 import signal
+import socket
 import subprocess
 import sys
 import threading
 import time
 from pathlib import Path
 from typing import Any
+from urllib.parse import urlsplit
 
 from fastapi import HTTPException
 
@@ -26,6 +28,7 @@ from ..config import (
 from ..jobs import JobContext
 from .contracts import AtlasModality, AtlasOptions
 from .embedding_backends import effective_embedder_for_modality
+from .ports import is_browser_safe_port
 
 ATLAS_URL_PATTERN = re.compile(
     r"https?://(?:localhost|127\.0\.0\.1|0\.0\.0\.0|\[::1\])(?::\d+)?"
@@ -33,6 +36,7 @@ ATLAS_URL_PATTERN = re.compile(
 )
 ANSI_ESCAPE_PATTERN = re.compile(r"\x1b\[[0-?]*[ -/]*[@-~]")
 RUNNING_ATLAS_PROCESSES: list[subprocess.Popen[str]] = []
+ATLAS_SERVER_READY_TIMEOUT_SECONDS = 60
 
 
 def embedding_atlas_executable() -> list[str]:
@@ -60,7 +64,7 @@ def build_atlas_command(
         options.host,
         "--port",
         str(options.port),
-        "--auto-port",
+        "--no-auto-port",
     ]
     if projection_columns is not None:
         x_column, y_column, neighbors_column = projection_columns
@@ -110,6 +114,21 @@ def normalize_atlas_url(url: str) -> str:
     """Normalize wildcard hosts to a browser-reachable loopback URL."""
     cleaned = ANSI_ESCAPE_PATTERN.sub("", url).strip().rstrip(".,);")
     return cleaned.replace("://0.0.0.0", "://127.0.0.1")
+
+
+def _atlas_url_is_ready(url: str) -> bool:
+    """Return whether the loopback Atlas endpoint has started accepting TCP."""
+    parsed = urlsplit(url)
+    host = parsed.hostname
+    port = parsed.port
+    if host not in {"localhost", "127.0.0.1", "0.0.0.0", "::1"} or port is None:
+        return False
+    connect_host = "127.0.0.1" if host in {"localhost", "0.0.0.0"} else host
+    try:
+        with socket.create_connection((connect_host, port), timeout=0.4):
+            return True
+    except OSError:
+        return False
 
 
 def embedding_atlas_env() -> dict[str, str]:
@@ -178,6 +197,8 @@ def launch_embedding_atlas(command: list[str], context: JobContext) -> tuple[str
         threading.Thread(target=_reader_thread, args=(process.stdout, output), daemon=True).start()
     started = time.monotonic()
     recent_lines: list[str] = []
+    pending_url: str | None = None
+    pending_url_started: float | None = None
     try:
         while True:
             context.check_cancelled()
@@ -190,19 +211,32 @@ def launch_embedding_atlas(command: list[str], context: JobContext) -> tuple[str
                     recent_lines.append(line)
                     recent_lines = recent_lines[-12:]
                     if match := ATLAS_URL_PATTERN.search(line):
-                        url = normalize_atlas_url(match.group(0))
-                        prune_cache_dir(ATLAS_CACHE_ROOT, ATLAS_CACHE_MAX_BYTES)
-                        RUNNING_ATLAS_PROCESSES.append(process)
-                        context.update(progress=1.0, message="Embedding Atlas is ready")
-                        return url, process.pid
+                        pending_url = normalize_atlas_url(match.group(0))
+                        pending_url_started = time.monotonic()
+                        parsed_port = urlsplit(pending_url).port
+                        if parsed_port is None or not is_browser_safe_port(parsed_port):
+                            raise HTTPException(
+                                status_code=500,
+                                detail=f"Embedding Atlas selected browser-restricted port {parsed_port}",
+                            )
+                        context.update(progress=0.98, message="Waiting for the Atlas page to accept connections")
+                        continue
                     context.update(progress=None, message=line[-180:])
+            if pending_url and _atlas_url_is_ready(pending_url):
+                context.check_cancelled()
+                prune_cache_dir(ATLAS_CACHE_ROOT, ATLAS_CACHE_MAX_BYTES)
+                RUNNING_ATLAS_PROCESSES.append(process)
+                context.update(progress=1.0, message="Embedding Atlas is ready")
+                return pending_url, process.pid
             if process.poll() is not None:
                 details = "\n".join(recent_lines[-6:]) or format_process_returncode(process.returncode)
                 raise HTTPException(status_code=500, detail=f"embedding-atlas exited before producing a URL: {details}")
             elapsed = time.monotonic() - started
+            if pending_url_started is not None and time.monotonic() - pending_url_started >= ATLAS_SERVER_READY_TIMEOUT_SECONDS:
+                raise HTTPException(status_code=504, detail="Embedding Atlas did not start accepting connections within 60 seconds")
             context.update(
-                progress=min(0.95, 0.05 + elapsed / 300),
-                message=f"Running Embedding Atlas for {int(elapsed)}s",
+                progress=min(0.99, 0.96 + elapsed / 3000),
+                message=(f"Waiting for the Atlas page ({int(elapsed)}s)" if pending_url else f"Starting the Atlas server ({int(elapsed)}s)"),
             )
             time.sleep(0.5)
     except Exception:

@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import threading
 from dataclasses import replace
 from pathlib import Path
 from typing import Any, cast
@@ -10,7 +9,7 @@ from typing import Any, cast
 from fastapi import HTTPException
 
 from .. import embedder_models
-from ..config import ATLAS_PORT, ATLAS_TRUST_REMOTE_CODE, EMBEDDER_MODELS_DIR
+from ..config import ATLAS_TRUST_REMOTE_CODE, EMBEDDER_MODELS_DIR
 from ..db import open_connection, quote_ident
 from ..deleted_rows import deleted_row_ids_for
 from ..embedder_capabilities import BackendName, ModelCapabilities, analyze_model_capabilities
@@ -19,10 +18,8 @@ from ..sql import configure_duckdb_limits, create_data_view, guard_select_sql_fo
 from .contracts import AtlasModality, AtlasOptions, AtlasProjectionMethod
 from .dataset import model_label, prepare_atlas_dataset
 from .images import IMAGE_COLUMN_HINTS, is_image_like_value
+from .ports import reserve_atlas_start_port
 from .process import build_atlas_command, launch_embedding_atlas
-
-ATLAS_PORT_LOCK = threading.Lock()
-ATLAS_PORT_STATE = {"next": ATLAS_PORT}
 
 
 def discover_embedder_models() -> list[dict[str, Any]]:
@@ -65,14 +62,6 @@ def infer_atlas_modality(
     return "image" if any(hint in column.lower() for hint in IMAGE_COLUMN_HINTS) else "text"
 
 
-def reserve_atlas_start_port(options: AtlasOptions) -> AtlasOptions:
-    """Return options with a unique preferred port for concurrent Atlas jobs."""
-    with ATLAS_PORT_LOCK:
-        port = max(options.port, ATLAS_PORT_STATE["next"])
-        ATLAS_PORT_STATE["next"] = port + 1
-    return replace(options, port=port)
-
-
 def run_atlas_visualization(
     *,
     file_name: str,
@@ -104,13 +93,11 @@ def run_atlas_visualization(
     normalized_prompt = prompt if prompt and prompt.strip() else None
     if normalized_prompt and selected_backend != "sentence-transformers":
         raise HTTPException(status_code=400, detail="prompt is supported only by the sentence-transformers backend")
-    options = reserve_atlas_start_port(
-        replace(
-            base_options,
-            backend=selected_backend,
-            prompt=normalized_prompt,
-            capability_fingerprint=capabilities.fingerprint,
-        )
+    options = replace(
+        base_options,
+        backend=selected_backend,
+        prompt=normalized_prompt,
+        capability_fingerprint=capabilities.fingerprint,
     )
     prepared = prepare_atlas_dataset(
         path=path,
@@ -121,6 +108,8 @@ def run_atlas_visualization(
         options=options,
         context=context,
     )
+    context.check_cancelled()
+    options = reserve_atlas_start_port(options)
     command = build_atlas_command(
         path=prepared.path,
         column=selected_column,
@@ -131,7 +120,7 @@ def run_atlas_visualization(
         projection_columns=(prepared.x, prepared.y, prepared.neighbors),
     )
     source = "query" if guarded_sql else "dataset"
-    context.update(progress=0.15, message="Starting Embedding Atlas")
+    context.update(progress=0.96, message=f"Starting Embedding Atlas on port {options.port}")
     url, pid = launch_embedding_atlas(command, context)
     return {
         "file": file_name,

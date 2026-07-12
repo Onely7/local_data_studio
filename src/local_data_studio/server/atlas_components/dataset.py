@@ -25,7 +25,7 @@ from ..config import (
     ATLAS_TEXT_MAX_CHARS,
     EMBEDDER_MODELS_DIR,
 )
-from ..jobs import JobContext
+from ..jobs import JobCancelledError, JobContext
 from .contracts import (
     ATLAS_PROJECTION_NEIGHBORS,
     ATLAS_PROJECTION_X,
@@ -45,6 +45,12 @@ from .prompts import PromptTemplateError, compile_prompt_template
 from .sampling import sample_atlas_frame
 
 ATLAS_DATASET_CACHE_VERSION = 11
+
+
+def _check_cancelled(context: JobContext) -> None:
+    checker = getattr(context, "check_cancelled", None)
+    if checker is not None:
+        checker()
 
 
 @lru_cache(maxsize=256)
@@ -150,20 +156,29 @@ def prepare_atlas_dataset(
         model_path=model_path,
         options=options,
     )
-    with _cache_generation_lock(str(cache_path)):
+    generation_lock = _cache_generation_lock(str(cache_path))
+    while not generation_lock.acquire(timeout=0.25):
+        _check_cancelled(context)
+        context.update(progress=0.04, message="Waiting for an identical Atlas cache job")
+    tmp_path: Path | None = None
+    try:
+        _check_cancelled(context)
         if cache_path.exists():
             prune_cache_dir(ATLAS_CACHE_ROOT, ATLAS_CACHE_MAX_BYTES, preserve=(cache_path,))
-            context.update(progress=0.08, message="Using cached Atlas dataset")
+            context.update(progress=0.90, message="Using cached Atlas dataset")
             import pyarrow.parquet as pq  # noqa: PLC0415
 
             row_count = pq.ParquetFile(cache_path).metadata.num_rows
             return AtlasPreparedDataset(cache_path, ATLAS_PROJECTION_X, ATLAS_PROJECTION_Y, None, True, row_count)
 
-        context.update(progress=0.08, message="Building Atlas dataset cache")
+        context.update(progress=0.05, message="Loading the selected Atlas rows")
         prune_cache_dir(ATLAS_CACHE_ROOT, ATLAS_CACHE_MAX_BYTES)
         try:
             data_frame = load_datasets([str(path)], query=sql, sample=None)
+            _check_cancelled(context)
+            context.update(progress=0.09, message=f"Loaded {len(data_frame):,} candidate rows")
             data_frame = sample_atlas_frame(data_frame, options.sample)
+            context.update(progress=0.12, message=f"Preparing {len(data_frame):,} embedding inputs")
             prompt_template = (
                 compile_prompt_template(options.prompt, [str(column_name) for column_name in data_frame.columns], ATLAS_TEXT_MAX_CHARS)
                 if options.prompt
@@ -182,13 +197,23 @@ def prepare_atlas_dataset(
                 modality=modality,
                 model_path=model_path,
                 options=options,
+                context=context,
             )
+            _check_cancelled(context)
+            context.update(progress=0.86, message="Preparing the Atlas display dataset")
             preserve_columns = image_like_columns(output_frame)
             projected = build_atlas_output_frame(output_frame, coordinates, preserve_columns)
+            _check_cancelled(context)
+            context.update(progress=0.90, message="Writing the Atlas dataset cache")
             cache_path.parent.mkdir(parents=True, exist_ok=True)
             tmp_path = cache_path.with_name(f".{cache_path.name}.{os.getpid()}.{threading.get_ident()}.tmp")
             projected.to_parquet(tmp_path)
+            _check_cancelled(context)
             tmp_path.replace(cache_path)
+            tmp_path = None
+            context.update(progress=0.94, message="Atlas dataset cache is ready")
+        except JobCancelledError:
+            raise
         except HTTPException:
             raise
         except PromptTemplateError as exc:
@@ -196,5 +221,9 @@ def prepare_atlas_dataset(
         except Exception as exc:
             raise HTTPException(status_code=500, detail=f"Atlas dataset cache generation failed: {exc}") from exc
         finally:
+            if tmp_path is not None:
+                tmp_path.unlink(missing_ok=True)
             prune_cache_dir(ATLAS_CACHE_ROOT, ATLAS_CACHE_MAX_BYTES, preserve=(cache_path,))
         return AtlasPreparedDataset(cache_path, ATLAS_PROJECTION_X, ATLAS_PROJECTION_Y, None, False, len(projected))
+    finally:
+        generation_lock.release()

@@ -38,6 +38,7 @@ from .atlas_components.images import (
 from .atlas_components.images import (
     read_url_bytes as _read_url_bytes,
 )
+from .atlas_components.ports import reserve_atlas_start_port
 from .atlas_components.process import build_atlas_command, launch_embedding_atlas
 from .atlas_components.process import (
     embedding_atlas_env as _embedding_atlas_env,
@@ -66,7 +67,6 @@ from .atlas_components.projection import (
 from .atlas_components.service import (
     discover_embedder_models,
     infer_atlas_modality,
-    reserve_atlas_start_port,
     resolve_embedder_model,
     run_atlas_visualization,
 )

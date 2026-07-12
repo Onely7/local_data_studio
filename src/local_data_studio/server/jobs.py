@@ -99,6 +99,7 @@ class JobStore:
         try:
             context.check_cancelled()
             result = work(context)
+            context.check_cancelled()
         except JobCancelledError as exc:
             self._set_cancelled(job_id, str(exc))
         except Exception as exc:
@@ -135,6 +136,8 @@ class JobStore:
         with self._lock:
             record = self._jobs.get(job_id)
             if record is None or record.status not in {"queued", "running"}:
+                return
+            if record.cancel_requested:
                 return
             if progress is not None:
                 record.progress = max(0.0, min(1.0, progress))
