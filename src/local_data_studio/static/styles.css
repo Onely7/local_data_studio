@@ -982,6 +982,10 @@ tr.expanded {
   display: block;
 }
 
+.nl-query-status {
+  font-size: 11px;
+}
+
 .muted {
   color: var(--muted);
 }

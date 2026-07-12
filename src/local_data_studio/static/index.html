@@ -109,7 +109,12 @@
                 ↑
               </button>
             </div>
-            <div class="muted" id="nl-status"></div>
+            <div
+              class="operation-status nl-query-status"
+              id="nl-status"
+              role="status"
+              aria-live="polite"
+            ></div>
             <textarea id="sql-input" spellcheck="false">
 SELECT * FROM data LIMIT 100</textarea
             >
