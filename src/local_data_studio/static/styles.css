@@ -257,6 +257,39 @@ body {
   flex-wrap: wrap;
 }
 
+.translation-controls {
+  flex: 1 1 360px;
+  justify-content: center;
+  color: var(--muted);
+  font-size: 11px;
+}
+
+.translation-controls select {
+  min-width: 120px;
+  max-width: 210px;
+}
+
+.translation-controls #translation-language {
+  max-width: 170px;
+}
+
+.translation-status {
+  flex-basis: 100%;
+  min-height: 1.35em;
+  text-align: center;
+  color: var(--muted);
+  text-transform: none;
+  letter-spacing: 0;
+}
+
+.translation-status:empty {
+  min-height: 0;
+}
+
+.translation-cancel[hidden] {
+  display: none;
+}
+
 input,
 select,
 textarea {
@@ -402,6 +435,37 @@ th {
   cursor: pointer;
   opacity: 0;
   transition: opacity 0.2s ease;
+}
+
+.col-translate-btn {
+  position: absolute;
+  top: 7px;
+  right: 47px;
+  width: 25px;
+  height: 25px;
+  padding: 3px;
+  display: grid;
+  place-items: center;
+  border-radius: 999px;
+  border: 1px solid rgba(15, 23, 42, 0.15);
+  background: rgba(255, 255, 255, 0.9);
+  cursor: pointer;
+  opacity: 0.62;
+  transition: opacity 0.2s ease;
+}
+
+.col-translate-btn img {
+  width: 16px;
+  height: 16px;
+}
+
+.col-translate-btn:disabled {
+  opacity: 0.2;
+  cursor: not-allowed;
+}
+
+th:hover .col-translate-btn:not(:disabled) {
+  opacity: 1;
 }
 
 th:hover .col-delete-btn {
@@ -603,6 +667,39 @@ tr.expanded {
   margin-bottom: 6px;
 }
 
+.expanded-field-actions {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+}
+
+.field-translate-btn {
+  min-height: 28px;
+  padding: 4px 8px;
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  border: 1px solid rgba(30, 42, 59, 0.18);
+  border-radius: 999px;
+  background: #fff;
+  color: var(--ink);
+  font-size: 10px;
+  text-transform: none;
+  letter-spacing: 0;
+  cursor: pointer;
+  box-shadow: 0 2px 6px rgba(30, 42, 59, 0.1);
+}
+
+.field-translate-btn img {
+  width: 15px;
+  height: 15px;
+}
+
+.field-translate-btn:disabled {
+  opacity: 0.38;
+  cursor: not-allowed;
+}
+
 .expanded-label {
   font-size: 11px;
   text-transform: uppercase;
@@ -632,6 +729,28 @@ tr.expanded {
   max-height: 240px;
   overflow: auto;
   padding-right: 4px;
+}
+
+.translation-result {
+  margin-top: 8px;
+  padding-top: 7px;
+  border-top: 1px solid rgba(42, 157, 143, 0.22);
+  color: var(--ink);
+  text-transform: none;
+  letter-spacing: 0;
+}
+
+.translation-result-label {
+  margin-bottom: 4px;
+  color: var(--accent-2);
+  font-size: 10px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+
+.translation-result-expanded {
+  background: rgba(42, 157, 143, 0.04);
 }
 
 .expanded-value .image-grid {
@@ -1531,6 +1650,15 @@ tr.expanded {
 
   .toolbar-group {
     width: 100%;
+  }
+
+  .translation-controls {
+    justify-content: flex-start;
+  }
+
+  .translation-controls select {
+    flex: 1 1 140px;
+    max-width: none;
   }
 
   .overlay-card {

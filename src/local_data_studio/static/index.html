@@ -4,7 +4,7 @@
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <title>Data Viewer</title>
-    <link rel="stylesheet" href="styles.css?v=20260712-litellm-models" />
+    <link rel="stylesheet" href="styles.css?v=20260714-translation" />
   </head>
   <body>
     <div class="app">
@@ -54,6 +54,23 @@
               />
               <button id="search-btn">Search</button>
               <button class="ghost" id="clear-search">Reset</button>
+            </div>
+            <div
+              class="toolbar-group translation-controls"
+              title="Visible values are sent to the selected LLM only when you request translation."
+            >
+              <label for="translation-model">Translate</label>
+              <select id="translation-model" disabled>
+                <option value="">No translation models</option>
+              </select>
+              <label for="translation-language">To</label>
+              <select id="translation-language" disabled>
+                <option value="ja">日本語</option>
+              </select>
+              <button class="ghost translation-cancel" id="translation-cancel" type="button" hidden>
+                Cancel
+              </button>
+              <span class="translation-status" id="translation-status" role="status" aria-live="polite"></span>
             </div>
             <div class="toolbar-group">
               <label for="page-size">Rows</label>
@@ -369,6 +386,17 @@ Select a row to inspect</pre
       </div>
     </div>
 
+    <div class="confirm-overlay" id="translation-confirm-overlay">
+      <div class="confirm-card" role="dialog" aria-modal="true" aria-labelledby="translation-confirm-title">
+        <div class="confirm-title" id="translation-confirm-title">Send visible text for translation?</div>
+        <div class="confirm-message" id="translation-confirm-message"></div>
+        <div class="confirm-actions">
+          <button class="confirm-btn" id="translation-confirm-cancel" type="button">Cancel</button>
+          <button class="confirm-btn confirm-btn--danger" id="translation-confirm-run" type="button">Translate</button>
+        </div>
+      </div>
+    </div>
+
     <div class="confirm-overlay" id="error-overlay">
       <div class="confirm-card">
         <div class="confirm-title">Error</div>
@@ -379,6 +407,6 @@ Select a row to inspect</pre
       </div>
     </div>
 
-    <script type="module" src="app.js?v=20260712-litellm-models"></script>
+    <script type="module" src="app.js?v=20260714-translation"></script>
   </body>
 </html>

@@ -35,6 +35,11 @@ export async function cancelJob(jobId) {
 export async function waitForJob(jobId, options = {}) {
   const intervalMs = options.intervalMs || 600;
   while (true) {
+    if (options.signal?.aborted) {
+      const error = new Error("Operation aborted");
+      error.name = "AbortError";
+      throw error;
+    }
     const job = await fetchJSON(`/api/jobs/${jobId}`);
     if (options.onUpdate) {
       options.onUpdate(job);

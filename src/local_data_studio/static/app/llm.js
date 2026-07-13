@@ -19,23 +19,24 @@ export function updateNlGenerateState() {
 function renderLlmModelOptions() {
   if (!elements.nlModel) return;
   const current = selectedLlmModel();
-  const options = state.llmModels.length
-    ? state.llmModels.map((model) => {
+  const sqlModels = state.llmModels.filter((model) => model.sql_generation !== false);
+  const options = sqlModels.length
+    ? sqlModels.map((model) => {
         const suffix = model.available ? "" : " (unavailable)";
         const title = model.reason ? ` title="${escapeHtml(model.reason)}"` : "";
         return `<option value="${escapeHtml(model.id)}"${model.available ? "" : " disabled"}${title}>${escapeHtml(model.label)}${suffix}</option>`;
       })
     : ['<option value="">No models configured</option>'];
   elements.nlModel.innerHTML = options.join("");
-  const selected = state.llmModels.some(
+  const selected = sqlModels.some(
     (model) => model.id === current && model.available,
   )
     ? current
-    : state.llmModels.find(
+    : sqlModels.find(
         (model) => model.id === state.llmDefaultModel && model.available,
-      )?.id || state.llmModels.find((model) => model.available)?.id || "";
+      )?.id || sqlModels.find((model) => model.available)?.id || "";
   elements.nlModel.value = selected;
-  elements.nlModel.disabled = !state.llmModels.some((model) => model.available);
+  elements.nlModel.disabled = !sqlModels.some((model) => model.available);
   updateNlGenerateState();
 }
 
@@ -44,15 +45,17 @@ export async function loadLlmModels() {
     const data = await fetchJSON("/api/llm_models");
     state.llmModels = data.models || [];
     state.llmDefaultModel = data.default_model || "";
+    state.translationDefaultModel = data.default_translation_model || "";
   } catch (err) {
     state.llmModels = [];
     state.llmDefaultModel = "";
+    state.translationDefaultModel = "";
     if (elements.nlStatus) {
       elements.nlStatus.textContent = extractErrorMessage(err);
     }
   }
   renderLlmModelOptions();
-  if (!state.llmModels.some((model) => model.available) && elements.nlStatus) {
+  if (!state.llmModels.some((model) => model.sql_generation !== false && model.available) && elements.nlStatus) {
     elements.nlStatus.textContent = "Configure an available LLM model to generate SQL.";
   }
 }

@@ -51,6 +51,15 @@ export const state = {
   llmModels: [],
   llmDefaultModel: "",
   nlGenerating: false,
+  translationLanguages: [],
+  translationLimits: {},
+  translationDefaultLanguage: "ja",
+  translationDefaultModel: "",
+  translationCache: new Map(),
+  translationPendingKeys: new Set(),
+  translationJobId: null,
+  translationGeneration: 0,
+  translationController: null,
 };
 
 export const UPLOAD_EXTENSIONS = new Set([".jsonl", ".parquet", ".csv", ".tsv"]);
