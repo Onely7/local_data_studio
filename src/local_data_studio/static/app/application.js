@@ -39,6 +39,16 @@ import {
   updateNlGenerateState,
 } from "./llm.js";
 import { MAX_IMAGE_CANDIDATES, state, UPLOAD_EXTENSIONS } from "./state.js";
+import {
+  bindTranslationControls,
+  createColumnTranslationButton,
+  expandedTranslationButtonMarkup,
+  loadTranslationConfig,
+  renderTranslationControls,
+  translateCell,
+  translateColumn,
+  translationResultMarkup,
+} from "./translation.js";
 
 function resetRowInspectorRaw() {
   state.rowInspectorRaw = false;
@@ -314,6 +324,8 @@ function renderTable() {
 
     th.appendChild(wrapper);
 
+    th.appendChild(createColumnTranslationButton(col));
+
     const deleteBtn = document.createElement("button");
     deleteBtn.type = "button";
     deleteBtn.className = "col-delete-btn";
@@ -345,7 +357,7 @@ function renderTable() {
       const cell = row[idx];
       const td = document.createElement("td");
       td.dataset.colIndex = String(idx);
-      td.innerHTML = formatCell(cell);
+      td.innerHTML = `${formatCell(cell)}${translationResultMarkup(rowIndex, idx)}`;
       tr.appendChild(td);
     });
     elements.tableBody.appendChild(tr);
@@ -371,13 +383,18 @@ function renderTable() {
           const jsonButton = showJson
             ? `<button class="json-detail-btn" data-row="${rowIndex}" data-col="${idx}" type="button" title="JSON View">{}</button>`
             : "";
+          const translateButton = expandedTranslationButtonMarkup(
+            rowIndex,
+            idx,
+            value,
+          );
           return `
             <div class="expanded-field">
               <div class="expanded-field-header">
                 <div class="expanded-label">${escapeHtml(col)}</div>
-                ${jsonButton}
+                <div class="expanded-field-actions">${translateButton}${jsonButton}</div>
               </div>
-              <div class="expanded-value">${formatExpandedCell(value)}</div>
+              <div class="expanded-value">${formatExpandedCell(value)}${translationResultMarkup(rowIndex, idx, true)}</div>
             </div>
           `;
         })
@@ -1624,6 +1641,12 @@ function attachEvents() {
 
   if (elements.tableHead) {
     elements.tableHead.addEventListener("click", (event) => {
+      const translateBtn = event.target.closest(".col-translate-btn");
+      if (translateBtn) {
+        event.stopPropagation();
+        translateColumn(translateBtn.dataset.col, renderTable);
+        return;
+      }
       const deleteBtn = event.target.closest(".col-delete-btn");
       if (deleteBtn) {
         event.stopPropagation();
@@ -1669,6 +1692,16 @@ function attachEvents() {
   }
 
   elements.tableBody.addEventListener("click", (event) => {
+    const translateBtn = event.target.closest(".field-translate-btn");
+    if (translateBtn) {
+      event.stopPropagation();
+      const rowIndex = Number(translateBtn.dataset.row);
+      const colIndex = Number(translateBtn.dataset.col);
+      if (Number.isFinite(rowIndex) && Number.isFinite(colIndex)) {
+        translateCell(rowIndex, colIndex, renderTable);
+      }
+      return;
+    }
     const jsonBtn = event.target.closest(".json-detail-btn");
     if (jsonBtn) {
       const rowIndex = Number(jsonBtn.dataset.row);
@@ -1768,20 +1801,27 @@ function attachEvents() {
       if (event.key === "Escape") closeJsonOverlay();
     });
   }
+  bindTranslationControls(renderTable);
 }
 
 attachEvents();
 updateRowActions();
 loadConfig()
-  .then(() => Promise.all([loadEmbedderModels(), loadLlmModels()]))
-  .then(() => loadFiles())
+  .then(() =>
+    Promise.all([loadEmbedderModels(), loadLlmModels(), loadTranslationConfig()]),
+  )
+  .then(() => {
+    renderTranslationControls();
+    return loadFiles();
+  })
   .catch((err) => {
     console.error(err);
-    Promise.all([loadEmbedderModels(), loadLlmModels()])
+    Promise.all([loadEmbedderModels(), loadLlmModels(), loadTranslationConfig()])
       .catch((error) => {
         console.error(error);
       })
       .finally(() => {
+        renderTranslationControls();
         loadFiles().catch((error) => {
           console.error(error);
         });

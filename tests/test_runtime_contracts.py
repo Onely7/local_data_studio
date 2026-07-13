@@ -46,6 +46,10 @@ EXPECTED_STATIC_IDS = (
     "search-input",
     "search-btn",
     "clear-search",
+    "translation-model",
+    "translation-language",
+    "translation-cancel",
+    "translation-status",
     "page-size",
     "prev-page",
     "page-info",
@@ -106,6 +110,11 @@ EXPECTED_STATIC_IDS = (
     "column-delete-cancel",
     "column-delete-soft",
     "column-delete-hard",
+    "translation-confirm-overlay",
+    "translation-confirm-title",
+    "translation-confirm-message",
+    "translation-confirm-cancel",
+    "translation-confirm-run",
     "error-overlay",
     "error-message",
     "error-ok",
@@ -125,8 +134,8 @@ class RuntimeContractTests(TestCase):
         collector.feed(response.text)
 
         self.assertEqual(EXPECTED_STATIC_IDS, tuple(collector.ids))
-        self.assertEqual(["styles.css?v=20260712-litellm-models"], collector.stylesheets)
-        self.assertEqual(["app.js?v=20260712-litellm-models"], collector.scripts)
+        self.assertEqual(["styles.css?v=20260714-translation"], collector.stylesheets)
+        self.assertEqual(["app.js?v=20260714-translation"], collector.scripts)
 
     def test_static_entrypoint_loads_application_as_an_es_module(self) -> None:
         """Keep the stable app URL while implementation modules remain package assets."""
@@ -135,13 +144,15 @@ class RuntimeContractTests(TestCase):
             entrypoint = client.get("/app.js")
             application = client.get("/app/application.js")
             stylesheet = client.get("/styles.css")
+            translation_icon = client.get("/icons/translation.svg")
 
-        self.assertIn('<script type="module" src="app.js?v=20260712-litellm-models"></script>', page)
+        self.assertIn('<script type="module" src="app.js?v=20260714-translation"></script>', page)
         self.assertEqual('import "./app/application.js";\n', entrypoint.text)
         self.assertEqual(200, application.status_code)
         self.assertIn('from "./state.js"', application.text)
         self.assertNotIn('document.createElement("style")', application.text)
         self.assertIn(".info-grid {", stylesheet.text)
+        self.assertEqual("image/svg+xml", translation_icon.headers["content-type"])
 
     def test_static_modules_declare_cross_module_dependencies(self) -> None:
         """Prevent non-empty model data and deferred UI actions from using missing globals."""
@@ -150,6 +161,7 @@ class RuntimeContractTests(TestCase):
         atlas = (static_app / "atlas.js").read_text(encoding="utf-8")
         images = (static_app / "images.js").read_text(encoding="utf-8")
         llm = (static_app / "llm.js").read_text(encoding="utf-8")
+        translation = (static_app / "translation.js").read_text(encoding="utf-8")
 
         self.assertIn('import { escapeHtml } from "./formatting.js";', atlas)
         self.assertIn('import { escapeHtml } from "./formatting.js";', llm)
@@ -157,6 +169,25 @@ class RuntimeContractTests(TestCase):
         self.assertIn("export function openAtlasUrl", atlas)
         self.assertIn("imageCandidate,", application)
         self.assertIn("openAtlasUrl,", application)
+        self.assertIn('from "./translation.js"', application)
+        self.assertIn('startJob("translation"', translation)
+        self.assertIn('translationConfirmOverlay.classList.add("active")', translation)
+        self.assertNotIn('translationConfirmOverlay.classList.add("open")', translation)
+
+    def test_translation_client_classifies_visible_values_without_source_fetches(self) -> None:
+        """Keep translation input browser-local and exclude obvious machine values."""
+        node = shutil.which("node")
+        if node is None:
+            self.skipTest("Node.js is unavailable")
+        module = Path(__file__).parents[1] / "src" / "local_data_studio" / "static" / "app" / "translation.js"
+        script = f"""
+globalThis.document = {{ getElementById: () => null, querySelector: () => null, querySelectorAll: () => [] }};
+globalThis.window = {{ location: {{ origin: "http://127.0.0.1:8000" }} }};
+const translation = await import({str(module.as_uri())!r});
+const values = translation.collectTranslatableStrings({{ title: "Hello world", label: "cat", image: "images/example.png", url: "https://example.com" }});
+if (JSON.stringify(values) !== JSON.stringify(["Hello world", "cat"])) throw new Error(`unexpected translation values: ${{JSON.stringify(values)}}`);
+"""
+        subprocess.run([node, "--experimental-default-type=module", "--input-type=module", "--eval", script], check=True)
 
     def test_static_model_renderers_run_with_non_empty_models(self) -> None:
         """Render configured LLM and embedder models without relying on legacy globals."""
