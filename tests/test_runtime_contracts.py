@@ -125,6 +125,21 @@ class RuntimeContractTests(TestCase):
         self.assertEqual(["styles.css?v=20260712-litellm-models"], collector.stylesheets)
         self.assertEqual(["app.js?v=20260712-litellm-models"], collector.scripts)
 
+    def test_static_entrypoint_loads_application_as_an_es_module(self) -> None:
+        """Keep the stable app URL while implementation modules remain package assets."""
+        with TestClient(app) as client:
+            page = client.get("/").text
+            entrypoint = client.get("/app.js")
+            application = client.get("/app/application.js")
+            stylesheet = client.get("/styles.css")
+
+        self.assertIn('<script type="module" src="app.js?v=20260712-litellm-models"></script>', page)
+        self.assertEqual('import "./app/application.js";\n', entrypoint.text)
+        self.assertEqual(200, application.status_code)
+        self.assertIn('from "./state.js"', application.text)
+        self.assertNotIn('document.createElement("style")', application.text)
+        self.assertIn(".info-grid {", stylesheet.text)
+
     def test_reader_and_atlas_facades_keep_supported_public_callables(self) -> None:
         """Keep imports used by API routes and extension code available."""
         for name in (
