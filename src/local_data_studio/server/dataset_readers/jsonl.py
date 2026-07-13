@@ -39,8 +39,11 @@ def _create_jsonl_metadata(path: Path, sample_rows: int = JSONL_SCHEMA_SAMPLE_RO
     scanned = 0
     with path.open("rb") as file:
         while sampled < sample_rows and scanned < JSONL_SCHEMA_MAX_SCANNED_LINES and file.tell() < JSONL_SCHEMA_MAX_BYTES:
-            line = file.readline()
+            remaining_bytes = JSONL_SCHEMA_MAX_BYTES - file.tell()
+            line = file.readline(remaining_bytes + 1)
             if not line:
+                break
+            if len(line) > remaining_bytes:
                 break
             scanned += 1
             if not line.strip():

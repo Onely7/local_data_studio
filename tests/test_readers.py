@@ -49,7 +49,35 @@ class ReaderPreviewTests(TestCase):
             metadata = jsonl_reader._create_jsonl_metadata(Path("unused.jsonl"))
 
         self.assertEqual([], metadata.columns)
-        self.assertLessEqual(stream.tell(), line_reader.JSONL_SCHEMA_MAX_BYTES + len(invalid_line))
+        self.assertLessEqual(stream.tell(), line_reader.JSONL_SCHEMA_MAX_BYTES + 1)
+
+    def test_jsonl_schema_does_not_materialize_one_oversized_line(self) -> None:
+        """Bound a single ``readline`` call by the remaining schema budget."""
+
+        class TrackingBytesIO(BytesIO):
+            """Record the largest bounded read request."""
+
+            def __init__(self, value: bytes) -> None:
+                """Initialize the stream and request tracker."""
+                super().__init__(value)
+                self.maximum_request = 0
+
+            def readline(self, size: int = -1) -> bytes:
+                """Track the caller-provided byte bound."""
+                self.maximum_request = max(self.maximum_request, size)
+                return super().readline(size)
+
+            def close(self) -> None:
+                """Keep the stream available for post-call assertions."""
+
+        stream = TrackingBytesIO(b"x" * (line_reader.JSONL_SCHEMA_MAX_BYTES * 2))
+
+        with patch.object(Path, "open", return_value=stream):
+            metadata = jsonl_reader._create_jsonl_metadata(Path("unused.jsonl"))
+
+        self.assertEqual([], metadata.columns)
+        self.assertEqual(line_reader.JSONL_SCHEMA_MAX_BYTES + 1, stream.maximum_request)
+        self.assertEqual(line_reader.JSONL_SCHEMA_MAX_BYTES + 1, stream.tell())
 
     def test_delimited_reader_supports_fields_larger_than_128_kib(self) -> None:
         """Verify that delimited reader supports fields larger than 128 kib."""
