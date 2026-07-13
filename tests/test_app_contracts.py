@@ -46,6 +46,23 @@ EXPECTED_API_OPERATIONS = {
     ("/api/upload", "post"),
 }
 
+STATIC_APPLICATION_MODULES = (
+    "/app.js",
+    "/app/application.js",
+    "/app/atlas.js",
+    "/app/dom.js",
+    "/app/formatting.js",
+    "/app/http.js",
+    "/app/images.js",
+    "/app/llm.js",
+    "/app/state.js",
+)
+
+
+def _packaged_application_source(client: TestClient) -> str:
+    """Return every shipped application module as one searchable contract."""
+    return "\n".join(client.get(path).text for path in STATIC_APPLICATION_MODULES)
+
 
 class ApplicationContractTests(TestCase):
     """Test application contract behavior."""
@@ -91,7 +108,7 @@ class ApplicationContractTests(TestCase):
         """Keep all projection choices and the UMAP default in the shipped UI."""
         client = TestClient(app)
         response = client.get("/")
-        script = client.get("/app.js").text
+        script = _packaged_application_source(client)
 
         self.assertIn('id="atlas-projection"', response.text)
         self.assertIn('<option value="umap" selected>UMAP</option>', response.text)
@@ -109,7 +126,7 @@ class ApplicationContractTests(TestCase):
         """Keep post-action feedback consistent and EDA row limits environment-owned."""
         client = TestClient(app)
         response = client.get("/")
-        script = client.get("/app.js").text
+        script = _packaged_application_source(client)
         stylesheet = client.get("/styles.css").text
 
         self.assertEqual(4, response.text.count("operation-status"))
@@ -185,7 +202,7 @@ class ApplicationContractTests(TestCase):
         """Keep model choice server-managed and submit only its selection ID."""
         client = TestClient(app)
         page = client.get("/").text
-        script = client.get("/app.js").text
+        script = _packaged_application_source(client)
         stylesheet = client.get("/styles.css").text
 
         self.assertIn('id="nl-model"', page)

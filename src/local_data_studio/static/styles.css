@@ -1542,3 +1542,27 @@ tr.expanded {
     width: 94vw;
   }
 }
+
+.info-grid {
+  display: grid;
+  grid-template-columns: 1fr auto;
+  gap: 6px 12px;
+  font-size: 12px;
+}
+
+.info-row {
+  display: contents;
+}
+
+.chip-grid {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.chip {
+  padding: 4px 8px;
+  border-radius: 999px;
+  background: rgba(42, 157, 143, 0.15);
+  font-size: 11px;
+}
