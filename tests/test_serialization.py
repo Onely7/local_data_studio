@@ -26,6 +26,30 @@ class SerializationTests(TestCase):
 
         self.assertIn("__truncated__", serialized)
 
+    def test_serialize_value_only_iterates_the_bounded_dict_prefix(self) -> None:
+        """Avoid materializing every item before applying the field limit."""
+
+        class TrackingDict(dict):
+            """Count items requested from a deliberately large mapping."""
+
+            def __init__(self) -> None:
+                """Create a mapping and reset its iteration counter."""
+                super().__init__((str(index), index) for index in range(MAX_SEQ_ITEMS + 100))
+                self.yielded = 0
+
+            def items(self):  # noqa: ANN201
+                """Yield items while recording bounded consumption."""
+                for item in super().items():
+                    self.yielded += 1
+                    yield item
+
+        value = TrackingDict()
+
+        serialized = serialize_value(value)
+
+        self.assertEqual(MAX_SEQ_ITEMS, value.yielded)
+        self.assertIn("__truncated__", serialized)
+
     def test_serialize_value_truncates_large_bytes(self) -> None:
         """Verify that serialize value truncates large bytes."""
         value = b"x" * (MAX_CELL_CHARS + 1)

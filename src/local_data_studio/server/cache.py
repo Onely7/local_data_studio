@@ -4,6 +4,8 @@ from __future__ import annotations
 
 import hashlib
 import json
+import stat as stat_module
+import threading
 from collections.abc import Iterable
 from dataclasses import dataclass
 from pathlib import Path
@@ -20,18 +22,41 @@ for cache_dir in (COUNT_CACHE_DIR, METADATA_CACHE_DIR, INDEX_CACHE_DIR, SEARCH_C
     cache_dir.mkdir(parents=True, exist_ok=True)
 
 
-def _file_size(path: Path) -> int:
-    try:
-        return path.stat().st_size
-    except OSError:
-        return 0
+@dataclass(frozen=True, slots=True)
+class _CacheFile:
+    path: Path
+    size: int
+    modified_ns: int
 
 
-def _file_mtime(path: Path) -> float:
-    try:
-        return path.stat().st_mtime
-    except OSError:
-        return 0.0
+_CACHE_LOCKS_GUARD = threading.Lock()
+_CACHE_LOCKS: dict[Path, threading.Lock] = {}
+
+
+def _cache_lock(cache_dir: Path) -> threading.Lock:
+    resolved = cache_dir.resolve()
+    with _CACHE_LOCKS_GUARD:
+        return _CACHE_LOCKS.setdefault(resolved, threading.Lock())
+
+
+def _scan_cache_files(cache_dir: Path) -> list[_CacheFile]:
+    files: list[_CacheFile] = []
+    for path in cache_dir.rglob("*"):
+        try:
+            stat = path.stat()
+        except OSError:
+            continue
+        if stat_module.S_ISREG(stat.st_mode):
+            files.append(_CacheFile(path=path, size=stat.st_size, modified_ns=stat.st_mtime_ns))
+    return files
+
+
+def _remove_empty_cache_dirs(cache_dir: Path) -> None:
+    for directory in sorted((path for path in cache_dir.rglob("*") if path.is_dir()), key=lambda item: len(item.parts), reverse=True):
+        try:
+            directory.rmdir()
+        except OSError:
+            pass
 
 
 def prune_cache_dir(cache_dir: Path, max_bytes: int, *, preserve: Iterable[Path] | None = None) -> int:
@@ -42,45 +67,24 @@ def prune_cache_dir(cache_dir: Path, max_bytes: int, *, preserve: Iterable[Path]
     configured capacity.
     """
     protected_paths = {path.resolve() for path in preserve or ()}
-    if max_bytes <= 0:
-        if cache_dir.exists():
-            for path in sorted(cache_dir.rglob("*"), key=lambda item: len(item.parts), reverse=True):
-                if path.resolve() in protected_paths:
-                    continue
-                if path.is_file():
-                    path.unlink(missing_ok=True)
-                elif path.is_dir():
-                    try:
-                        path.rmdir()
-                    except OSError:
-                        pass
+    with _cache_lock(cache_dir):
         cache_dir.mkdir(parents=True, exist_ok=True)
-        return sum(_file_size(path) for path in cache_dir.rglob("*") if path.is_file())
-
-    cache_dir.mkdir(parents=True, exist_ok=True)
-    files = [path for path in cache_dir.rglob("*") if path.is_file()]
-    total = sum(_file_size(path) for path in files)
-    if total <= max_bytes:
-        return total
-
-    for path in sorted(files, key=lambda item: (_file_mtime(item), item.as_posix())):
-        if path.resolve() in protected_paths:
-            continue
-        try:
-            size = path.stat().st_size
-            path.unlink()
-            total -= size
-        except OSError:
-            continue
-        if total <= max_bytes:
-            break
-
-    for directory in sorted((path for path in cache_dir.rglob("*") if path.is_dir()), key=lambda item: len(item.parts), reverse=True):
-        try:
-            directory.rmdir()
-        except OSError:
-            pass
-    return max(total, 0)
+        files = _scan_cache_files(cache_dir)
+        total = sum(entry.size for entry in files)
+        target_bytes = max(max_bytes, 0)
+        if total > target_bytes:
+            for entry in sorted(files, key=lambda item: (item.modified_ns, item.path.as_posix())):
+                if entry.path.resolve() in protected_paths:
+                    continue
+                try:
+                    entry.path.unlink()
+                except OSError:
+                    continue
+                total -= entry.size
+                if total <= target_bytes:
+                    break
+        _remove_empty_cache_dirs(cache_dir)
+        return max(total, 0)
 
 
 @dataclass(frozen=True, slots=True)

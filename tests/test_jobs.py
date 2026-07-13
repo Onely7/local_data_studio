@@ -63,3 +63,46 @@ class JobStoreTests(TestCase):
         with self.assertRaisesRegex(RuntimeError, "shutting down"):
             store.submit("count", lambda context: {})  # noqa: ARG005
         store.shutdown(wait_timeout=0)
+
+    def test_terminal_history_is_bounded_without_evicting_active_jobs(self) -> None:
+        """Retain only the newest terminal records while active work remains."""
+        store = JobStore(max_workers=2, max_terminal_jobs=2)
+        release_active = Event()
+        active_started = Event()
+
+        def active_work(context):  # noqa: ANN001
+            active_started.set()
+            release_active.wait(timeout=2)
+            return {"active": True}
+
+        active = store.submit("active", active_work)
+        self.assertTrue(active_started.wait(timeout=2))
+        completed = [store.submit("quick", lambda context, index=index: {"index": index}) for index in range(3)]  # noqa: ARG005
+
+        for record in completed:
+            for _ in range(200):
+                snapshot = store.get(record.job_id)
+                if snapshot is None or snapshot.status == "succeeded":
+                    break
+                sleep(0.01)
+
+        self.assertIsNotNone(store.get(active.job_id))
+        self.assertIsNone(store.get(completed[0].job_id))
+        self.assertIsNotNone(store.get(completed[1].job_id))
+        self.assertIsNotNone(store.get(completed[2].job_id))
+        release_active.set()
+        store.shutdown(wait_timeout=2)
+
+    def test_get_returns_a_detached_result_mapping(self) -> None:
+        """Prevent API callers from mutating the live job result mapping."""
+        store = JobStore(max_workers=1)
+        record = store.submit("quick", lambda context: {"value": "original"})  # noqa: ARG005
+        self.assertTrue(store.wait_for_idle(2))
+
+        first = store.get(record.job_id)
+        self.assertIsNotNone(first)
+        first.result["value"] = "changed"
+
+        second = store.get(record.job_id)
+        self.assertEqual("original", second.result["value"])
+        store.shutdown(wait_timeout=0)

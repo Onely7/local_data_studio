@@ -3,6 +3,8 @@
 from __future__ import annotations
 
 import json
+import os
+import tempfile
 from pathlib import Path
 from typing import Any
 
@@ -51,11 +53,30 @@ def load_cached_result(cache_path: Path) -> dict[str, Any] | None:
 
 
 def write_cached_result(cache_path: Path, result: dict[str, Any]) -> None:
-    """Replace a JSON cache file with the supplied result.
+    """Atomically replace a JSON cache file with the supplied result.
 
     The caller retains ownership of ``result``; this function does not mutate it.
     """
-    cache_path.write_text(json.dumps(result, ensure_ascii=False, indent=2), encoding="utf-8")
+    cache_path.parent.mkdir(parents=True, exist_ok=True)
+    temporary_path: Path | None = None
+    try:
+        with tempfile.NamedTemporaryFile(
+            mode="w",
+            encoding="utf-8",
+            dir=cache_path.parent,
+            prefix=f".{cache_path.name}.",
+            suffix=".tmp",
+            delete=False,
+        ) as temporary:
+            json.dump(result, temporary, ensure_ascii=False, indent=2)
+            temporary.flush()
+            os.fsync(temporary.fileno())
+            temporary_path = Path(temporary.name)
+        os.replace(temporary_path, cache_path)
+        temporary_path = None
+    finally:
+        if temporary_path is not None:
+            temporary_path.unlink(missing_ok=True)
 
 
 def _load_cached_stats(path: Path, sample: int) -> dict[str, Any] | None:
