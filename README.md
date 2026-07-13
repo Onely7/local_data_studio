@@ -449,7 +449,7 @@ For **Run EDA on Query Results**, internal helper columns such as `rn` and `__ro
 
 An Embedding Atlas job computes embeddings with the selected local encoder model and then reduces those embeddings to two dimensions, so processing may take some time.
 
-Parquet files containing embeddings and two-dimensional coordinates are stored in `./cache/atlas/datasets`.
+Parquet files containing the selected display rows and their two-dimensional coordinates are stored in `./cache/atlas/datasets`.
 An existing cache entry is reused only when all of the following match:
 
 - Dataset fingerprint
@@ -464,8 +464,9 @@ An existing cache entry is reused only when all of the following match:
 Columns used for image display preserve their original URL, path, or `{bytes, path}` representation.
 Values converted into encoder input format are stored only in an internal embedding-input column.
 
-`ATLAS_SAMPLE=N` limits the number of rows used for embedding computation, dimensionality reduction, and the cached Parquet file to at most `N` after SQL filtering.
-However, in the current implementation, it does not limit the initial number of rows loaded into the DataFrame.
+`ATLAS_SAMPLE=N` applies deterministic sampling in DuckDB after SQL filtering and before pandas DataFrame creation. At most `N` rows are therefore materialized for embedding computation, dimensionality reduction, and the cached Parquet file. Setting `ATLAS_SAMPLE=0` keeps the unbounded all-row behavior.
+
+Text and prompt templates are expanded only for the current embedding batch. Image bytes are decoded into a temporary disk-backed spool and loaded into memory only for the current batch; the spool is removed after success, failure, or cancellation. Full UMAP, t-SNE, and PCA still require the complete sampled embedding matrix. `anchor_transform` avoids retaining non-anchor embeddings after each transform batch.
 
 UMAP supports both `full` and `anchor_transform` modes.
 t-SNE and PCA perform dimensionality reduction over all sampled embeddings together.
@@ -523,7 +524,7 @@ Caches are separated by purpose and stored in the following directories:
 - `./cache/atlas`
 
 Embedding Atlas caches are stored under `./cache/atlas`, and Parquet files containing dimensionality-reduced coordinates are stored in `./cache/atlas/datasets`.
-The total EDA report size is controlled by `EDA_CACHE_MAX_BYTES`, while the total Embedding Atlas cache size is controlled by `ATLAS_CACHE_MAX_BYTES`. When either limit is exceeded, the oldest files in the corresponding cache are removed first.
+The total EDA report size is controlled by `EDA_CACHE_MAX_BYTES`, while the total Embedding Atlas cache size is controlled by `ATLAS_CACHE_MAX_BYTES`. When either limit is exceeded, the oldest files in the corresponding cache are removed first. Cache replacement is atomic, so interrupted writes do not replace a valid JSON cache with a partial file.
 
 Caches that use fingerprints are invalidated based on the source file path, size, and modification time.
 Here, invalidation means that an old cache entry is not reused when the source file is considered to have changed.
