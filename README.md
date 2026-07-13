@@ -46,10 +46,10 @@ Choose the installation method that matches how you plan to use Local Data Studi
 
 ### Install from PyPI
 
-Once the package has been published, install it with the following command:
+Install it with the following command:
 
 ```bash
-python -m pip install local-data-studio
+pip install local-data-studio
 ```
 
 After installation, you can start the application with either of the following commands:
