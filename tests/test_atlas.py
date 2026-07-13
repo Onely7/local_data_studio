@@ -86,7 +86,7 @@ class AtlasModelDiscoveryTests(TestCase):
     def test_atlas_command_loads_projection_cache_patch(self) -> None:
         """Verify that atlas command loads projection cache patch."""
         with patch(
-            "local_data_studio.server.atlas_components.process.effective_embedder_for_modality",
+            "local_data_studio.server.atlas_components.command.effective_embedder_for_modality",
             return_value="transformers",
         ):
             command = build_atlas_command(
@@ -661,7 +661,7 @@ class AtlasModelDiscoveryTests(TestCase):
                 patch("local_data_studio.server.atlas_components.dataset.load_datasets", side_effect=fake_load_datasets),
                 patch("local_data_studio.server.atlas_components.dataset.project_atlas_frame", side_effect=fake_project_atlas_frame),
                 patch("local_data_studio.server.atlas_components.dataset.effective_embedder_for_modality", return_value="transformers"),
-                patch("local_data_studio.server.atlas_components.images.read_url_bytes", return_value=b"\xff\xd8\xfftest"),
+                patch("local_data_studio.server.atlas_components.image_values.read_url_bytes", return_value=b"\xff\xd8\xfftest"),
             ):
                 prepared = prepare_atlas_dataset(
                     path=data_path,
@@ -735,7 +735,7 @@ class AtlasModelDiscoveryTests(TestCase):
                 patch("local_data_studio.server.atlas_components.dataset.load_datasets", side_effect=fake_load_datasets),
                 patch("local_data_studio.server.atlas_components.dataset.project_atlas_frame", side_effect=fake_project_atlas_frame),
                 patch("local_data_studio.server.atlas_components.dataset.effective_embedder_for_modality", return_value="transformers"),
-                patch("local_data_studio.server.atlas_components.images.read_url_bytes", side_effect=fake_read_url_bytes),
+                patch("local_data_studio.server.atlas_components.image_values.read_url_bytes", side_effect=fake_read_url_bytes),
             ):
                 prepared = prepare_atlas_dataset(
                     path=data_path,
@@ -938,7 +938,7 @@ class AtlasModelDiscoveryTests(TestCase):
                 patch("local_data_studio.server.atlas_components.dataset.load_datasets", side_effect=fake_load_datasets),
                 patch("local_data_studio.server.atlas_components.dataset.project_atlas_frame", side_effect=fake_project_atlas_frame),
                 patch("local_data_studio.server.atlas_components.dataset.effective_embedder_for_modality", return_value="transformers"),
-                patch("local_data_studio.server.atlas_components.images.read_url_bytes", return_value=b"\xff\xd8\xfftest"),
+                patch("local_data_studio.server.atlas_components.image_values.read_url_bytes", return_value=b"\xff\xd8\xfftest"),
             ):
                 prepared = prepare_atlas_dataset(
                     path=data_path,
@@ -1006,7 +1006,8 @@ class AtlasModelDiscoveryTests(TestCase):
                 patch("local_data_studio.server.atlas_components.dataset.ATLAS_DATA_CACHE_DIR", data_cache),
                 patch("local_data_studio.server.atlas_components.dataset.ATLAS_CACHE_ROOT", cache_root),
                 patch("local_data_studio.server.atlas_components.dataset.ATLAS_TEXT_MAX_CHARS", 8),
-                patch("local_data_studio.server.atlas_components.images.ATLAS_TEXT_MAX_CHARS", 8),
+                patch("local_data_studio.server.atlas_components.projection_inputs.ATLAS_TEXT_MAX_CHARS", 8),
+                patch("local_data_studio.server.atlas_components.output_frames.ATLAS_TEXT_MAX_CHARS", 8),
                 patch("local_data_studio.server.atlas_components.dataset.load_datasets", side_effect=fake_load_datasets),
                 patch("local_data_studio.server.atlas_components.dataset.project_atlas_frame", side_effect=fake_project_atlas_frame),
             ):
