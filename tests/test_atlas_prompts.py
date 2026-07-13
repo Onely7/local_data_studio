@@ -135,6 +135,39 @@ class PromptTemplateTests(TestCase):
         self.assertIsInstance(value, PromptedEmbeddingValue)
         self.assertEqual(b"\x89PNG\r\n\x1a\n", value.value["bytes"])
         self.assertEqual("Represent star", value.prompt)
+        projection.close()
+
+    def test_image_projection_input_removes_its_disk_spool(self) -> None:
+        """Release temporary image bytes after projection finishes."""
+        frame = pd.DataFrame({"image": [{"bytes": "89504e470d0a1a0a"}]})
+
+        projection, _, _ = prepare_projection_input(
+            frame,
+            column="image",
+            modality="image",
+            dataset_path=Path("dataset.jsonl"),
+        )
+        spool_path = Path(projection._values._stream.name)
+        self.assertTrue(spool_path.exists())
+
+        projection.close()
+
+        self.assertFalse(spool_path.exists())
+
+    def test_text_projection_values_are_expanded_on_batch_access(self) -> None:
+        """Avoid constructing every prompt before the encoder requests a row."""
+        frame = pd.DataFrame({"title": ["before"], "body": ["content"]})
+        template = compile_prompt_template("{title}: {body}", list(frame.columns), 100)
+        projection, _, _ = prepare_projection_input(
+            frame,
+            column="body",
+            modality="text",
+            dataset_path=Path("dataset.jsonl"),
+            prompt_template=template,
+        )
+        frame.loc[0, "title"] = "after"
+
+        self.assertEqual(PromptedEmbeddingValue("after: content", ""), projection.iloc[0, 0])
 
 
 class SentenceTransformerAdapterTests(TestCase):

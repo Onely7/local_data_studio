@@ -49,7 +49,7 @@ def _embed_in_batches(
     if selected.size == 0:
         return session.embed([])
     batch_size = max(options.batch_size or DEFAULT_EMBEDDING_BATCH_SIZE, 1)
-    batches: list[np.ndarray] = []
+    embeddings: np.ndarray | None = None
     total = len(selected)
     for start in range(0, total, batch_size):
         end = min(start + batch_size, total)
@@ -58,9 +58,19 @@ def _embed_in_batches(
             progress=progress_start + (progress_end - progress_start) * (start / total),
             message=f"{message}: {start:,}/{total:,} rows",
         )
-        batches.append(session.embed(embedding_batch(items, selected[start:end])))
+        batch = np.asarray(session.embed(embedding_batch(items, selected[start:end])))
+        expected_rows = end - start
+        if batch.ndim != 2 or batch.shape[0] != expected_rows:
+            raise ValueError(f"encoder returned shape {batch.shape}; expected ({expected_rows}, embedding_dimension)")
+        if embeddings is None:
+            embeddings = np.empty((total, batch.shape[1]), dtype=batch.dtype)
+        elif batch.shape[1] != embeddings.shape[1]:
+            raise ValueError(f"encoder embedding dimension changed from {embeddings.shape[1]} to {batch.shape[1]}")
+        embeddings[start:end] = batch
     _publish_progress(context, progress=progress_end, message=f"{message}: {total:,}/{total:,} rows")
-    return np.concatenate(batches, axis=0)
+    if embeddings is None:
+        return session.embed([])
+    return embeddings
 
 
 def run_full_projection(embeddings: np.ndarray) -> Projection:
