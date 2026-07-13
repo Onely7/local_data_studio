@@ -94,7 +94,7 @@ function bytesToImageDataUrl(bytes, pathHint = "") {
   return "";
 }
 
-function imageCandidate(src, fallback, fallbackSrc = "") {
+export function imageCandidate(src, fallback, fallbackSrc = "") {
   if (!src) return null;
   return { src, fallback: fallback === undefined ? src : fallback, fallbackSrc };
 }

@@ -6,6 +6,7 @@ import {
   renderAtlasPromptControl,
   runAtlas,
   runAtlasOnQueryResults,
+  openAtlasUrl,
   setAtlasButtonsRunning,
 } from "./atlas.js";
 import {
@@ -28,6 +29,7 @@ import {
   extractImageUrls,
   formatCell,
   formatExpandedCell,
+  imageCandidate,
   normalizeImageUrl,
 } from "./images.js";
 import {

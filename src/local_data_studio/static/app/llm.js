@@ -1,4 +1,5 @@
 import { elements } from "./dom.js";
+import { escapeHtml } from "./formatting.js";
 import { extractErrorMessage, fetchJSON } from "./http.js";
 import { state } from "./state.js";
 
@@ -126,4 +127,3 @@ function buildSampleRow() {
   });
   return obj;
 }
-
