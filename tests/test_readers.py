@@ -12,7 +12,9 @@ import pyarrow.parquet as pq
 from fastapi import HTTPException
 
 from local_data_studio.server.config import MAX_COLUMNS, MAX_JSON_PREVIEW_BYTES, MAX_OFFSET_FALLBACK
+from local_data_studio.server.dataset_readers import jsonl as jsonl_reader
 from local_data_studio.server.dataset_readers import line as line_reader
+from local_data_studio.server.dataset_readers import line_indexing
 from local_data_studio.server.dataset_readers import parquet as parquet_reader
 from local_data_studio.server.readers import count_rows_with_progress, fetch_preview_page, fetch_raw_row, load_dataset_metadata, search_dataset
 
@@ -44,7 +46,7 @@ class ReaderPreviewTests(TestCase):
         stream = TrackingBytesIO(invalid_line * (line_reader.JSONL_SCHEMA_MAX_BYTES // len(invalid_line) + 2))
 
         with patch.object(Path, "open", return_value=stream):
-            metadata = line_reader._create_jsonl_metadata(Path("unused.jsonl"))
+            metadata = jsonl_reader._create_jsonl_metadata(Path("unused.jsonl"))
 
         self.assertEqual([], metadata.columns)
         self.assertLessEqual(stream.tell(), line_reader.JSONL_SCHEMA_MAX_BYTES + len(invalid_line))
@@ -107,7 +109,7 @@ class ReaderPreviewTests(TestCase):
             path = Path(tmpdir) / "data.jsonl"
             path.write_text("".join(f'{{"id": {index}}}\n' for index in range(10)), encoding="utf-8")
             fake_index = FakeIndex()
-            with patch.object(line_reader, "LineOffsetIndex", return_value=fake_index):
+            with patch.object(line_indexing, "LineOffsetIndex", return_value=fake_index):
                 result = line_reader.build_line_index_with_progress(path, _NoCancelControl())
 
             self.assertEqual(10, result["row_count"])
