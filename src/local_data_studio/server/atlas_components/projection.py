@@ -13,7 +13,6 @@ from .contracts import AtlasModality, AtlasOptions, AtlasProjectionCoordinates
 from .embedding_session import (
     AtlasEmbeddingSession,
     create_embedding_session,
-    embed_items,
     embedding_batch,
     embedding_sequence,
 )

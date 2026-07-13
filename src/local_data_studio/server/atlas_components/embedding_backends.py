@@ -6,7 +6,7 @@ from collections import defaultdict
 from dataclasses import dataclass
 from io import BytesIO
 from pathlib import Path
-from typing import Any, cast
+from typing import Any
 
 import numpy as np
 from embedding_atlas.embedding import create_embedder
@@ -22,7 +22,7 @@ from .prompts import PromptedEmbeddingValue
 class AtlasEmbeddingBackend:
     """Resolved backend and adapter selected from local model capabilities."""
 
-    name: str
+    name: BackendName
     adapter: str | None
 
     @classmethod
@@ -38,7 +38,7 @@ class AtlasEmbeddingBackend:
         selected = options.backend or capabilities.default_backend
         if selected not in {"transformers", "sentence-transformers"}:
             raise ValueError("no supported embedding backend is available")
-        backend_name = cast(BackendName, selected)
+        backend_name = selected
         capability = capabilities.backend(backend_name)
         if not capability.available or modality not in capability.modalities:
             raise ValueError(f"{selected} cannot embed {modality} values: {capability.reason}")

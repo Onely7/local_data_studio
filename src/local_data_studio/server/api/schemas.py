@@ -8,25 +8,25 @@ from pydantic import BaseModel, Field, field_validator
 class QueryRequest(BaseModel):
     """Input for a guarded read-only SQL query."""
 
-    file: str
-    sql: str
-    limit: int | None = None
-    offset: int | None = None
+    file: str = Field(min_length=1)
+    sql: str = Field(min_length=1)
+    limit: int | None = Field(default=None, ge=1)
+    offset: int | None = Field(default=None, ge=0)
 
 
 class RawRowRequest(BaseModel):
     """Input selecting either a one-based dataset row or SQL result offset."""
 
-    file: str
-    row_id: int | None = None
+    file: str = Field(min_length=1)
+    row_id: int | None = Field(default=None, ge=1)
     sql: str | None = None
-    offset: int | None = None
+    offset: int | None = Field(default=None, ge=0)
 
 
 class EdaRequest(BaseModel):
     """Input controlling bounded EDA generation and report cache reuse."""
 
-    file: str
+    file: str = Field(min_length=1)
     sample: int | None = None
     force: bool | None = None
     mode: Literal["minimal", "maximal"] | None = None
@@ -43,15 +43,15 @@ class EdaRequest(BaseModel):
 class EdaQueryRequest(EdaRequest):
     """EDA input extended with the guarded SQL that supplies report rows."""
 
-    sql: str
+    sql: str = Field(min_length=1)
 
 
 class AtlasRequest(BaseModel):
     """Input selecting a dataset column and local model for Atlas embedding."""
 
-    file: str
-    column: str
-    model: str
+    file: str = Field(min_length=1)
+    column: str = Field(min_length=1)
+    model: str = Field(min_length=1)
     sample: int | None = Field(default=None, ge=0)
     backend: Literal["transformers", "sentence-transformers"] | None = None
     prompt: str | None = Field(default=None, max_length=16_384)
@@ -61,33 +61,33 @@ class AtlasRequest(BaseModel):
 class AtlasQueryRequest(AtlasRequest):
     """Atlas input extended with the guarded SQL that supplies embedding rows."""
 
-    sql: str
+    sql: str = Field(min_length=1)
 
 
 class CountJobRequest(BaseModel):
     """Input for a background row-count operation."""
 
-    file: str
+    file: str = Field(min_length=1)
 
 
 class IndexJobRequest(BaseModel):
     """Input for incremental sparse-index construction."""
 
-    file: str
+    file: str = Field(min_length=1)
 
 
 class SearchJobRequest(BaseModel):
     """Input for a bounded background dataset search."""
 
-    file: str
-    query: str
-    limit: int | None = None
+    file: str = Field(min_length=1)
+    query: str = Field(min_length=1)
+    limit: int | None = Field(default=None, ge=1)
 
 
 class StatsJobRequest(BaseModel):
     """Input controlling sampled statistics and cache refresh."""
 
-    file: str
+    file: str = Field(min_length=1)
     sample: int | None = None
     force: bool | None = None
 
@@ -95,23 +95,23 @@ class StatsJobRequest(BaseModel):
 class DeleteRowRequest(BaseModel):
     """Input for one-based soft or persistent row deletion."""
 
-    file: str
-    row_id: int
+    file: str = Field(min_length=1)
+    row_id: int = Field(ge=1)
     persist: bool | None = None
 
 
 class DeleteColumnRequest(BaseModel):
     """Input for soft or persistent column deletion."""
 
-    file: str
-    column: str
+    file: str = Field(min_length=1)
+    column: str = Field(min_length=1)
     persist: bool | None = None
 
 
 class NLQueryRequest(BaseModel):
     """Input for natural-language SQL generation with optional sample context."""
 
-    file: str
-    prompt: str = Field(max_length=16_384)
+    file: str = Field(min_length=1)
+    prompt: str = Field(min_length=1, max_length=16_384)
     sample: dict[str, Any] | None = None
     model: str | None = Field(default=None, max_length=64)
