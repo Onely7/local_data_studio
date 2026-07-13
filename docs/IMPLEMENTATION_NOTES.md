@@ -77,10 +77,16 @@ The implementation separates the following responsibilities:
 * Image handling
 * LLM selection
 * Translation controls and browser-memory results
+* Native-select-compatible custom dropdown presentation
 * Atlas operations
 * Overall application orchestration
 
-This separation assumes that the existing DOM structure, visible text, CSS values, and interaction flow remain unchanged.
+Native `select` elements remain the source of truth while `static/app/selects.js` provides the scrollable six-row presentation and keyboard interaction.
+Its overflow indicator is derived from the current scroll position, so the lower fade is removed at the last option.
+
+Desktop layouts use a viewport-bound three-pane shell with internal scrolling in the dataset, Preview, and inspector regions.
+At the mobile/tablet breakpoint the document returns to normal vertical scrolling.
+Icon actions use packaged SVG assets and retain explicit labels through `aria-label` and tooltips.
 
 `styles.css` is kept as a single asset so that the order of CSS rules remains stable.
 All JavaScript modules and CSS files are included in the distributed wheel.
@@ -194,6 +200,8 @@ Provider-specific structured-output features are not required; normal assistant 
 `static/app/translation.js` owns target/model selectors, confirmation, job polling, and the memory-only browser cache.
 Its cache key includes the dataset view, page or query context, row and column identity, source fingerprint, model, and target language.
 Only model and language selections are stored in `localStorage`; translation contents are not persisted.
+The browser and server apply the same conservative classification to numeric-only structures, booleans, binary objects, and recognized image or audio data before exposing or accepting translation work.
+The expanded-field and JSON code views share the same translation cache, so both views render the same result without another provider request.
 
 ## EDA Reports
 
