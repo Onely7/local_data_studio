@@ -42,9 +42,9 @@ from .images import (
 )
 from .projection import project_atlas_frame
 from .prompts import PromptTemplateError, compile_prompt_template
-from .sampling import sample_atlas_frame
+from .sampling import load_bounded_atlas_frame
 
-ATLAS_DATASET_CACHE_VERSION = 11
+ATLAS_DATASET_CACHE_VERSION = 12
 
 
 def _check_cancelled(context: JobContext) -> None:
@@ -174,10 +174,9 @@ def prepare_atlas_dataset(
         context.update(progress=0.05, message="Loading the selected Atlas rows")
         prune_cache_dir(ATLAS_CACHE_ROOT, ATLAS_CACHE_MAX_BYTES)
         try:
-            data_frame = load_datasets([str(path)], query=sql, sample=None)
+            data_frame = load_bounded_atlas_frame(path, sql, options.sample) if options.sample else load_datasets([str(path)], query=sql, sample=None)
             _check_cancelled(context)
-            context.update(progress=0.09, message=f"Loaded {len(data_frame):,} candidate rows")
-            data_frame = sample_atlas_frame(data_frame, options.sample)
+            context.update(progress=0.09, message=f"Loaded {len(data_frame):,} selected rows")
             context.update(progress=0.12, message=f"Preparing {len(data_frame):,} embedding inputs")
             prompt_template = (
                 compile_prompt_template(options.prompt, [str(column_name) for column_name in data_frame.columns], ATLAS_TEXT_MAX_CHARS)
@@ -191,14 +190,19 @@ def prepare_atlas_dataset(
                 dataset_path=path,
                 prompt_template=prompt_template,
             )
-            coordinates = project_atlas_frame(
-                projection_input,
-                input_column=input_column,
-                modality=modality,
-                model_path=model_path,
-                options=options,
-                context=context,
-            )
+            try:
+                coordinates = project_atlas_frame(
+                    projection_input,
+                    input_column=input_column,
+                    modality=modality,
+                    model_path=model_path,
+                    options=options,
+                    context=context,
+                )
+            finally:
+                close_projection_input = getattr(projection_input, "close", None)
+                if callable(close_projection_input):
+                    close_projection_input()
             _check_cancelled(context)
             context.update(progress=0.86, message="Preparing the Atlas display dataset")
             preserve_columns = image_like_columns(output_frame)

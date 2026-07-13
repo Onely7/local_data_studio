@@ -1,6 +1,7 @@
 """Tests for Atlas sampling and projection method contracts."""
 
 from pathlib import Path
+from tempfile import TemporaryDirectory
 from unittest import TestCase
 from unittest.mock import patch
 
@@ -10,9 +11,9 @@ from pydantic import ValidationError
 
 from local_data_studio.server.api.schemas import AtlasRequest
 from local_data_studio.server.atlas_components.contracts import AtlasOptions
-from local_data_studio.server.atlas_components.projection import project_atlas_frame
+from local_data_studio.server.atlas_components.projection import _embed_in_batches, project_atlas_frame
 from local_data_studio.server.atlas_components.reducers import reduce_embeddings
-from local_data_studio.server.atlas_components.sampling import sample_atlas_frame
+from local_data_studio.server.atlas_components.sampling import load_bounded_atlas_frame, sample_atlas_frame
 from local_data_studio.server.config import Settings
 from local_data_studio.server.jobs import JobCancelledError
 
@@ -46,6 +47,31 @@ class AtlasSamplingTests(TestCase):
 
         self.assertIs(frame, sample_atlas_frame(frame, 0))
         self.assertIs(frame, sample_atlas_frame(frame, None))
+
+    def test_bounded_loader_samples_after_query_before_dataframe_creation(self) -> None:
+        """Apply filtering and the strict maximum inside DuckDB."""
+        with TemporaryDirectory() as tmp:
+            path = Path(tmp) / "rows.jsonl"
+            path.write_text("".join(f'{{"value":{index},"group":{index % 2}}}\n' for index in range(100)), encoding="utf-8")
+
+            first = load_bounded_atlas_frame(path, 'SELECT * FROM data WHERE "group" = 1', 7)
+            second = load_bounded_atlas_frame(path, 'SELECT * FROM data WHERE "group" = 1', 7)
+
+        self.assertEqual(7, len(first))
+        self.assertEqual(first["value"].tolist(), second["value"].tolist())
+        self.assertEqual({1}, set(first["group"].tolist()))
+        self.assertIn("FILE_NAME", first.columns)
+        self.assertNotIn("__local_data_studio_atlas_ordinal", first.columns)
+
+    def test_bounded_loader_keeps_all_rows_below_the_limit(self) -> None:
+        """Treat the configured sample as a maximum rather than an exact count."""
+        with TemporaryDirectory() as tmp:
+            path = Path(tmp) / "rows.jsonl"
+            path.write_text('{"value":1}\n{"value":2}\n', encoding="utf-8")
+
+            loaded = load_bounded_atlas_frame(path, None, 10)
+
+        self.assertEqual([1, 2], sorted(loaded["value"].tolist()))
 
 
 class AtlasProjectionSettingsTests(TestCase):
@@ -196,6 +222,47 @@ class AtlasReducerTests(TestCase):
         self.assertIn("Creating embeddings: 0/130 rows", messages)
         self.assertIn("Creating embeddings: 130/130 rows", messages)
         self.assertIn("Projection coordinates are ready", messages)
+
+    def test_embedding_batches_write_directly_into_the_final_array(self) -> None:
+        """Avoid retaining every batch for a final concatenation copy."""
+
+        class FakeSession:
+            """Return deterministic two-dimensional embeddings per batch."""
+
+            def __init__(self) -> None:
+                self.batch_sizes: list[int] = []
+
+            def embed(self, items):  # noqa: ANN001
+                """Encode each scalar as two coordinates."""
+                self.batch_sizes.append(len(items))
+                return np.asarray([[item, item + 0.5] for item in items], dtype=np.float32)
+
+        options = AtlasOptions(
+            sample=None,
+            host="127.0.0.1",
+            port=5055,
+            batch_size=2,
+            text_embedder=None,
+            image_embedder=None,
+            trust_remote_code=False,
+        )
+        session = FakeSession()
+
+        embeddings = _embed_in_batches(
+            session,
+            [0.0, 1.0, 2.0, 3.0, 4.0],
+            np.arange(5),
+            options=options,
+            context=None,
+            progress_start=0.0,
+            progress_end=1.0,
+            message="Embedding",
+        )
+
+        self.assertEqual([2, 2, 1], session.batch_sizes)
+        self.assertEqual(np.float32, embeddings.dtype)
+        self.assertEqual((5, 2), embeddings.shape)
+        self.assertEqual([0.0, 1.0, 2.0, 3.0, 4.0], embeddings[:, 0].tolist())
 
     def test_full_projection_checks_cancellation_between_batches(self) -> None:
         """Abort embedding work at a bounded batch boundary."""

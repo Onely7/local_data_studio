@@ -579,11 +579,11 @@ class AtlasModelDiscoveryTests(TestCase):
                 umap_anchor_sample=None,
             )
 
-            def fake_load_datasets(inputs, query=None, sample=None, splits=None):  # noqa: ANN001, ARG001
-                """Return a filtered result while keeping sampling application-owned."""
+            def fake_load_bounded_atlas_frame(path, query, sample):  # noqa: ANN001, ARG001
+                """Return only rows selected before DataFrame materialization."""
                 self.assertEqual("SELECT text FROM data WHERE text IS NOT NULL", query)
-                self.assertIsNone(sample)
-                return pd.DataFrame({"text": [f"row-{index}" for index in range(10)]})
+                self.assertEqual(4, sample)
+                return pd.DataFrame({"text": [f"row-{index}" for index in range(4)]})
 
             def fake_project(data_frame, **kwargs):  # noqa: ANN001, ARG001
                 """Assert that sampling happened before encoder input is consumed."""
@@ -594,7 +594,10 @@ class AtlasModelDiscoveryTests(TestCase):
                 patch("local_data_studio.server.atlas_components.dataset.EMBEDDER_MODELS_DIR", model_root),
                 patch("local_data_studio.server.atlas_components.dataset.ATLAS_DATA_CACHE_DIR", data_cache),
                 patch("local_data_studio.server.atlas_components.dataset.ATLAS_CACHE_ROOT", cache_root),
-                patch("local_data_studio.server.atlas_components.dataset.load_datasets", side_effect=fake_load_datasets),
+                patch(
+                    "local_data_studio.server.atlas_components.dataset.load_bounded_atlas_frame",
+                    side_effect=fake_load_bounded_atlas_frame,
+                ),
                 patch("local_data_studio.server.atlas_components.dataset.project_atlas_frame", side_effect=fake_project),
                 patch("local_data_studio.server.atlas_components.dataset.effective_embedder_for_modality", return_value="sentence-transformers"),
             ):
