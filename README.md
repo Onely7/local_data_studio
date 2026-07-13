@@ -23,6 +23,7 @@ The SQL console can also generate SQL from natural-language instructions using a
 * Preview large datasets while limiting how much data is loaded at once
 * Navigate efficiently between pages with cursor-based pagination
 * Run read-only searches and aggregations with DuckDB SQL
+* Translate visible cells or columns manually with configured LiteLLM models
 * Apply SQL timeouts, memory limits, and warnings for potentially large scans
 * Generate EDA reports for an entire dataset or SQL query results
 * Visualize embeddings for text columns, image columns, or SQL query results with Embedding Atlas
@@ -112,7 +113,8 @@ Running Local Data Studio from source requires the following software:
    * Single data file to inspect: `[paths].data_file`
    * Server settings: `[server]`
    * EDA, Atlas, deletion, and related settings: `[settings]`
-   * LLM settings used for SQL generation: `[llm]`
+   * LLM settings used for SQL generation and manual translation: `[llm]`
+   * Translation request limits: `[translation]`
 
    For example, configure the data location and the maximum number of rows loaded for EDA as follows:
 
@@ -329,7 +331,19 @@ SQL execution is subject to timeouts, memory limits, and checks for queries that
 
 <img src="images/local_data_studio_04.png" alt="SQL console" width="45%">
 
-### 4. Generate an EDA Report
+### 4. Translate Visible Values
+
+Configure a model profile with `translation = true`, then select its model and a target language in the toolbar.
+The translation icon in an expanded field translates that cell, while the icon in a column header translates the values currently visible in that column.
+
+Translation is always manual. It does not modify the dataset, load another page, scan the source file, or fetch the complete **Raw** value.
+Only the bounded values already loaded in the current Preview, search result, or SQL result page are sent to the selected LLM provider.
+The original value remains visible and the translated value appears underneath it.
+
+Large requests require confirmation. Results are retained only in browser memory for the current page session and are not written to Local Data Studio's server cache or `localStorage`.
+Changing the dataset, view, page, model, language, or source value prevents a result from being shown in the wrong context.
+
+### 5. Generate an EDA Report
 
 Select **Run EDA** to generate an EDA report from rows loaded from the dataset.
 Generated reports are stored in the cache and may be reused when the same report is requested again under identical conditions.
@@ -345,7 +359,7 @@ The default value is `minimal`.
 
 <img src="images/local_data_studio_05.png" alt="Running EDA" width="45%"> <img src="images/local_data_studio_06.png" alt="Generated EDA report" width="45%">
 
-### 5. Visualize Embeddings
+### 6. Visualize Embeddings
 
 An embedding represents the features of text or an image as a sequence of numbers called a vector.
 Embeddings usually contain many numbers, so they cannot be displayed clearly on a screen in their original form.
@@ -401,7 +415,7 @@ The link uses `/atlas/{instance_id}/` on the same Local Data Studio origin, so i
 
 <img src="images/local_data_studio_07.png" alt="Embedding Atlas settings" width="45%"> <img src="images/local_data_studio_08.png" alt="Embedding Atlas visualization" width="45%">
 
-### 6. Use the Row Inspector and Enlarged Image View
+### 7. Use the Row Inspector and Enlarged Image View
 
 Click a row to display the full contents of each column in the **Row Inspector**.
 Long values are shortened by default. Switch to **Raw** to view the complete value.
@@ -447,15 +461,22 @@ Messages shown after Count Rows, EDA, and Atlas operations use a consistent comp
 </details>
 
 <details>
-<summary><strong>LLM Model Profiles for SQL Generation</strong></summary>
+<summary><strong>LLM Model Profiles for SQL Generation and Translation</strong></summary>
 
-Model profiles used for SQL generation are loaded from the `[llm]` section of `local_data_studio.toml`.
+Model profiles used for SQL generation and translation are loaded from the `[llm]` section of `local_data_studio.toml`.
 Model names must include an explicit LiteLLM provider prefix such as `openai/`, `anthropic/`, `gemini/`, or `hosted_vllm/`.
 A provider prefix is an identifier at the beginning of a model name that indicates which provider should be used.
 The deprecated `vllm/` prefix is not accepted.
 
 Set `model` to one model string or a list of model strings from the same provider.
-Each model in the list appears as a separate choice in the SQL console.
+Each model in the list appears as a separate choice for every capability enabled on its profile.
+
+Set `sql_generation = true` to make a profile available in the SQL console and `translation = true` to make it available in the translation toolbar.
+For backward compatibility, `sql_generation` defaults to `true`, while translation is opt-in and defaults to `false`.
+Profiles that disable both capabilities are rejected.
+
+Use `default_sql_generation_model` and `default_translation_model` to select independent defaults.
+The legacy `default_model` key remains an alias for the SQL default; configuring it with a different value from `default_sql_generation_model` is rejected.
 
 Models in the same profile share the credentials, optional endpoint, timeout, and `provider_options` defined by that profile.
 For this reason, one profile cannot mix models from different providers.
@@ -468,6 +489,9 @@ Settings that attempt to replace messages, credentials, streaming behavior, tool
 `OPENAI_MODEL` and `OPENAI_BASE_URL` are not used as Local Data Studio configuration options.
 When starting the Local Data Studio application directly through Uvicorn, specify the same TOML file with `LOCAL_DATA_STUDIO_CONFIG_FILE`.
 Its `[settings]` and `[llm]` sections are both applied.
+
+The optional `[translation]` section controls row, string, character, chunk, concurrency, and browser-confirmation limits.
+The server recalculates the hard limits for every request instead of trusting browser-provided counts.
 
 </details>
 
