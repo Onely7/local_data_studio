@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Literal
+from typing import Literal, cast
 
 from ..config import (
     ATLAS_BATCH_SIZE,
@@ -17,8 +17,11 @@ from ..config import (
     ATLAS_UMAP_PROJECTION_MODE,
 )
 
-AtlasModality = str
+AtlasModality = Literal["text", "image", "vector"]
 AtlasProjectionMethod = Literal["umap", "tsne", "pca"]
+AtlasEmbeddingDtype = Literal["float16", "float32"]
+AtlasUmapProjectionMode = Literal["full", "anchor_transform"]
+AtlasBackend = Literal["transformers", "sentence-transformers"]
 ATLAS_PROJECTION_X = "__local_data_studio_atlas_x"
 ATLAS_PROJECTION_Y = "__local_data_studio_atlas_y"
 ATLAS_PROJECTION_NEIGHBORS = "__local_data_studio_atlas_neighbors"
@@ -27,7 +30,11 @@ ATLAS_EMBED_INPUT_COLUMN = "__local_data_studio_atlas_embed_input"
 
 @dataclass(frozen=True, slots=True)
 class AtlasOptions:
-    """Resolved options for launching Embedding Atlas."""
+    """Immutable embedding, projection, and child-process options.
+
+    Instances are safe to share with worker threads. Paths and mutable model
+    objects are deliberately excluded; callers retain ownership of those inputs.
+    """
 
     sample: int | None
     host: str
@@ -36,11 +43,11 @@ class AtlasOptions:
     text_embedder: str | None
     image_embedder: str | None
     trust_remote_code: bool
-    embedding_dtype: str = "float32"
+    embedding_dtype: AtlasEmbeddingDtype = "float32"
     projection_method: AtlasProjectionMethod = "umap"
-    umap_projection_mode: str | None = "full"
+    umap_projection_mode: AtlasUmapProjectionMode | None = "full"
     umap_anchor_sample: int | None = None
-    backend: str | None = None
+    backend: AtlasBackend | None = None
     prompt: str | None = None
     capability_fingerprint: str | None = None
 
@@ -61,16 +68,20 @@ class AtlasOptions:
             text_embedder=None,
             image_embedder=None,
             trust_remote_code=ATLAS_TRUST_REMOTE_CODE,
-            embedding_dtype=ATLAS_EMBEDDING_DTYPE,
+            embedding_dtype=cast("AtlasEmbeddingDtype", ATLAS_EMBEDDING_DTYPE),
             projection_method=projection_method,
-            umap_projection_mode=umap_projection_mode,
+            umap_projection_mode=cast("AtlasUmapProjectionMode | None", umap_projection_mode),
             umap_anchor_sample=anchor_sample if projection_method == "umap" else None,
         )
 
 
 @dataclass(frozen=True, slots=True)
 class AtlasPreparedDataset:
-    """Materialized Atlas input with precomputed projection columns."""
+    """Materialized Atlas cache owned by the application cache directory.
+
+    ``path`` remains valid until cache eviction. Callers must not mutate or
+    delete it and should use ``cache_hit`` only for user-facing status.
+    """
 
     path: Path
     x: str
@@ -82,6 +93,9 @@ class AtlasPreparedDataset:
 
 @dataclass(frozen=True, slots=True)
 class AtlasProjectionCoordinates:
-    """Two-dimensional coordinates produced by an Atlas projection."""
+    """Owned two-dimensional projection coordinates.
+
+    ``values`` is an owned finite float32 array with shape ``(rows, 2)``.
+    """
 
     values: object

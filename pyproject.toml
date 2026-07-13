@@ -112,8 +112,6 @@ select = [
 ignore = [
     "B905",     # Zip-without-explicit-strict
     "E501",     # Line too long, handled by black
-    "F401",     # module imported but unused
-    "F403",     # Unable to detect undefined names
     "N812",     # Lowercase imported as non-lowercase
     "N999",     # Invalid module name
     "UP035",    # Checks for uses of deprecated imports based on the minimum supported Python version.
@@ -125,6 +123,11 @@ ignore = [
 
 [tool.ruff.lint.pyupgrade]
 keep-runtime-typing = true
+
+[tool.ruff.lint.per-file-ignores]
+"src/local_data_studio/server/atlas.py" = ["F401"]
+"src/local_data_studio/server/atlas_components/process.py" = ["F401"]
+"src/local_data_studio/server/dataset_readers/line.py" = ["F401"]
 
 [tool.ruff.lint.pydocstyle]
 convention = "google"

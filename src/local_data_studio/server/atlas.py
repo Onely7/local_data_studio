@@ -56,9 +56,6 @@ from .atlas_components.projection import (
     compute_full_projection as _compute_full_projection,
 )
 from .atlas_components.projection import (
-    embed_items as _embed_items,
-)
-from .atlas_components.projection import (
     project_atlas_frame,
 )
 from .atlas_components.projection import (
