@@ -21,6 +21,7 @@ from ..files import resolve_data_file
 from ..llm import generate_sql_request, public_llm_models
 from ..sql import execute_query_guarded
 from ..stats import compute_column_stats
+from ..translation_config import public_translation_config
 from .schemas import EdaRequest, NLQueryRequest, QueryRequest
 from .services import eda_reports_service, reject_large_sync_operation
 
@@ -31,6 +32,12 @@ router = APIRouter()
 def llm_models() -> dict[str, Any]:
     """Return server-managed model profiles without secrets or endpoints."""
     return public_llm_models()
+
+
+@router.get("/api/translation_languages")
+def translation_languages() -> dict[str, Any]:
+    """Return fixed target languages and browser-facing translation limits."""
+    return public_translation_config()
 
 
 @router.get("/api/column_stats")

@@ -18,6 +18,7 @@ from local_data_studio.app import (
     RawRowRequest,
     SearchJobRequest,
     StatsJobRequest,
+    TranslationRequest,
     get_job,
     preview,
     raw_row,
@@ -30,6 +31,7 @@ from local_data_studio.app import (
     start_query_job,
     start_search_job,
     start_stats_job,
+    start_translation_job,
 )
 from local_data_studio.server.atlas import AtlasPreparedDataset
 from local_data_studio.server.atlas_components.process import LaunchedAtlasProcess
@@ -125,6 +127,34 @@ class ApiJobTests(TestCase):
 
         self.assertEqual("succeeded", payload["status"])
         self.assertIn("columns", payload["result"])
+
+    def test_translation_job_returns_nested_values_without_cache_fields(self) -> None:
+        """Submit visible values through the shared cancellable job contract."""
+        expected = {
+            "model": "translator",
+            "target_language": "ja",
+            "items": [{"id": "row-1", "value": {"text": "こんにちは"}}],
+        }
+        prepared = object()
+        with (
+            patch("local_data_studio.server.api.jobs.TRANSLATION_SERVICE.prepare", return_value=prepared),
+            patch("local_data_studio.server.api.jobs.TRANSLATION_SERVICE.translate_prepared", return_value=expected) as translate,
+        ):
+            started = start_translation_job(
+                TranslationRequest(
+                    model="translator",
+                    target_language="ja",
+                    column_name="content",
+                    items=[{"id": "row-1", "value": {"text": "Hello"}}],
+                )
+            )
+            payload = self._wait_for_job(started["id"])
+
+        self.assertEqual("succeeded", payload["status"])
+        self.assertEqual(expected, payload["result"])
+        self.assertNotIn("cached", payload["result"])
+        translate.assert_called_once()
+        self.assertIs(prepared, translate.call_args.args[0])
 
     def test_eda_query_job_completes_for_filtered_results(self) -> None:
         """Verify that eda query job completes for filtered results."""

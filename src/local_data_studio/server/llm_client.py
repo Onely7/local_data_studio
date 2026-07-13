@@ -1,4 +1,4 @@
-"""Lazy LiteLLM adapter for text-only SQL generation."""
+"""Lazy LiteLLM adapter for non-streaming text operations."""
 
 from __future__ import annotations
 
@@ -47,11 +47,11 @@ def extract_completion_text(response: Any) -> str:
     return _content_text(getattr(message, "content", None))
 
 
-def _provider_failure(exc: Exception, litellm: Any, selection: LlmModelSelection) -> HTTPException:
+def _provider_failure(exc: Exception, litellm: Any, selection: LlmModelSelection, operation: str) -> HTTPException:
     timeout_type = getattr(litellm, "Timeout", ())
     if timeout_type and isinstance(exc, timeout_type):
-        return HTTPException(status_code=504, detail=f"SQL generation timed out for {selection.label}")
-    return HTTPException(status_code=502, detail=f"SQL generation provider failed for {selection.label}")
+        return HTTPException(status_code=504, detail=f"{operation} timed out for {selection.label}")
+    return HTTPException(status_code=502, detail=f"{operation} provider failed for {selection.label}")
 
 
 def complete_text(
@@ -59,6 +59,7 @@ def complete_text(
     messages: list[dict[str, str]],
     *,
     default_timeout_seconds: float,
+    operation: str = "SQL generation",
 ) -> str:
     """Run one non-streaming text completion through a validated model selection.
 
@@ -84,8 +85,8 @@ def complete_text(
     try:
         response = litellm.completion(**request)
     except Exception as exc:
-        raise _provider_failure(exc, litellm, selection) from exc
+        raise _provider_failure(exc, litellm, selection, operation) from exc
     text = extract_completion_text(response).strip()
     if not text:
-        raise HTTPException(status_code=502, detail=f"SQL generation provider returned no text for {selection.label}")
+        raise HTTPException(status_code=502, detail=f"{operation} provider returned no text for {selection.label}")
     return text

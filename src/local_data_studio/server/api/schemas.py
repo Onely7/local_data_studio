@@ -1,8 +1,8 @@
 """Request schemas shared by Local Data Studio API routers."""
 
-from typing import Any, Literal
+from typing import Any, Literal, Self
 
-from pydantic import BaseModel, Field, field_validator
+from pydantic import BaseModel, Field, JsonValue, field_validator, model_validator
 
 
 class QueryRequest(BaseModel):
@@ -115,3 +115,27 @@ class NLQueryRequest(BaseModel):
     prompt: str = Field(min_length=1, max_length=16_384)
     sample: dict[str, Any] | None = None
     model: str | None = Field(default=None, max_length=64)
+
+
+class TranslationItem(BaseModel):
+    """One browser-loaded JSON value identified for translation."""
+
+    id: str = Field(min_length=1, max_length=128)
+    value: JsonValue
+
+
+class TranslationRequest(BaseModel):
+    """Input for a cancellable translation of visible preview values."""
+
+    model: str | None = Field(default=None, max_length=64)
+    target_language: str = Field(min_length=2, max_length=16)
+    column_name: str = Field(min_length=1, max_length=512)
+    items: list[TranslationItem] = Field(min_length=1)
+
+    @model_validator(mode="after")
+    def validate_unique_item_ids(self) -> Self:
+        """Require stable one-to-one IDs for translated result mapping."""
+        ids = [item.id for item in self.items]
+        if len(ids) != len(set(ids)):
+            raise ValueError("translation item ids must be unique")
+        return self

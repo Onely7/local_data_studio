@@ -13,6 +13,7 @@ from ..files import resolve_data_file
 from ..jobs import JOB_STORE, JobContext, JobStore
 from ..readers import build_line_index_with_progress, count_rows_with_progress, search_dataset
 from ..sql import execute_query_guarded
+from ..translation_service import TRANSLATION_SERVICE
 from .schemas import (
     AtlasQueryRequest,
     AtlasRequest,
@@ -23,6 +24,7 @@ from .schemas import (
     QueryRequest,
     SearchJobRequest,
     StatsJobRequest,
+    TranslationRequest,
 )
 from .services import atlas_service, compute_cached_column_stats, eda_reports_service, load_cached_result, write_cached_result
 
@@ -124,6 +126,23 @@ def start_stats_job(payload: StatsJobRequest, request: Request = REQUEST_DEFAULT
         return result
 
     return _job_store(request).submit("stats", _work).to_response()
+
+
+@router.post("/api/jobs/translation")
+def start_translation_job(payload: TranslationRequest, request: Request = REQUEST_DEFAULT) -> dict[str, Any]:
+    """Submit translation for browser-loaded values without persistent caching."""
+    items = [(item.id, item.value) for item in payload.items]
+    prepared = TRANSLATION_SERVICE.prepare(
+        model_id=payload.model,
+        target_language=payload.target_language,
+        column_name=payload.column_name,
+        items=items,
+    )
+
+    def _work(context: JobContext) -> dict[str, Any]:
+        return TRANSLATION_SERVICE.translate_prepared(prepared, context=context)
+
+    return _job_store(request).submit("translation", _work).to_response()
 
 
 @router.post("/api/jobs/eda")
