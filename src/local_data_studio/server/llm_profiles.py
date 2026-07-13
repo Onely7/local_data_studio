@@ -1,4 +1,4 @@
-"""Validated server-side model profiles for SQL generation."""
+"""Validated server-side model profiles for text generation operations."""
 
 from __future__ import annotations
 
@@ -101,6 +101,15 @@ class LlmModelProfile(BaseModel):
     api_key_env: str | None = None
     timeout_seconds: float | None = Field(default=None, gt=0)
     provider_options: dict[str, JsonValue] = Field(default_factory=dict)
+    sql_generation: bool = True
+    translation: bool = False
+
+    @model_validator(mode="after")
+    def validate_capabilities(self) -> LlmModelProfile:
+        """Require each profile to serve at least one supported operation."""
+        if not self.sql_generation and not self.translation:
+            raise ValueError("an llm model profile must enable at least one capability")
+        return self
 
     @field_validator("id", mode="before")
     @classmethod
@@ -208,11 +217,13 @@ class LlmModelProfile(BaseModel):
 
 
 class LlmProfileRegistry(BaseModel):
-    """Validated collection of selectable SQL-generation models."""
+    """Validated collection of selectable text-generation models."""
 
     model_config = ConfigDict(extra="forbid", frozen=True)
 
     default_model: str | None = None
+    default_sql_generation_model: str | None = None
+    default_translation_model: str | None = None
     timeout_seconds: float = Field(default=60.0, gt=0)
     models: tuple[LlmModelProfile, ...] = ()
 
@@ -222,10 +233,19 @@ class LlmProfileRegistry(BaseModel):
         ids = [profile.id for profile in self.models]
         if len(ids) != len(set(ids)):
             raise ValueError("llm model profile ids must be unique")
-        selection_ids = {selection.id for selection in self.selections}
-        if self.default_model and self.default_model not in {*ids, *selection_ids}:
-            raise ValueError("llm.default_model must reference a configured profile or model selection")
+        if self.default_model and self.default_sql_generation_model and self.default_model != self.default_sql_generation_model:
+            raise ValueError("llm.default_model and llm.default_sql_generation_model must match when both are set")
+        self._validate_default(self.default_sql_generation_model or self.default_model, "sql_generation")
+        self._validate_default(self.default_translation_model, "translation")
         return self
+
+    def _validate_default(self, value: str | None, capability: str) -> None:
+        if value is None:
+            return
+        selection = self._find_selection(value)
+        if selection is None or not getattr(selection.profile, capability):
+            key = "default_sql_generation_model" if capability == "sql_generation" else "default_translation_model"
+            raise ValueError(f"llm.{key} must reference a configured model with {capability} enabled")
 
     @property
     def selections(self) -> tuple[LlmModelSelection, ...]:
@@ -234,15 +254,32 @@ class LlmProfileRegistry(BaseModel):
 
     @property
     def effective_default_model(self) -> str | None:
-        """Return the default selection ID, choosing each profile's first model."""
-        if self.default_model:
-            for selection in self.selections:
-                if selection.id == self.default_model:
-                    return selection.id
-            profile = next((item for item in self.models if item.id == self.default_model), None)
-            if profile is not None:
-                return profile.selection(0).id
-        return self.selections[0].id if self.selections else None
+        """Return the legacy SQL-generation default selection ID."""
+        return self.effective_default_sql_generation_model
+
+    @property
+    def effective_default_sql_generation_model(self) -> str | None:
+        """Return the effective default SQL-generation selection ID."""
+        return self._effective_default(self.default_sql_generation_model or self.default_model, "sql_generation")
+
+    @property
+    def effective_default_translation_model(self) -> str | None:
+        """Return the effective default translation selection ID."""
+        return self._effective_default(self.default_translation_model, "translation")
+
+    def _effective_default(self, configured: str | None, capability: str) -> str | None:
+        if configured:
+            selection = self._find_selection(configured)
+            if selection is not None and getattr(selection.profile, capability):
+                return selection.id
+        return next((selection.id for selection in self.selections if getattr(selection.profile, capability)), None)
+
+    def _find_selection(self, selection_id: str) -> LlmModelSelection | None:
+        selection = next((item for item in self.selections if item.id == selection_id), None)
+        if selection is not None:
+            return selection
+        profile = next((item for item in self.models if item.id == selection_id), None)
+        return profile.selection(0) if profile is not None else None
 
     def selection(self, selection_id: str | None) -> LlmModelSelection:
         """Resolve an allowed model selection and enforce credential availability.
@@ -253,15 +290,22 @@ class LlmProfileRegistry(BaseModel):
             HTTPException: No model exists, the ID is unknown, or the selected
                 profile's explicit credential environment variable is unset.
         """
-        selected = selection_id or self.effective_default_model
+        return self.selection_for(selection_id, capability="sql_generation")
+
+    def translation_selection(self, selection_id: str | None) -> LlmModelSelection:
+        """Resolve an allowed translation model selection."""
+        return self.selection_for(selection_id, capability="translation")
+
+    def selection_for(self, selection_id: str | None, *, capability: str) -> LlmModelSelection:
+        """Resolve a credential-ready model enabled for one operation."""
+        default = self.effective_default_sql_generation_model if capability == "sql_generation" else self.effective_default_translation_model
+        operation = "SQL generation" if capability == "sql_generation" else "translation"
+        selected = selection_id or default
         if selected is None:
-            raise HTTPException(status_code=503, detail="no SQL generation model is configured")
-        selection = next((item for item in self.selections if item.id == selected), None)
-        if selection is None:
-            profile = next((item for item in self.models if item.id == selected), None)
-            selection = profile.selection(0) if profile is not None else None
-        if selection is None:
-            raise HTTPException(status_code=400, detail="unknown SQL generation model")
+            raise HTTPException(status_code=503, detail=f"no {operation} model is configured")
+        selection = self._find_selection(selected)
+        if selection is None or not getattr(selection.profile, capability):
+            raise HTTPException(status_code=400, detail=f"unknown {operation} model")
         profile = selection.profile
         if profile.api_key_env and profile.api_key() is None:
             raise HTTPException(status_code=503, detail=f"credential environment variable for {profile.label} is not set")
@@ -273,7 +317,8 @@ class LlmProfileRegistry(BaseModel):
 
     def public_models(self) -> list[dict[str, Any]]:
         """Return browser-safe model metadata without endpoints or options."""
-        default = self.effective_default_model
+        sql_default = self.effective_default_sql_generation_model
+        translation_default = self.effective_default_translation_model
         return [
             {
                 "id": selection.id,
@@ -281,7 +326,11 @@ class LlmProfileRegistry(BaseModel):
                 "provider": selection.provider,
                 "available": not selection.profile.api_key_env or selection.profile.api_key() is not None,
                 "reason": "" if not selection.profile.api_key_env or selection.profile.api_key() is not None else "credential is not configured",
-                "default": selection.id == default,
+                "default": selection.id == sql_default,
+                "sql_generation": selection.profile.sql_generation,
+                "translation": selection.profile.translation,
+                "default_sql_generation": selection.id == sql_default,
+                "default_translation": selection.id == translation_default,
             }
             for selection in self.selections
         ]

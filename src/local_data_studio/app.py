@@ -6,7 +6,7 @@ from contextlib import asynccontextmanager
 
 from fastapi import FastAPI
 
-from .server.api.analysis import column_stats, count_rows, llm_models, nl_query, run_eda, run_query, search
+from .server.api.analysis import column_stats, count_rows, llm_models, nl_query, run_eda, run_query, search, translation_languages
 from .server.api.analysis import router as analysis_router
 from .server.api.atlas_proxy import router as atlas_proxy_router
 from .server.api.atlas_proxy import stop_atlas_instance
@@ -36,6 +36,7 @@ from .server.api.jobs import (
     start_query_job,
     start_search_job,
     start_stats_job,
+    start_translation_job,
 )
 from .server.api.jobs import (
     router as jobs_router,
@@ -56,6 +57,7 @@ from .server.api.schemas import (
     RawRowRequest,
     SearchJobRequest,
     StatsJobRequest,
+    TranslationRequest,
 )
 from .server.api.static import NoCacheStaticFiles, mount_static_files
 from .server.atlas_components.runtime import AtlasRuntime
@@ -115,6 +117,7 @@ __all__ = [
     "RawRowRequest",
     "SearchJobRequest",
     "StatsJobRequest",
+    "TranslationRequest",
     "app",
     "cancel_job",
     "column_sample",
@@ -145,6 +148,8 @@ __all__ = [
     "start_query_job",
     "start_search_job",
     "start_stats_job",
+    "start_translation_job",
     "stop_atlas_instance",
+    "translation_languages",
     "upload_files",
 ]

@@ -28,6 +28,8 @@ def public_llm_models() -> dict[str, Any]:
     return {
         "models": LLM_PROFILES.public_models(),
         "default_model": LLM_PROFILES.effective_default_model,
+        "default_sql_generation_model": LLM_PROFILES.effective_default_sql_generation_model,
+        "default_translation_model": LLM_PROFILES.effective_default_translation_model,
     }
 
 

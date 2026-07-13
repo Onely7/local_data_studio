@@ -33,10 +33,12 @@ EXPECTED_API_OPERATIONS = {
     ("/api/jobs/query", "post"),
     ("/api/jobs/search", "post"),
     ("/api/jobs/stats", "post"),
+    ("/api/jobs/translation", "post"),
     ("/api/jobs/{job_id}", "get"),
     ("/api/jobs/{job_id}/cancel", "post"),
     ("/api/llm_models", "get"),
     ("/api/nl_query", "post"),
+    ("/api/translation_languages", "get"),
     ("/api/preview", "get"),
     ("/api/query", "post"),
     ("/api/raw", "get"),
@@ -56,6 +58,7 @@ STATIC_APPLICATION_MODULES = (
     "/app/images.js",
     "/app/llm.js",
     "/app/state.js",
+    "/app/translation.js",
 )
 
 
@@ -192,7 +195,15 @@ class ApplicationContractTests(TestCase):
         """Keep SQL model discovery browser-safe."""
         payload = TestClient(app).get("/api/llm_models").json()
 
-        self.assertEqual({"models": [], "default_model": None}, payload)
+        self.assertEqual(
+            {
+                "models": [],
+                "default_model": None,
+                "default_sql_generation_model": None,
+                "default_translation_model": None,
+            },
+            payload,
+        )
         serialized = str(payload).lower()
         self.assertNotIn("api_key", serialized)
         self.assertNotIn("base_url", serialized)
