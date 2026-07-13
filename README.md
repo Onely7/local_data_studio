@@ -335,10 +335,17 @@ SQL execution is subject to timeouts, memory limits, and checks for queries that
 
 Configure a model profile with `translation = true`, then select its model and a target language in the toolbar.
 The translation icon in an expanded field translates that cell, while the icon in a column header translates the values currently visible in that column.
+Column translation is offered only when at least one visible value contains natural-language text.
+Numeric-only values and containers, booleans, binary values, and recognized image or audio data are excluded.
 
 Translation is always manual. It does not modify the dataset, load another page, scan the source file, or fetch the complete **Raw** value.
 Only the bounded values already loaded in the current Preview, search result, or SQL result page are sent to the selected LLM provider.
 The original value remains visible and the translated value appears underneath it.
+Expanded values and translations have separate copy controls.
+For lists and objects, the code-view control shows the original JSON together with its translation and the applicable copy and translation controls.
+
+Selection menus display about six choices at a time and scroll for additional choices.
+The lower fade is removed at the final choice so the end of the list remains clear.
 
 Large requests require confirmation. Results are retained only in browser memory for the current page session and are not written to Local Data Studio's server cache or `localStorage`.
 Changing the dataset, view, page, model, language, or source value prevents a result from being shown in the wrong context.
@@ -418,6 +425,8 @@ The link uses `/atlas/{instance_id}/` on the same Local Data Studio origin, so i
 ### 7. Use the Row Inspector and Enlarged Image View
 
 Click a row to display the full contents of each column in the **Row Inspector**.
+On desktop-sized viewports, the dataset list, Preview, and inspector share the available viewport height and scroll independently, keeping the application page itself fixed.
+On mobile and tablet layouts, the page returns to normal vertical scrolling.
 Long values are shortened by default. Switch to **Raw** to view the complete value.
 
 Values recognized as images can be clicked to open an enlarged preview.
