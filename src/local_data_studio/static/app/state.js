@@ -60,6 +60,8 @@ export const state = {
   translationJobId: null,
   translationGeneration: 0,
   translationController: null,
+  jsonOverlayRowIndex: null,
+  jsonOverlayColumnIndex: null,
 };
 
 export const UPLOAD_EXTENSIONS = new Set([".jsonl", ".parquet", ".csv", ".tsv"]);

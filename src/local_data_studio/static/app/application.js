@@ -11,6 +11,7 @@ import {
 } from "./atlas.js";
 import {
   compactInspectorValue,
+  encodeCopyValue,
   escapeHtml,
   formatFileSize,
   isInspectorValueTruncated,
@@ -49,6 +50,25 @@ import {
   translateColumn,
   translationResultMarkup,
 } from "./translation.js";
+import { enhanceSelectControls } from "./selects.js";
+
+function showCopiedState(button) {
+  if (!button) return;
+  const label =
+    button.dataset.copyLabel ||
+    button.getAttribute("aria-label") ||
+    button.title ||
+    "Copy";
+  button.dataset.copyLabel = label;
+  button.classList.add("is-copied");
+  button.setAttribute("aria-label", "Copied");
+  button.title = "Copied";
+  setTimeout(() => {
+    button.classList.remove("is-copied");
+    button.setAttribute("aria-label", label);
+    button.title = label;
+  }, 1200);
+}
 
 function resetRowInspectorRaw() {
   state.rowInspectorRaw = false;
@@ -99,7 +119,7 @@ function renderOverlayFields() {
             <div class="overlay-field-label">${escapeHtml(col)}</div>
             <div class="overlay-field-actions">
               ${rawButton}
-              <button class="overlay-copy" data-copy="${copyValue}" type="button">Copy</button>
+              <button class="overlay-copy icon-action-btn" data-copy="${copyValue}" type="button" title="Copy value" aria-label="Copy value"><img src="icons/content-copy.svg" alt="" aria-hidden="true" /></button>
             </div>
           </div>
           <div class="overlay-field-value">${formatOverlayValue(displayValue)}</div>
@@ -121,16 +141,6 @@ function toggleOverlayFieldRaw(fieldKey) {
     state.overlayRawFields.add(key);
   }
   renderOverlayFields();
-}
-
-function encodeCopyValue(value) {
-  let text;
-  try {
-    text = JSON.stringify(value, null, 2);
-  } catch (err) {
-    text = String(value);
-  }
-  return encodeURIComponent(text);
 }
 
 function sameImageCandidate(left, right) {
@@ -324,14 +334,17 @@ function renderTable() {
 
     th.appendChild(wrapper);
 
-    th.appendChild(createColumnTranslationButton(col));
+    const columnTranslationButton = createColumnTranslationButton(col);
+    if (columnTranslationButton) th.appendChild(columnTranslationButton);
 
     const deleteBtn = document.createElement("button");
     deleteBtn.type = "button";
     deleteBtn.className = "col-delete-btn";
     deleteBtn.dataset.col = col;
     deleteBtn.title = "Delete column";
-    deleteBtn.textContent = "DEL";
+    deleteBtn.setAttribute("aria-label", `Delete column ${col}`);
+    deleteBtn.innerHTML =
+      '<img src="icons/delete.svg" alt="" aria-hidden="true" />';
     th.appendChild(deleteBtn);
 
     headRow.appendChild(th);
@@ -381,20 +394,21 @@ function renderTable() {
           const value = row[idx];
           const showJson = isJsonDetailValue(value);
           const jsonButton = showJson
-            ? `<button class="json-detail-btn" data-row="${rowIndex}" data-col="${idx}" type="button" title="JSON View">{}</button>`
+            ? `<button class="json-detail-btn icon-action-btn" data-row="${rowIndex}" data-col="${idx}" type="button" title="Code view" aria-label="Open code view for ${escapeHtml(col)}"><img src="icons/code.svg" alt="" aria-hidden="true" /></button>`
             : "";
           const translateButton = expandedTranslationButtonMarkup(
             rowIndex,
             idx,
             value,
           );
+          const copyButton = `<button class="expanded-copy-btn icon-action-btn" data-copy="${encodeCopyValue(value)}" type="button" title="Copy value" aria-label="Copy value"><img src="icons/content-copy.svg" alt="" aria-hidden="true" /></button>`;
           return `
             <div class="expanded-field">
               <div class="expanded-field-header">
                 <div class="expanded-label">${escapeHtml(col)}</div>
-                <div class="expanded-field-actions">${translateButton}${jsonButton}</div>
+                <div class="expanded-field-actions">${copyButton}${translateButton}${jsonButton}</div>
               </div>
-              <div class="expanded-value">${formatExpandedCell(value)}${translationResultMarkup(rowIndex, idx, true)}</div>
+              <div class="expanded-value"><div class="expanded-source-value">${formatExpandedCell(value)}</div>${translationResultMarkup(rowIndex, idx, true)}</div>
             </div>
           `;
         })
@@ -670,12 +684,7 @@ async function copyRowInspector() {
   if (!text || text === "Select a row to inspect") return;
   try {
     await navigator.clipboard.writeText(text);
-    if (elements.copyRow) {
-      elements.copyRow.textContent = "Copied";
-      setTimeout(() => {
-        elements.copyRow.textContent = "Copy";
-      }, 1200);
-    }
+    showCopiedState(elements.copyRow);
   } catch (err) {
     console.error(err);
   }
@@ -857,12 +866,7 @@ async function copyJsonOverlay() {
   if (!text) return;
   try {
     await navigator.clipboard.writeText(text);
-    if (elements.copyJson) {
-      elements.copyJson.textContent = "Copied";
-      setTimeout(() => {
-        elements.copyJson.textContent = "Copy";
-      }, 1200);
-    }
+    showCopiedState(elements.copyJson);
   } catch (err) {
     console.error(err);
   }
@@ -991,9 +995,16 @@ function navigateOverlay(step) {
   updateOverlayImage();
 }
 
-function openJsonOverlay(rowIndex, colIndex) {
-  if (!elements.jsonOverlay) return;
-  closeImageOverlay();
+function renderJsonOverlayContent() {
+  const rowIndex = state.jsonOverlayRowIndex;
+  const colIndex = state.jsonOverlayColumnIndex;
+  if (
+    !elements.jsonOverlay ||
+    !Number.isFinite(rowIndex) ||
+    !Number.isFinite(colIndex)
+  ) {
+    return;
+  }
   const value = state.rows[rowIndex]?.[colIndex];
   const columnName = state.columns[colIndex] || "Value";
   let jsonText = "";
@@ -1005,6 +1016,28 @@ function openJsonOverlay(rowIndex, colIndex) {
   const rowLabel = state.offset + rowIndex + 1;
   elements.jsonTitle.textContent = `${columnName} | Row ${rowLabel}`;
   elements.jsonBody.innerHTML = highlightJson(jsonText);
+  if (elements.jsonTranslateAction) {
+    elements.jsonTranslateAction.innerHTML = expandedTranslationButtonMarkup(
+      rowIndex,
+      colIndex,
+      value,
+    );
+  }
+  if (elements.jsonTranslationResult) {
+    elements.jsonTranslationResult.innerHTML = translationResultMarkup(
+      rowIndex,
+      colIndex,
+      true,
+    );
+  }
+}
+
+function openJsonOverlay(rowIndex, colIndex) {
+  if (!elements.jsonOverlay) return;
+  closeImageOverlay();
+  state.jsonOverlayRowIndex = rowIndex;
+  state.jsonOverlayColumnIndex = colIndex;
+  renderJsonOverlayContent();
   elements.jsonOverlay.classList.add("active");
 }
 
@@ -1013,6 +1046,12 @@ function closeJsonOverlay() {
   elements.jsonOverlay.classList.remove("active");
   elements.jsonTitle.textContent = "JSON View";
   elements.jsonBody.textContent = "";
+  if (elements.jsonTranslateAction) elements.jsonTranslateAction.textContent = "";
+  if (elements.jsonTranslationResult) {
+    elements.jsonTranslationResult.textContent = "";
+  }
+  state.jsonOverlayRowIndex = null;
+  state.jsonOverlayColumnIndex = null;
 }
 
 function highlightJson(text) {
@@ -1692,6 +1731,17 @@ function attachEvents() {
   }
 
   elements.tableBody.addEventListener("click", (event) => {
+    const copyBtn = event.target.closest(".expanded-copy-btn");
+    if (copyBtn) {
+      event.stopPropagation();
+      const encoded = copyBtn.dataset.copy || "";
+      if (!encoded) return;
+      navigator.clipboard
+        .writeText(decodeURIComponent(encoded))
+        .then(() => showCopiedState(copyBtn))
+        .catch((err) => console.error(err));
+      return;
+    }
     const translateBtn = event.target.closest(".field-translate-btn");
     if (translateBtn) {
       event.stopPropagation();
@@ -1779,10 +1829,7 @@ function attachEvents() {
         if (!encoded) return;
         try {
           await navigator.clipboard.writeText(decodeURIComponent(encoded));
-          btn.textContent = "Copied";
-          setTimeout(() => {
-            btn.textContent = "Copy";
-          }, 1200);
+          showCopiedState(btn);
         } catch (err) {
           console.error(err);
         }
@@ -1795,6 +1842,30 @@ function attachEvents() {
     elements.jsonOverlay.addEventListener("click", (event) => {
       if (event.target === elements.jsonOverlay) {
         closeJsonOverlay();
+        return;
+      }
+      const copyButton = event.target.closest(".expanded-copy-btn");
+      if (copyButton) {
+        event.stopPropagation();
+        const encoded = copyButton.dataset.copy || "";
+        if (!encoded) return;
+        navigator.clipboard
+          .writeText(decodeURIComponent(encoded))
+          .then(() => showCopiedState(copyButton))
+          .catch((err) => console.error(err));
+        return;
+      }
+      const translateButton = event.target.closest(".field-translate-btn");
+      if (translateButton) {
+        event.stopPropagation();
+        const rowIndex = Number(translateButton.dataset.row);
+        const colIndex = Number(translateButton.dataset.col);
+        if (Number.isFinite(rowIndex) && Number.isFinite(colIndex)) {
+          translateCell(rowIndex, colIndex, () => {
+            renderTable();
+            renderJsonOverlayContent();
+          });
+        }
       }
     });
     document.addEventListener("keydown", (event) => {
@@ -1805,6 +1876,7 @@ function attachEvents() {
 }
 
 attachEvents();
+enhanceSelectControls();
 updateRowActions();
 loadConfig()
   .then(() =>

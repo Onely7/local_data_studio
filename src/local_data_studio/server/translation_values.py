@@ -9,11 +9,40 @@ from dataclasses import dataclass
 from typing import Any
 from urllib.parse import urlsplit
 
-_IMAGE_EXTENSIONS = frozenset({".avif", ".bmp", ".gif", ".heic", ".jpeg", ".jpg", ".png", ".tif", ".tiff", ".webp"})
+_MEDIA_EXTENSIONS = frozenset(
+    {
+        ".aac",
+        ".avif",
+        ".bmp",
+        ".flac",
+        ".gif",
+        ".heic",
+        ".jpeg",
+        ".jpg",
+        ".m4a",
+        ".mp3",
+        ".mp4",
+        ".oga",
+        ".ogg",
+        ".png",
+        ".svg",
+        ".tif",
+        ".tiff",
+        ".wav",
+        ".webm",
+        ".webp",
+    }
+)
 _UUID_RE = re.compile(r"^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-5][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}$")
 _EMAIL_RE = re.compile(r"^[^\s@]+@[^\s@]+\.[^\s@]+$")
 _HEX_RE = re.compile(r"^[0-9a-fA-F]+$")
 _BASE64_RE = re.compile(r"^[A-Za-z0-9+/]+={0,2}$")
+_NUMERIC_RE = re.compile(r"^[+-]?(?:(?:\d+(?:\.\d*)?)|(?:\.\d+))(?:e[+-]?\d+)?$", re.IGNORECASE)
+_MEDIA_HEX_PREFIX_RE = re.compile(
+    r"^(?:89504e47|ffd8ff|47494638|424d|49492a00|4d4d002a|3c737667|494433|4f676753|664c6143|1a45dfa3|52494646)",
+    re.IGNORECASE,
+)
+_MEDIA_BASE64_PREFIX_RE = re.compile(r"^(?:iVBORw0KGgo|/9j/|R0lGOD|Qk|SUkq|TU0AKg|PHN2Zy|PD94bW|SUQz|T2dnUw|ZkxhQw|GkXfo|UklGR)")
 _CODE_RE = re.compile(r"(?:^|\s)(?:def |class |function |SELECT\s|INSERT\s|UPDATE\s|DELETE\s|import |from\s+\S+\s+import\s)", re.IGNORECASE)
 _PathPart = str | int
 
@@ -48,8 +77,11 @@ def is_translatable_string(value: str) -> bool:
         or text.lower().startswith(("data:", "<binary "))
         or parsed.scheme in {"http", "https", "ftp", "file"}
         or bool(_EMAIL_RE.fullmatch(text) or _UUID_RE.fullmatch(text))
-        or any(path_text.endswith(extension) for extension in _IMAGE_EXTENSIONS)
+        or any(path_text.endswith(extension) for extension in _MEDIA_EXTENSIONS)
+        or bool(_NUMERIC_RE.fullmatch(text))
+        or text.lower() in {"true", "false", "null"}
         or (not any(character.isspace() for character in text) and ("/" in text or "\\" in text))
+        or bool(_MEDIA_HEX_PREFIX_RE.match(compact) or _MEDIA_BASE64_PREFIX_RE.match(compact))
         or (len(compact) >= 64 and bool(_HEX_RE.fullmatch(compact)))
         or (len(compact) >= 96 and len(compact) % 4 == 0 and bool(_BASE64_RE.fullmatch(compact)))
         or bool(_CODE_RE.search(text))
@@ -82,6 +114,11 @@ def extract_translatable_strings(items: list[tuple[str, Any]], *, max_depth: int
             for index, nested in enumerate(value):
                 visit(nested, item_index, (*path, index), depth + 1)
         elif isinstance(value, dict):
+            path_hint = value.get("path")
+            if "bytes" in value or (
+                isinstance(path_hint, str) and any(urlsplit(path_hint).path.lower().endswith(extension) for extension in _MEDIA_EXTENSIONS)
+            ):
+                return
             for key, nested in value.items():
                 visit(nested, item_index, (*path, key), depth + 1)
 
