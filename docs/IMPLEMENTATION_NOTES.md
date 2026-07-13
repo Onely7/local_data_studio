@@ -19,7 +19,7 @@ The `local_data_studio.toml` file in the workspace is the standard configuration
 * EDA settings
 * Embedding Atlas settings
 * Permission to delete rows from source data files
-* LLM profiles used for SQL generation
+* LLM profiles used for SQL generation and translation
 
 When starting the application from the CLI, use `--config` to select the configuration file explicitly.
 
@@ -76,6 +76,7 @@ The implementation separates the following responsibilities:
 * HTTP communication
 * Image handling
 * LLM selection
+* Translation controls and browser-memory results
 * Atlas operations
 * Overall application orchestration
 
@@ -146,16 +147,16 @@ This module is responsible mainly for the following operations:
 Cooperative cancellation means that a process is not terminated externally at an arbitrary point.
 Instead, the process checks for a cancellation request at safe boundaries and exits cleanly.
 
-## LLM-Based SQL Generation
+## LLM Text Generation
 
-SQL generation uses an adapter that lazily loads the LiteLLM Python SDK.
+SQL generation and manual translation share an adapter that lazily loads the LiteLLM Python SDK.
 Lazy loading means that a library is not imported until the feature is actually needed.
 
 The related modules have the following responsibilities:
 
 * `server/llm_profiles.py`
 
-  * Validates server-managed LLM model profiles.
+  * Validates server-managed LLM model profiles and their SQL/translation capabilities.
 * `server/llm_prompt.py`
 
   * Builds one provider-independent user message.
@@ -168,6 +169,31 @@ The related modules have the following responsibilities:
   * Selects the profile and orchestrates the overall SQL-generation process.
 
 Provider error bodies and credentials are not included in API responses.
+
+### Manual Translation
+
+Translation is submitted through the same cancellable `JobStore` contract used by other long-running operations.
+It accepts only JSON values already loaded in the browser's current Preview page; the server does not load source rows or Raw values for translation.
+
+The translation modules have the following responsibilities:
+
+* `server/translation_config.py`
+
+  * Owns the fixed target-language registry and validated TOML limits.
+* `server/translation_values.py`
+
+  * Copies nested JSON values, identifies natural-language string leaves, and restores translated text without changing keys or non-string values.
+* `server/translation_service.py`
+
+  * Resolves translation-enabled profiles, enforces server-calculated limits, chunks requests, validates exact ID mappings, retries malformed output once, and reports progress.
+
+The service does not persist source or translated text.
+LiteLLM calls are limited by a process-wide bounded semaphore, and cancellation is checked between chunks and retries.
+Provider-specific structured-output features are not required; normal assistant text is parsed as strict JSON with an exact one-to-one ID contract.
+
+`static/app/translation.js` owns target/model selectors, confirmation, job polling, and the memory-only browser cache.
+Its cache key includes the dataset view, page or query context, row and column identity, source fingerprint, model, and target language.
+Only model and language selections are stored in `localStorage`; translation contents are not persisted.
 
 ## EDA Reports
 
