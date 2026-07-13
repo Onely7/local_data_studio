@@ -2,7 +2,10 @@
 
 from __future__ import annotations
 
+import shutil
+import subprocess
 from html.parser import HTMLParser
+from pathlib import Path
 from unittest import TestCase
 
 from fastapi.testclient import TestClient
@@ -139,6 +142,75 @@ class RuntimeContractTests(TestCase):
         self.assertIn('from "./state.js"', application.text)
         self.assertNotIn('document.createElement("style")', application.text)
         self.assertIn(".info-grid {", stylesheet.text)
+
+    def test_static_modules_declare_cross_module_dependencies(self) -> None:
+        """Prevent non-empty model data and deferred UI actions from using missing globals."""
+        static_app = Path(__file__).parents[1] / "src" / "local_data_studio" / "static" / "app"
+        application = (static_app / "application.js").read_text(encoding="utf-8")
+        atlas = (static_app / "atlas.js").read_text(encoding="utf-8")
+        images = (static_app / "images.js").read_text(encoding="utf-8")
+        llm = (static_app / "llm.js").read_text(encoding="utf-8")
+
+        self.assertIn('import { escapeHtml } from "./formatting.js";', atlas)
+        self.assertIn('import { escapeHtml } from "./formatting.js";', llm)
+        self.assertIn("export function imageCandidate", images)
+        self.assertIn("export function openAtlasUrl", atlas)
+        self.assertIn("imageCandidate,", application)
+        self.assertIn("openAtlasUrl,", application)
+
+    def test_static_model_renderers_run_with_non_empty_models(self) -> None:
+        """Render configured LLM and embedder models without relying on legacy globals."""
+        node = shutil.which("node")
+        if node is None:
+            self.skipTest("Node.js is unavailable")
+        static_app = Path(__file__).parents[1] / "src" / "local_data_studio" / "static" / "app"
+        script = f"""
+globalThis.document = {{ getElementById: () => null, querySelector: () => null }};
+globalThis.window = {{ location: {{ origin: "http://127.0.0.1:8000", protocol: "http:", href: "http://127.0.0.1:8000/" }} }};
+const {{ elements }} = await import({str((static_app / "dom.js").as_uri())!r});
+const {{ state }} = await import({str((static_app / "state.js").as_uri())!r});
+const atlas = await import({str((static_app / "atlas.js").as_uri())!r});
+const images = await import({str((static_app / "images.js").as_uri())!r});
+const llm = await import({str((static_app / "llm.js").as_uri())!r});
+const classList = {{ toggle: () => {{}}, add: () => {{}}, remove: () => {{}} }};
+const element = (value = "") => ({{ value, innerHTML: "", textContent: "", title: "", disabled: false, classList, style: {{}} }});
+elements.atlasColumn = element("image");
+elements.atlasModel = element("model-id");
+elements.atlasBackend = element("transformers");
+elements.atlasPromptControls = element();
+elements.atlasPrompt = element();
+elements.runAtlas = element();
+elements.runAtlasQuery = element();
+state.embedderModels = [{{
+  value: "model-id",
+  name: "Model <One>",
+  default_backend: "transformers",
+  backends: {{
+    "sentence-transformers": {{ available: false, status: "unsupported", reason: "" }},
+    transformers: {{ available: true, status: "direct", reason: "" }},
+  }},
+}}];
+atlas.renderAtlasModelOptions();
+if (!elements.atlasModel.innerHTML.includes("Model &lt;One&gt;")) throw new Error("embedder model rendering failed");
+if (images.imageCandidate("image.png", "image.png").src !== "image.png") throw new Error("image candidate export failed");
+state.atlasUrl = "/atlas/runtime-test/";
+atlas.openAtlasUrl();
+if (window.location.href !== "http://127.0.0.1:8000/atlas/runtime-test/") throw new Error("Atlas URL export failed");
+elements.nlModel = element();
+elements.nlGenerate = element();
+elements.nlStatus = element();
+globalThis.fetch = async () => ({{
+  ok: true,
+  json: async () => ({{ models: [{{ id: "llm-id", label: "LLM <One>", available: true }}], default_model: "llm-id" }}),
+}});
+await llm.loadLlmModels();
+if (!elements.nlModel.innerHTML.includes("LLM &lt;One&gt;")) throw new Error("LLM model rendering failed");
+"""
+        subprocess.run(
+            [node, "--experimental-default-type=module", "--input-type=module", "--eval", script],
+            check=True,
+            cwd=static_app,
+        )
 
     def test_reader_and_atlas_facades_keep_supported_public_callables(self) -> None:
         """Keep imports used by API routes and extension code available."""

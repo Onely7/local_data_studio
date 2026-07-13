@@ -6,6 +6,7 @@ import {
   startJob,
   waitForJob,
 } from "./http.js";
+import { escapeHtml } from "./formatting.js";
 import { state } from "./state.js";
 
 function selectedAtlasColumn() {
@@ -53,7 +54,7 @@ function normalizeAtlasUrl(url) {
   }
 }
 
-function openAtlasUrl() {
+export function openAtlasUrl() {
   const url = normalizeAtlasUrl(
     state.atlasUrl || (elements.atlasLink ? elements.atlasLink.href : ""),
   );
@@ -351,4 +352,3 @@ export async function runAtlas() {
 export async function runAtlasOnQueryResults() {
   await runAtlasJob("query");
 }
-
