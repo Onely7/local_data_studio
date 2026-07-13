@@ -3,6 +3,7 @@
 import datetime
 import decimal
 import re
+from itertools import islice
 from typing import Any, Sequence
 
 from .config import MAX_CELL_CHARS, MAX_SEQ_ITEMS
@@ -79,7 +80,7 @@ def serialize_value(value: Any, *, key: str | None = None, sibling_image_path: b
         image_path = value.get("path")
         has_image_path = isinstance(image_path, str) and _is_image_reference(image_path)
         result = {
-            str(item_key): serialize_value(val, key=str(item_key), sibling_image_path=has_image_path) for item_key, val in list(value.items())[:MAX_SEQ_ITEMS]
+            str(item_key): serialize_value(val, key=str(item_key), sibling_image_path=has_image_path) for item_key, val in islice(value.items(), MAX_SEQ_ITEMS)
         }
         if len(value) > MAX_SEQ_ITEMS:
             result["__truncated__"] = f"{len(value) - MAX_SEQ_ITEMS} more fields truncated"
