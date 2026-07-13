@@ -1,5 +1,5 @@
 import { elements } from "./dom.js";
-import { escapeHtml } from "./formatting.js";
+import { encodeCopyValue, escapeHtml } from "./formatting.js";
 import {
   cancelJob,
   extractErrorMessage,
@@ -13,8 +13,15 @@ import { state } from "./state.js";
 
 const MODEL_STORAGE_KEY = "local-data-studio.translation-model";
 const LANGUAGE_STORAGE_KEY = "local-data-studio.translation-language";
-const IMAGE_PATH_RE = /\.(?:avif|bmp|gif|heic|jpe?g|png|tiff?|webp)(?:[?#].*)?$/i;
+const MEDIA_PATH_RE =
+  /\.(?:aac|avif|bmp|flac|gif|heic|jpe?g|m4a|mp3|mp4|oga|ogg|png|svg|tiff?|wav|webm|webp)(?:[?#].*)?$/i;
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
+const NUMERIC_STRING_RE =
+  /^[+-]?(?:(?:\d+(?:\.\d*)?)|(?:\.\d+))(?:e[+-]?\d+)?$/i;
+const MEDIA_HEX_PREFIX_RE =
+  /^(?:89504e47|ffd8ff|47494638|424d|49492a00|4d4d002a|3c737667|494433|4f676753|664c6143|1a45dfa3|52494646)/i;
+const MEDIA_BASE64_PREFIX_RE =
+  /^(?:iVBORw0KGgo|\/9j\/|R0lGOD|Qk|SUkq|TU0AKg|PHN2Zy|PD94bW|SUQz|T2dnUw|ZkxhQw|GkXfo|UklGR)/;
 let confirmationResolver = null;
 let confirmationFocus = null;
 
@@ -37,19 +44,43 @@ function storageSet(key, value) {
 export function isTranslatableString(value) {
   if (typeof value !== "string") return false;
   const text = value.trim();
-  if (!text || /^(?:data:|<binary )/i.test(text)) return false;
+  if (!text || /^(?:data:|<binary )/i.test(text)) {
+    return false;
+  }
   if (/^(?:https?|ftp|file):\/\//i.test(text) || /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(text)) return false;
-  if (IMAGE_PATH_RE.test(text) || UUID_RE.test(text)) return false;
+  if (MEDIA_PATH_RE.test(text) || UUID_RE.test(text)) return false;
+  if (NUMERIC_STRING_RE.test(text) || /^(?:true|false|null)$/i.test(text)) {
+    return false;
+  }
   if (!/\s/.test(text) && /[\\/]/.test(text)) return false;
   const compact = text.replace(/\s/g, "");
+  if (MEDIA_HEX_PREFIX_RE.test(compact) || MEDIA_BASE64_PREFIX_RE.test(compact)) {
+    return false;
+  }
   if (compact.length >= 64 && /^[0-9a-f]+$/i.test(compact)) return false;
   if (compact.length >= 96 && compact.length % 4 === 0 && /^[A-Za-z0-9+/]+={0,2}$/.test(compact)) return false;
   if (/(?:^|\s)(?:def |class |function |SELECT\s|INSERT\s|UPDATE\s|DELETE\s|import )/i.test(text)) return false;
   return true;
 }
 
+function isBinarySequence(value) {
+  if (typeof ArrayBuffer !== "undefined") {
+    if (value instanceof ArrayBuffer || ArrayBuffer.isView(value)) return true;
+  }
+  return typeof Blob !== "undefined" && value instanceof Blob;
+}
+
+function isMediaOrBinaryObject(value) {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return false;
+  if (isBinarySequence(value)) return true;
+  if (Object.hasOwn(value, "bytes")) return true;
+  const path = typeof value.path === "string" ? value.path.trim() : "";
+  return Boolean(path && MEDIA_PATH_RE.test(path));
+}
+
 export function collectTranslatableStrings(value, output = [], depth = 0) {
   if (depth > 64) return output;
+  if (isBinarySequence(value) || isMediaOrBinaryObject(value)) return output;
   if (typeof value === "string") {
     if (isTranslatableString(value)) output.push(value);
     return output;
@@ -173,7 +204,10 @@ export function translationResultMarkup(rowIndex, columnIndex, expanded = false)
   const translated = cachedTranslation(rowIndex, columnIndex);
   if (translated === undefined) return "";
   const value = expanded ? formatExpandedCell(translated) : formatCell(translated);
-  return `<div class="translation-result${expanded ? " translation-result-expanded" : ""}"><div class="translation-result-label">Translation</div>${value}</div>`;
+  const copyButton = expanded
+    ? `<button class="expanded-copy-btn icon-action-btn" data-copy="${encodeCopyValue(translated)}" type="button" title="Copy translation" aria-label="Copy translation"><img src="icons/content-copy.svg" alt="" aria-hidden="true" /></button>`
+    : "";
+  return `<div class="translation-result${expanded ? " translation-result-expanded" : ""}"><div class="translation-result-header"><div class="translation-result-label">Translation</div>${copyButton}</div><div class="translation-result-value">${value}</div></div>`;
 }
 
 export function expandedTranslationButtonMarkup(rowIndex, columnIndex, value) {
@@ -187,13 +221,19 @@ export function expandedTranslationButtonMarkup(rowIndex, columnIndex, value) {
 }
 
 export function createColumnTranslationButton(column) {
+  const columnIndex = state.columns.indexOf(column);
+  if (
+    columnIndex < 0 ||
+    !state.rows.some((row) => hasTranslatableText(row[columnIndex]))
+  ) {
+    return null;
+  }
   const button = document.createElement("button");
   button.type = "button";
   button.className = "col-translate-btn";
   button.dataset.col = column;
   button.title = `Translate visible values in ${column}`;
   button.setAttribute("aria-label", `Translate visible values in ${column}`);
-  const columnIndex = state.columns.indexOf(column);
   const pending = state.rows.some((row, rowIndex) => state.translationPendingKeys.has(cacheKey(rowIndex, columnIndex, row[columnIndex])));
   button.disabled = pending || !selectedModelMetadata() || !selectedLanguageMetadata();
   button.setAttribute("aria-busy", pending ? "true" : "false");

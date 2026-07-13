@@ -66,6 +66,8 @@ export const elements = {
   jsonTitle: document.getElementById("json-title"),
   jsonBody: document.getElementById("json-body"),
   copyJson: document.getElementById("copy-json"),
+  jsonTranslateAction: document.getElementById("json-translate-action"),
+  jsonTranslationResult: document.getElementById("json-translation-result"),
   copyRow: document.getElementById("copy-row"),
   deleteRow: document.getElementById("delete-row"),
   deleteOverlay: document.getElementById("delete-overlay"),

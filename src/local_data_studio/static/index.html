@@ -4,7 +4,8 @@
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <title>Data Viewer</title>
-    <link rel="stylesheet" href="styles.css?v=20260714-translation" />
+    <link rel="icon" href="favicon.svg" type="image/svg+xml" />
+    <link rel="stylesheet" href="styles.css?v=20260714-controls" />
   </head>
   <body>
     <div class="app">
@@ -46,15 +47,6 @@
 
         <main class="main">
           <div class="toolbar">
-            <div class="toolbar-group">
-              <input
-                id="search-input"
-                type="text"
-                placeholder="Search dataset"
-              />
-              <button id="search-btn">Search</button>
-              <button class="ghost" id="clear-search">Reset</button>
-            </div>
             <div
               class="toolbar-group translation-controls"
               title="Visible values are sent to the selected LLM only when you request translation."
@@ -72,18 +64,29 @@
               </button>
               <span class="translation-status" id="translation-status" role="status" aria-live="polite"></span>
             </div>
-            <div class="toolbar-group">
-              <label for="page-size">Rows</label>
-              <select id="page-size">
-                <option value="50">50</option>
-                <option value="100" selected>100</option>
-                <option value="200">200</option>
-                <option value="500">500</option>
-              </select>
-              <div class="pagination">
-                <button class="ghost" id="prev-page">Prev</button>
-                <span id="page-info">-</span>
-                <button class="ghost" id="next-page">Next</button>
+            <div class="toolbar-actions">
+              <div class="toolbar-group search-controls">
+                <input
+                  id="search-input"
+                  type="text"
+                  placeholder="Search dataset"
+                />
+                <button id="search-btn">Search</button>
+                <button class="ghost" id="clear-search">Reset</button>
+              </div>
+              <div class="toolbar-group pagination-controls">
+                <label for="page-size">Rows</label>
+                <select id="page-size">
+                  <option value="50">50</option>
+                  <option value="100" selected>100</option>
+                  <option value="200">200</option>
+                  <option value="500">500</option>
+                </select>
+                <div class="pagination">
+                  <button class="ghost" id="prev-page">Prev</button>
+                  <span id="page-info">-</span>
+                  <button class="ghost" id="next-page">Next</button>
+                </div>
               </div>
             </div>
           </div>
@@ -121,9 +124,10 @@
                 class="nl-send"
                 id="nl-generate"
                 aria-label="Generate SQL"
+                title="Generate SQL"
                 disabled
               >
-                ↑
+                <img src="icons/send.svg" alt="" aria-hidden="true" />
               </button>
             </div>
             <div
@@ -256,8 +260,18 @@ SELECT * FROM data LIMIT 100</textarea
             <h3>Row Inspector</h3>
             <div class="row-inspector-wrap">
               <div class="row-inspector-actions">
-                <button class="copy-btn" id="copy-row" type="button">
-                  Copy
+                <button
+                  class="copy-btn icon-action-btn"
+                  id="copy-row"
+                  type="button"
+                  aria-label="Copy row"
+                  title="Copy row"
+                >
+                  <img
+                    src="icons/content-copy.svg"
+                    alt=""
+                    aria-hidden="true"
+                  />
                 </button>
                 <button
                   class="copy-btn"
@@ -334,10 +348,24 @@ Select a row to inspect</pre
           </button>
         </div>
         <div class="json-body-wrap">
-          <button class="copy-btn copy-btn--light" id="copy-json" type="button">
-            Copy
-          </button>
+          <div class="json-actions">
+            <button
+              class="copy-btn copy-btn--light icon-action-btn"
+              id="copy-json"
+              type="button"
+              aria-label="Copy value"
+              title="Copy value"
+            >
+              <img
+                src="icons/content-copy.svg"
+                alt=""
+                aria-hidden="true"
+              />
+            </button>
+            <div id="json-translate-action"></div>
+          </div>
           <pre class="json-body" id="json-body"></pre>
+          <div id="json-translation-result"></div>
         </div>
       </div>
     </div>
@@ -407,6 +435,6 @@ Select a row to inspect</pre
       </div>
     </div>
 
-    <script type="module" src="app.js?v=20260714-translation"></script>
+    <script type="module" src="app.js?v=20260714-controls"></script>
   </body>
 </html>

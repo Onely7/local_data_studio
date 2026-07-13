@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import shutil
 import subprocess
+import tempfile
 from html.parser import HTMLParser
 from pathlib import Path
 from unittest import TestCase
@@ -43,13 +44,13 @@ EXPECTED_STATIC_IDS = (
     "file-list",
     "drop-hint",
     "file-empty",
-    "search-input",
-    "search-btn",
-    "clear-search",
     "translation-model",
     "translation-language",
     "translation-cancel",
     "translation-status",
+    "search-input",
+    "search-btn",
+    "clear-search",
     "page-size",
     "prev-page",
     "page-info",
@@ -99,7 +100,9 @@ EXPECTED_STATIC_IDS = (
     "json-title",
     "json-close",
     "copy-json",
+    "json-translate-action",
     "json-body",
+    "json-translation-result",
     "delete-overlay",
     "delete-message",
     "delete-cancel",
@@ -134,8 +137,8 @@ class RuntimeContractTests(TestCase):
         collector.feed(response.text)
 
         self.assertEqual(EXPECTED_STATIC_IDS, tuple(collector.ids))
-        self.assertEqual(["styles.css?v=20260714-translation"], collector.stylesheets)
-        self.assertEqual(["app.js?v=20260714-translation"], collector.scripts)
+        self.assertEqual(["styles.css?v=20260714-controls"], collector.stylesheets)
+        self.assertEqual(["app.js?v=20260714-controls"], collector.scripts)
 
     def test_static_entrypoint_loads_application_as_an_es_module(self) -> None:
         """Keep the stable app URL while implementation modules remain package assets."""
@@ -143,16 +146,29 @@ class RuntimeContractTests(TestCase):
             page = client.get("/").text
             entrypoint = client.get("/app.js")
             application = client.get("/app/application.js")
+            select_controls = client.get("/app/selects.js")
             stylesheet = client.get("/styles.css")
             translation_icon = client.get("/icons/translation.svg")
+            code_icon = client.get("/icons/code.svg")
+            copy_icon = client.get("/icons/content-copy.svg")
+            delete_icon = client.get("/icons/delete.svg")
+            send_icon = client.get("/icons/send.svg")
+            favicon = client.get("/favicon.svg")
 
-        self.assertIn('<script type="module" src="app.js?v=20260714-translation"></script>', page)
+        self.assertIn('<script type="module" src="app.js?v=20260714-controls"></script>', page)
         self.assertEqual('import "./app/application.js";\n', entrypoint.text)
         self.assertEqual(200, application.status_code)
+        self.assertEqual(200, select_controls.status_code)
         self.assertIn('from "./state.js"', application.text)
+        self.assertIn("export function enhanceSelectControls", select_controls.text)
+        self.assertIn('classList.toggle("has-more-options"', select_controls.text)
         self.assertNotIn('document.createElement("style")', application.text)
         self.assertIn(".info-grid {", stylesheet.text)
         self.assertEqual("image/svg+xml", translation_icon.headers["content-type"])
+        for response in (code_icon, copy_icon, delete_icon, send_icon):
+            self.assertEqual(200, response.status_code)
+            self.assertEqual("image/svg+xml", response.headers["content-type"])
+        self.assertEqual("image/svg+xml", favicon.headers["content-type"])
 
     def test_static_modules_declare_cross_module_dependencies(self) -> None:
         """Prevent non-empty model data and deferred UI actions from using missing globals."""
@@ -179,23 +195,42 @@ class RuntimeContractTests(TestCase):
         node = shutil.which("node")
         if node is None:
             self.skipTest("Node.js is unavailable")
-        module = Path(__file__).parents[1] / "src" / "local_data_studio" / "static" / "app" / "translation.js"
-        script = f"""
+        source_app = Path(__file__).parents[1] / "src" / "local_data_studio" / "static" / "app"
+        with tempfile.TemporaryDirectory() as temporary_directory:
+            static_app = Path(temporary_directory) / "app"
+            shutil.copytree(source_app, static_app)
+            module = static_app / "translation.js"
+            script = f"""
 globalThis.document = {{ getElementById: () => null, querySelector: () => null, querySelectorAll: () => [] }};
 globalThis.window = {{ location: {{ origin: "http://127.0.0.1:8000" }} }};
 const translation = await import({str(module.as_uri())!r});
-const values = translation.collectTranslatableStrings({{ title: "Hello world", label: "cat", image: "images/example.png", url: "https://example.com" }});
+const values = translation.collectTranslatableStrings({{
+  title: "Hello world",
+  label: "cat",
+  image: "images/example.png",
+  audio: "audio/example.mp3",
+  url: "https://example.com",
+  numericText: "123.45",
+  numericObject: {{ count: 10, score: "42" }},
+  binaryObject: {{ bytes: "iVBORw0KGgoAAAANSUhEUg", path: "image.png" }},
+  booleanValue: true,
+}});
 if (JSON.stringify(values) !== JSON.stringify(["Hello world", "cat"])) throw new Error(`unexpected translation values: ${{JSON.stringify(values)}}`);
+if (translation.hasTranslatableText([1, "2", false])) throw new Error("numeric-only list must not be translatable");
+if (!translation.hasTranslatableText({{ status: "error" }})) throw new Error("ordinary short words must remain translatable");
 """
-        subprocess.run([node, "--experimental-default-type=module", "--input-type=module", "--eval", script], check=True)
+            subprocess.run([node, "--experimental-default-type=module", "--input-type=module", "--eval", script], check=True)
 
     def test_static_model_renderers_run_with_non_empty_models(self) -> None:
         """Render configured LLM and embedder models without relying on legacy globals."""
         node = shutil.which("node")
         if node is None:
             self.skipTest("Node.js is unavailable")
-        static_app = Path(__file__).parents[1] / "src" / "local_data_studio" / "static" / "app"
-        script = f"""
+        source_app = Path(__file__).parents[1] / "src" / "local_data_studio" / "static" / "app"
+        with tempfile.TemporaryDirectory() as temporary_directory:
+            static_app = Path(temporary_directory) / "app"
+            shutil.copytree(source_app, static_app)
+            script = f"""
 globalThis.document = {{ getElementById: () => null, querySelector: () => null }};
 globalThis.window = {{ location: {{ origin: "http://127.0.0.1:8000", protocol: "http:", href: "http://127.0.0.1:8000/" }} }};
 const {{ elements }} = await import({str((static_app / "dom.js").as_uri())!r});
@@ -237,11 +272,11 @@ globalThis.fetch = async () => ({{
 await llm.loadLlmModels();
 if (!elements.nlModel.innerHTML.includes("LLM &lt;One&gt;")) throw new Error("LLM model rendering failed");
 """
-        subprocess.run(
-            [node, "--experimental-default-type=module", "--input-type=module", "--eval", script],
-            check=True,
-            cwd=static_app,
-        )
+            subprocess.run(
+                [node, "--experimental-default-type=module", "--input-type=module", "--eval", script],
+                check=True,
+                cwd=static_app,
+            )
 
     def test_reader_and_atlas_facades_keep_supported_public_callables(self) -> None:
         """Keep imports used by API routes and extension code available."""

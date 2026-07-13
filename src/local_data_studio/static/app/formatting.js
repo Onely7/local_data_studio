@@ -9,6 +9,23 @@ export function escapeHtml(value) {
     .replace(/'/g, "&#39;");
 }
 
+/**
+ * Encode a displayed value for a `data-copy` attribute without interpolating raw text.
+ */
+export function encodeCopyValue(value) {
+  if (typeof value === "string") return encodeURIComponent(value);
+  if (typeof value === "number" || typeof value === "boolean" || value === null) {
+    return encodeURIComponent(String(value));
+  }
+  let text;
+  try {
+    text = JSON.stringify(value, null, 2);
+  } catch (err) {
+    text = String(value);
+  }
+  return encodeURIComponent(text);
+}
+
 export function shorten(text, max = 240) {
   if (text.length <= max) return text;
   return text.slice(0, max) + "...";
