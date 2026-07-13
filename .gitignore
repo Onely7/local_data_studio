@@ -223,3 +223,7 @@ cython_debug/
 # Keep project-level settings by default. To ignore the entire directory,
 # uncomment the following line:
 # .idea/
+
+package.json
+package-lock.json
+node_modules/
