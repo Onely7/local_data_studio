@@ -1,4 +1,4 @@
-import { escapeHtml, shorten } from "./formatting.js";
+import { escapeHtml, highlightJson, shorten } from "./formatting.js";
 import { MAX_IMAGE_CANDIDATES } from "./state.js";
 
 export function isImageUrl(text) {
@@ -205,7 +205,18 @@ export function formatExpandedCell(value) {
     return `<pre class="expanded-text">${escapeHtml(value)}</pre>`;
   }
   try {
-    return `<pre class="expanded-text">${escapeHtml(JSON.stringify(value, null, 2))}</pre>`;
+    const json = JSON.stringify(value, null, 2);
+    const isDictionary = typeof value === "object" && !Array.isArray(value);
+    const isListOfDictionaries =
+      Array.isArray(value) &&
+      value.length > 0 &&
+      value.every(
+        (item) => item && typeof item === "object" && !Array.isArray(item),
+      );
+    if (isDictionary || isListOfDictionaries) {
+      return `<pre class="expanded-text expanded-json">${highlightJson(json)}</pre>`;
+    }
+    return `<pre class="expanded-text">${escapeHtml(json)}</pre>`;
   } catch (err) {
     return `<pre class="expanded-text">${escapeHtml(String(value))}</pre>`;
   }
