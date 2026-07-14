@@ -85,7 +85,7 @@ Native `select` elements remain the source of truth while `static/app/selects.js
 Its overflow indicator is derived from the current scroll position, so the lower fade is removed at the last option.
 
 Desktop layouts use a viewport-bound three-pane shell with internal scrolling in the dataset, Preview, and inspector regions.
-At the mobile/tablet breakpoint the document returns to normal vertical scrolling.
+At the mobile/tablet breakpoint the document returns to normal vertical scrolling and orders the grid as dataset sidebar, main workspace, then inspector, so the dataset chooser remains directly below the title bar.
 Icon actions use packaged SVG assets and retain explicit labels through `aria-label` and tooltips.
 
 `styles.css` is kept as a single asset so that the order of CSS rules remains stable.
@@ -201,7 +201,7 @@ Provider-specific structured-output features are not required; normal assistant 
 Its cache key includes the dataset view, page or query context, row and column identity, source fingerprint, model, and target language.
 Only model and language selections are stored in `localStorage`; translation contents are not persisted.
 The browser and server apply the same conservative classification to numeric-only structures, booleans, binary objects, and recognized image or audio data before exposing or accepting translation work.
-The expanded-field and JSON code views share the same translation cache, so both views render the same result without another provider request.
+The expanded-field and JSON code views share the same translation cache, so both views render the same result without another provider request. Their copy and translation actions use a shared action-row geometry with a reserved right inset, keeping icon and text controls aligned in dense overlays.
 
 ## EDA Reports
 
