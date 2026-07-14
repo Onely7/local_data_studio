@@ -87,6 +87,8 @@ Its overflow indicator is derived from the current scroll position, so the lower
 Desktop layouts use a viewport-bound three-pane shell with internal scrolling in the dataset, Preview, and inspector regions.
 At the mobile/tablet breakpoint the document returns to normal vertical scrolling and orders the grid as dataset sidebar, main workspace, then inspector, so the dataset chooser remains directly below the title bar.
 Icon actions use packaged SVG assets and retain explicit labels through `aria-label` and tooltips.
+The logo and title in the top bar form one external link that opens the repository in a separate tab with `noopener noreferrer` protection.
+Structured values use the same JSON token colouring in expanded Preview fields, the Row Inspector, and the code-view dialog.
 
 `styles.css` is kept as a single asset so that the order of CSS rules remains stable.
 All JavaScript modules and CSS files are included in the distributed wheel.
@@ -185,7 +187,7 @@ The translation modules have the following responsibilities:
 
 * `server/translation_config.py`
 
-  * Owns the fixed target-language registry and validated TOML limits.
+  * Owns the fixed target-language registry, the optional TOML-selected initial target language, and validated request limits.
 * `server/translation_values.py`
 
   * Copies nested JSON values, identifies natural-language string leaves, and restores translated text without changing keys or non-string values.
@@ -200,6 +202,7 @@ Provider-specific structured-output features are not required; normal assistant 
 `static/app/translation.js` owns target/model selectors, confirmation, job polling, and the memory-only browser cache.
 Its cache key includes the dataset view, page or query context, row and column identity, source fingerprint, model, and target language.
 Only model and language selections are stored in `localStorage`; translation contents are not persisted.
+When present, `[translation].default_target_language` takes priority for the initial browser selection. Otherwise, the saved selection, the exact browser locale, the browser locale's base language, the server default (`ja`), and then the first registered language are considered in that order.
 The browser and server apply the same conservative classification to numeric-only structures, booleans, binary objects, and recognized image or audio data before exposing or accepting translation work.
 The expanded-field and JSON code views share the same translation cache, so both views render the same result without another provider request. The JSON code-view action row reserves a top and right inset, and gives its copy icon the same bordered surface treatment as the adjacent translation control. This keeps the controls aligned and visually separate from the overlay header in dense views.
 
@@ -207,6 +210,7 @@ The expanded-field and JSON code views share the same translation cache, so both
 
 Overall EDA report orchestration is handled by `src/local_data_studio/server/eda_reports.py`.
 Profiling configuration and the conversion of DataFrames into a safe form for analysis are separated into `src/local_data_studio/server/eda.py`.
+For EDA requests without session-hidden rows, `load_eda_dataframe()` applies `EDA_ROW_LIMIT` directly to the source relation before pandas materialization. Requests with hidden rows retain the row-ID relation so the exclusions stay correct.
 
 Generated reports are stored under `./cache/eda`.
 When the cache exceeds its size limit, shared capacity-management logic removes the oldest files first.

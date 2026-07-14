@@ -1,6 +1,6 @@
 <div align="center">
 
-# Local Data Studio
+# Local Data Studio <img src="images/local_data_studio_icon.png" alt="Local Data Studio Icon" align="right" width="150" style="margin-left:50px;"/>
 
 **A GUI application for viewing and analyzing local datasets**
 
@@ -10,6 +10,7 @@ English | [日本語](docs/README_ja.md)
 
 Local Data Studio is a web-based viewer for local environments, inspired by [Data Studio](https://huggingface.co/docs/hub/data-studio#data-studio) from Hugging Face Datasets.
 It lets you browse, search, and analyze data in JSONL, JSON, CSV, TSV, and Parquet formats directly in your browser.
+Click the Local Data Studio logo in the top bar to open this GitHub repository in a new tab.
 
 Its main features include fast previews, SQL execution with DuckDB, exploratory data analysis (EDA) report generation, and embedding visualization with Embedding Atlas.
 The SQL console can also generate SQL from natural-language instructions using an LLM.
@@ -334,6 +335,7 @@ SQL execution is subject to timeouts, memory limits, and checks for queries that
 ### 4. Translate Visible Values
 
 Configure a model profile with `translation = true`, then select its model and a target language in the toolbar.
+Set `default_target_language = "ja"` in `[translation]` to make a supported language code the initial target for every browser; this takes precedence over the browser's saved and locale-derived choices.
 The translation icon in an expanded field translates that cell, while the icon in a column header translates the values currently visible in that column.
 Column translation is offered only when at least one visible value contains natural-language text.
 Numeric-only values and containers, booleans, binary values, and recognized image or audio data are excluded.
@@ -360,6 +362,7 @@ Select **Run EDA on Query Results** to generate a report from the current result
 Set the row limit with `eda_row_limit` in `[settings]`, or with `EDA_ROW_LIMIT` in the environment or `.env` file.
 This value cannot be changed from the UI.
 Any integer greater than or equal to `1` is accepted; use `-1` to remove the row limit.
+For datasets without session-hidden rows, the limit is applied directly while reading the source, before the pandas DataFrame used for profiling is materialized. This prevents a larger source file from being loaded into the EDA DataFrame first.
 
 The **Profile mode** option in the EDA panel controls the level of detail for each run.
 The default value is `minimal`.
@@ -499,7 +502,7 @@ Settings that attempt to replace messages, credentials, streaming behavior, tool
 When starting the Local Data Studio application directly through Uvicorn, specify the same TOML file with `LOCAL_DATA_STUDIO_CONFIG_FILE`.
 Its `[settings]` and `[llm]` sections are both applied.
 
-The optional `[translation]` section controls row, string, character, chunk, concurrency, and browser-confirmation limits.
+The optional `[translation]` section controls the initial target language plus row, string, character, chunk, concurrency, and browser-confirmation limits. Set `default_target_language` to one of the supported language codes, such as `ja` or `en`.
 The server recalculates the hard limits for every request instead of trusting browser-provided counts.
 
 </details>
