@@ -137,7 +137,7 @@ class RuntimeContractTests(TestCase):
         collector.feed(response.text)
 
         self.assertEqual(EXPECTED_STATIC_IDS, tuple(collector.ids))
-        self.assertEqual(["styles.css?v=20260714-translation-layout"], collector.stylesheets)
+        self.assertEqual(["styles.css?v=20260714-code-view-actions"], collector.stylesheets)
         self.assertEqual(["app.js?v=20260714-controls"], collector.scripts)
 
     def test_static_entrypoint_loads_application_as_an_es_module(self) -> None:
@@ -155,7 +155,7 @@ class RuntimeContractTests(TestCase):
             send_icon = client.get("/icons/send.svg")
             favicon = client.get("/favicon.svg")
 
-        self.assertIn('<link rel="stylesheet" href="styles.css?v=20260714-translation-layout" />', page)
+        self.assertIn('<link rel="stylesheet" href="styles.css?v=20260714-code-view-actions" />', page)
         self.assertIn('<script type="module" src="app.js?v=20260714-controls"></script>', page)
         self.assertEqual('import "./app/application.js";\n', entrypoint.text)
         self.assertEqual(200, application.status_code)
@@ -168,6 +168,8 @@ class RuntimeContractTests(TestCase):
         self.assertIn(".translation-result-header .expanded-copy-btn", stylesheet.text)
         self.assertIn(".json-actions .icon-action-btn", stylesheet.text)
         self.assertIn("#json-translate-action", stylesheet.text)
+        self.assertIn("padding: 10px 12px 0;", stylesheet.text)
+        self.assertIn(".json-actions .field-translate-btn", stylesheet.text)
         self.assertIn(".sidebar {\n    order: 1;", stylesheet.text)
         self.assertIn(".main {\n    order: 2;", stylesheet.text)
         self.assertIn(".inspector {\n    order: 3;", stylesheet.text)
