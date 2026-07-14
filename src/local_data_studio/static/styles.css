@@ -1000,6 +1000,10 @@ tr.expanded {
   margin-bottom: 0;
 }
 
+.translation-result-header .expanded-copy-btn {
+  margin-right: 4px;
+}
+
 .translation-result-expanded {
   background: rgba(42, 157, 143, 0.04);
   padding-bottom: 6px;
@@ -1799,12 +1803,31 @@ tr.expanded {
   display: flex;
   align-items: center;
   justify-content: flex-end;
-  gap: 6px;
+  gap: 8px;
+  margin: 0;
   margin-bottom: 8px;
+  padding: 0 12px;
 }
 
 .json-actions .copy-btn {
   position: static;
+}
+
+.json-actions .icon-action-btn {
+  width: 32px;
+  height: 32px;
+  min-width: 32px;
+  min-height: 32px;
+}
+
+#json-translate-action {
+  display: inline-flex;
+  align-items: center;
+}
+
+.json-actions .field-translate-btn {
+  min-height: 32px;
+  padding: 5px 10px;
 }
 
 #json-translation-result .translation-result {
@@ -1908,17 +1931,22 @@ tr.expanded {
     overflow: visible;
   }
 
-  .sidebar,
-  .inspector {
-    order: 2;
+  .sidebar {
+    order: 1;
     height: auto;
     max-height: none;
   }
 
   .main {
-    order: 1;
+    order: 2;
     height: auto;
     overflow: visible;
+  }
+
+  .inspector {
+    order: 3;
+    height: auto;
+    max-height: none;
   }
 
   .table-wrap {
