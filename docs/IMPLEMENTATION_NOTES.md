@@ -201,7 +201,7 @@ Provider-specific structured-output features are not required; normal assistant 
 Its cache key includes the dataset view, page or query context, row and column identity, source fingerprint, model, and target language.
 Only model and language selections are stored in `localStorage`; translation contents are not persisted.
 The browser and server apply the same conservative classification to numeric-only structures, booleans, binary objects, and recognized image or audio data before exposing or accepting translation work.
-The expanded-field and JSON code views share the same translation cache, so both views render the same result without another provider request. Their copy and translation actions use a shared action-row geometry with a reserved right inset, keeping icon and text controls aligned in dense overlays.
+The expanded-field and JSON code views share the same translation cache, so both views render the same result without another provider request. The JSON code-view action row reserves a top and right inset, and gives its copy icon the same bordered surface treatment as the adjacent translation control. This keeps the controls aligned and visually separate from the overlay header in dense views.
 
 ## EDA Reports
 
