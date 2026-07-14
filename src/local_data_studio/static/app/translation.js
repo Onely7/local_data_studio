@@ -117,6 +117,9 @@ function selectedLanguageMetadata() {
 
 function browserLanguageDefault() {
   const available = new Set(state.translationLanguages.map((language) => language.code));
+  if (available.has(state.translationConfiguredDefaultLanguage)) {
+    return state.translationConfiguredDefaultLanguage;
+  }
   const stored = storageGet(LANGUAGE_STORAGE_KEY);
   if (available.has(stored)) return stored;
   const browser = String(globalThis.navigator?.language || "").toLowerCase();
@@ -156,6 +159,7 @@ export async function loadTranslationConfig() {
   const data = await fetchJSON("/api/translation_languages");
   state.translationLanguages = data.languages || [];
   state.translationLimits = data.limits || {};
+  state.translationConfiguredDefaultLanguage = data.configured_default_language || "";
   state.translationDefaultLanguage = data.default_language || "ja";
 }
 

@@ -88,6 +88,8 @@ provider_options = { max_completion_tokens = 400 }
 
 # Manual translation uses only the values loaded in the current Preview page.
 [translation]
+# Target language initially selected in the browser. Use a supported two-letter code.
+default_target_language = "ja"
 max_batch_rows = 500
 max_total_characters = 50000
 max_strings = 2000
