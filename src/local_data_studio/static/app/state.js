@@ -53,6 +53,7 @@ export const state = {
   nlGenerating: false,
   translationLanguages: [],
   translationLimits: {},
+  translationConfiguredDefaultLanguage: "",
   translationDefaultLanguage: "ja",
   translationDefaultModel: "",
   translationCache: new Map(),

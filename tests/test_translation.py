@@ -11,7 +11,7 @@ from fastapi import HTTPException
 from pydantic import ValidationError
 
 from local_data_studio.server.llm_profiles import LlmProfileRegistry
-from local_data_studio.server.translation_config import TRANSLATION_LANGUAGES, TranslationSettings
+from local_data_studio.server.translation_config import TRANSLATION_LANGUAGES, TranslationSettings, public_translation_config
 from local_data_studio.server.translation_service import TranslationService, parse_translation_response
 from local_data_studio.server.translation_values import extract_translatable_strings, restore_translations
 
@@ -127,6 +127,18 @@ class TranslationServiceTests(TestCase):
         for field in TranslationSettings.model_fields:
             with self.subTest(field=field), self.assertRaises(ValidationError):
                 TranslationSettings.model_validate({field: 0})
+
+    def test_configured_default_language_is_exposed_and_validated(self) -> None:
+        """Expose a supported TOML default without mixing it into request limits."""
+        settings = TranslationSettings(default_target_language="EN")
+
+        public = public_translation_config(settings)
+
+        self.assertEqual("en", public["configured_default_language"])
+        self.assertEqual("ja", public["default_language"])
+        self.assertNotIn("default_target_language", public["limits"])
+        with self.assertRaises(ValidationError):
+            TranslationSettings(default_target_language="unsupported")
 
     def test_parser_rejects_missing_extra_and_duplicate_ids(self) -> None:
         """Require an exact one-to-one response for every source string."""

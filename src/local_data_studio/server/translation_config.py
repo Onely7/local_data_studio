@@ -6,7 +6,7 @@ from collections.abc import Mapping
 from dataclasses import asdict, dataclass
 from typing import Any
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 from ..runtime_config import config_section, read_runtime_config
 
@@ -105,6 +105,18 @@ class TranslationSettings(BaseModel):
     max_concurrency: int = Field(default=2, ge=1)
     confirm_rows: int = Field(default=25, ge=1)
     confirm_characters: int = Field(default=10_000, ge=1)
+    default_target_language: str | None = None
+
+    @field_validator("default_target_language")
+    @classmethod
+    def validate_default_target_language(cls, value: str | None) -> str | None:
+        """Normalize and validate the configured target-language code."""
+        if value is None:
+            return None
+        code = value.strip().lower()
+        if code not in LANGUAGES_BY_CODE:
+            raise ValueError("default_target_language must be a supported translation language code")
+        return code
 
 
 def load_translation_settings(path: str | None = None) -> TranslationSettings:
@@ -121,6 +133,7 @@ def public_translation_config(settings: TranslationSettings = TRANSLATION_SETTIN
     """Return browser-safe languages and limits without model credentials."""
     return {
         "languages": [asdict(language) for language in TRANSLATION_LANGUAGES],
+        "configured_default_language": settings.default_target_language,
         "default_language": "ja",
-        "limits": settings.model_dump(),
+        "limits": settings.model_dump(exclude={"default_target_language"}),
     }
