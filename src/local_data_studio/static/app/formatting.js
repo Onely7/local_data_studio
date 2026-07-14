@@ -9,6 +9,37 @@ export function escapeHtml(value) {
     .replace(/'/g, "&#39;");
 }
 
+/** Render escaped JSON tokens with semantic syntax classes. */
+export function highlightJson(text) {
+  const tokenRegex =
+    /("(?:\\u[a-fA-F0-9]{4}|\\[^u]|[^\\"])*"|\btrue\b|\bfalse\b|\bnull\b|-?\d+(?:\.\d+)?(?:[eE][+\-]?\d+)?)/g;
+  let result = "";
+  let lastIndex = 0;
+  let match = tokenRegex.exec(text);
+  while (match) {
+    const token = match[0];
+    const start = match.index;
+    result += escapeHtml(text.slice(lastIndex, start));
+    let className = "json-number";
+    if (token.startsWith('"')) {
+      let index = start + token.length;
+      while (index < text.length && /\s/.test(text[index])) {
+        index += 1;
+      }
+      className = text[index] === ":" ? "json-key" : "json-string";
+    } else if (token === "true" || token === "false") {
+      className = "json-boolean";
+    } else if (token === "null") {
+      className = "json-null";
+    }
+    result += `<span class="${className}">${escapeHtml(token)}</span>`;
+    lastIndex = start + token.length;
+    match = tokenRegex.exec(text);
+  }
+  result += escapeHtml(text.slice(lastIndex));
+  return result;
+}
+
 /**
  * Encode a displayed value for a `data-copy` attribute without interpolating raw text.
  */

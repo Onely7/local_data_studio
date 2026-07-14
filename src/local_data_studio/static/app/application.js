@@ -14,6 +14,7 @@ import {
   encodeCopyValue,
   escapeHtml,
   formatFileSize,
+  highlightJson,
   isInspectorValueTruncated,
   shorten,
 } from "./formatting.js";
@@ -109,9 +110,9 @@ function renderOverlayFields() {
         truncated && !isRaw ? compactInspectorValue(rawValue) : rawValue;
       const copyValue = encodeCopyValue(rawValue);
       const rawButton = truncated
-        ? `<button class="overlay-copy overlay-raw-field" data-raw-field="${escapeHtml(
+        ? `<button class="overlay-copy overlay-raw-field icon-action-btn" data-raw-field="${escapeHtml(
             fieldKey,
-          )}" type="button">${isRaw ? "Compact" : "Raw"}</button>`
+          )}" type="button" title="${isRaw ? "Show compact value" : "Show raw value"}" aria-label="${isRaw ? "Show compact value" : "Show raw value"}"><img src="icons/${isRaw ? "unfold-less" : "unfold-more"}.svg" alt="" aria-hidden="true" /></button>`
         : "";
       return `
         <div class="overlay-field">
@@ -194,6 +195,7 @@ function renderFiles() {
     if (elements.datasetEmpty) {
       elements.datasetEmpty.style.display = "none";
     }
+    requestAnimationFrame(updateDatasetScrollCue);
     return;
   }
   elements.fileEmpty.style.display = "none";
@@ -220,6 +222,19 @@ function renderFiles() {
     `;
     elements.fileList.appendChild(div);
   });
+  requestAnimationFrame(updateDatasetScrollCue);
+}
+
+function updateDatasetScrollCue() {
+  const scrollContainer = window.matchMedia("(max-width: 960px)").matches
+    ? elements.fileList
+    : elements.sidebar;
+  if (!scrollContainer || !elements.sidebar) return;
+  const remaining =
+    scrollContainer.scrollHeight -
+    scrollContainer.clientHeight -
+    scrollContainer.scrollTop;
+  elements.sidebar.classList.toggle("has-more-datasets", remaining > 1);
 }
 
 function applyRowIndexStyle(cell) {
@@ -454,7 +469,7 @@ function renderMeta() {
   elements.viewLabel.textContent = state.datasetWarning ? `${mode} | Warning` : mode;
   elements.datasetMeta.textContent = state.file
     ? state.datasetWarning ||
-      `${columnCount} columns | page ${
+      `${columnCount} Columns | Page ${
         state.view === "query"
           ? Math.floor(state.offset / state.limit) + 1
           : state.pageIndex + 1
@@ -501,16 +516,26 @@ function renderColumnFocus(columnName, values = []) {
   `;
 }
 
+function updateRowInspectorRawButton() {
+  if (!elements.rowInspectorRaw) return;
+  const isLoading = state.rowInspectorRawLoading;
+  const isRaw = state.rowInspectorRaw;
+  const label = isLoading ? "Loading full row data" : isRaw ? "Show compact row" : "Show raw row";
+  elements.rowInspectorRaw.disabled = isLoading;
+  elements.rowInspectorRaw.title = label;
+  elements.rowInspectorRaw.setAttribute("aria-label", label);
+  elements.rowInspectorRaw.innerHTML = isLoading
+    ? "Loading..."
+    : `<img src="icons/${isRaw ? "unfold-less" : "unfold-more"}.svg" alt="" aria-hidden="true" />`;
+}
+
 function renderRowInspector(rowIndex) {
   if (rowIndex === null || rowIndex === undefined) {
     elements.rowInspector.textContent = "Select a row to inspect";
     state.selectedRowIndex = null;
     state.selectedRowId = null;
     resetRowInspectorRaw();
-    if (elements.rowInspectorRaw) {
-      elements.rowInspectorRaw.disabled = true;
-      elements.rowInspectorRaw.textContent = "Raw";
-    }
+    updateRowInspectorRawButton();
     updateRowActions();
     return;
   }
@@ -536,19 +561,16 @@ function renderRowInspector(rowIndex) {
       rowObj[col] = compactInspectorValue(row[idx]);
     });
   }
-  if (elements.rowInspectorRaw) {
-    elements.rowInspectorRaw.disabled = state.rowInspectorRawLoading;
-    elements.rowInspectorRaw.textContent = state.rowInspectorRawLoading
-      ? "Loading..."
-      : state.rowInspectorRaw
-        ? "Compact"
-        : "Raw";
+  updateRowInspectorRawButton();
+  if (state.rowInspectorRawLoading) {
+    elements.rowInspector.textContent = "Loading full row data...";
+  } else if (Object.keys(rowObj).length) {
+    elements.rowInspector.innerHTML = highlightJson(
+      JSON.stringify(rowObj, null, 2),
+    );
+  } else {
+    elements.rowInspector.textContent = "No visible columns";
   }
-  elements.rowInspector.textContent = state.rowInspectorRawLoading
-    ? "Loading full row data..."
-    : Object.keys(rowObj).length
-      ? JSON.stringify(rowObj, null, 2)
-      : "No visible columns";
   updateRowActions();
 }
 
@@ -609,6 +631,10 @@ async function toggleRowInspectorRaw() {
 }
 
 function updateRowActions() {
+  elements.rowInspectorWrap?.classList.toggle(
+    "has-selected-row",
+    Number.isInteger(state.selectedRowIndex),
+  );
   if (!elements.deleteRow) return;
   const canDelete = Number.isFinite(state.selectedRowId);
   elements.deleteRow.disabled = !canDelete;
@@ -1054,36 +1080,6 @@ function closeJsonOverlay() {
   state.jsonOverlayColumnIndex = null;
 }
 
-function highlightJson(text) {
-  const tokenRegex =
-    /(\"(?:\\u[a-fA-F0-9]{4}|\\[^u]|[^\\\"])*\"|\\btrue\\b|\\bfalse\\b|\\bnull\\b|-?\\d+(?:\\.\\d+)?(?:[eE][+\\-]?\\d+)?)/g;
-  let result = "";
-  let lastIndex = 0;
-  let match = tokenRegex.exec(text);
-  while (match) {
-    const token = match[0];
-    const start = match.index;
-    result += escapeHtml(text.slice(lastIndex, start));
-    let className = "json-number";
-    if (token.startsWith('"')) {
-      let index = start + token.length;
-      while (index < text.length && /\s/.test(text[index])) {
-        index += 1;
-      }
-      className = text[index] === ":" ? "json-key" : "json-string";
-    } else if (token === "true" || token === "false") {
-      className = "json-boolean";
-    } else if (token === "null") {
-      className = "json-null";
-    }
-    result += `<span class=\"${className}\">${escapeHtml(token)}</span>`;
-    lastIndex = start + token.length;
-    match = tokenRegex.exec(text);
-  }
-  result += escapeHtml(text.slice(lastIndex));
-  return result;
-}
-
 async function loadFiles() {
   const data = await fetchJSON("/api/files");
   state.files = data.files || [];
@@ -1149,7 +1145,6 @@ async function selectFile(fileName) {
   closeDeleteOverlay();
   closeColumnDeleteOverlay();
   elements.searchInput.value = "";
-  elements.currentFile.textContent = fileName;
   elements.rowCount.textContent = "";
   if (elements.edaStatus) {
     elements.edaStatus.textContent = "";
@@ -1706,6 +1701,10 @@ function attachEvents() {
   }
 
   if (elements.sidebar) {
+    elements.sidebar.addEventListener("scroll", updateDatasetScrollCue, {
+      passive: true,
+    });
+    window.addEventListener("resize", updateDatasetScrollCue);
     elements.sidebar.addEventListener("dragenter", (event) => {
       event.preventDefault();
       setDragActive(true);
@@ -1729,6 +1728,9 @@ function attachEvents() {
       uploadFiles(files);
     });
   }
+  elements.fileList?.addEventListener("scroll", updateDatasetScrollCue, {
+    passive: true,
+  });
 
   elements.tableBody.addEventListener("click", (event) => {
     const copyBtn = event.target.closest(".expanded-copy-btn");

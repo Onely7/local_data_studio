@@ -3,31 +3,48 @@
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
-    <title>Data Viewer</title>
+    <title>Local Data Studio</title>
     <link rel="icon" href="favicon.svg" type="image/svg+xml" />
     <link rel="stylesheet" href="styles.css?v=20260714-code-view-actions" />
   </head>
   <body>
     <div class="app">
       <header class="topbar">
-        <div class="brand">
-          <div class="logo">DS</div>
+        <a
+          class="brand"
+          href="https://github.com/Onely7/local_data_studio"
+          target="_blank"
+          rel="noopener noreferrer"
+          aria-label="Open the Local Data Studio GitHub repository"
+        >
+          <img
+            class="logo"
+            src="local_data_studio_icon_transparent.svg"
+            alt="Local Data Studio"
+          />
           <div>
-            <div class="title">Data Studio</div>
+            <div class="title">Local Data Studio</div>
             <div class="subtitle">
               Fast Exploration for JSONL/JSON/CSV/TSV/Parquet
             </div>
           </div>
-        </div>
-        <div class="top-actions">
-          <div class="file-pill" id="current-file">No file selected</div>
-          <button class="ghost" id="refresh-files">Refresh</button>
-        </div>
+        </a>
       </header>
 
       <div class="layout">
         <aside class="sidebar">
-          <div class="panel-title">Datasets</div>
+          <div class="dataset-heading">
+            <div class="panel-title">Datasets</div>
+            <button
+              class="ghost icon-action-btn"
+              id="refresh-files"
+              type="button"
+              aria-label="Refresh datasets"
+              title="Refresh datasets"
+            >
+              <img src="icons/refresh.svg" alt="" aria-hidden="true" />
+            </button>
+          </div>
           <div class="dataset-search">
             <input
               id="dataset-search"
@@ -51,41 +68,96 @@
               class="toolbar-group translation-controls"
               title="Visible values are sent to the selected LLM only when you request translation."
             >
-              <label for="translation-model">Translate</label>
+              <label for="translation-model">Translator</label>
               <select id="translation-model" disabled>
                 <option value="">No translation models</option>
               </select>
-              <label for="translation-language">To</label>
+              <label for="translation-language">Target Lang</label>
               <select id="translation-language" disabled>
                 <option value="ja">日本語</option>
               </select>
-              <button class="ghost translation-cancel" id="translation-cancel" type="button" hidden>
+              <button
+                class="ghost translation-cancel"
+                id="translation-cancel"
+                type="button"
+                hidden
+              >
                 Cancel
               </button>
-              <span class="translation-status" id="translation-status" role="status" aria-live="polite"></span>
+              <span
+                class="translation-status"
+                id="translation-status"
+                role="status"
+                aria-live="polite"
+              ></span>
             </div>
             <div class="toolbar-actions">
               <div class="toolbar-group search-controls">
                 <input
                   id="search-input"
                   type="text"
-                  placeholder="Search dataset"
+                  placeholder="Search data"
                 />
-                <button id="search-btn">Search</button>
-                <button class="ghost" id="clear-search">Reset</button>
+                <button
+                  class="icon-action-btn"
+                  id="search-btn"
+                  type="button"
+                  aria-label="Search dataset"
+                  title="Search dataset"
+                >
+                  <img src="icons/search_white.svg" alt="" aria-hidden="true" />
+                </button>
+                <button
+                  class="ghost icon-action-btn"
+                  id="clear-search"
+                  type="button"
+                  aria-label="Reset search"
+                  title="Reset search"
+                >
+                  <img
+                    src="icons/reset-settings.svg"
+                    alt=""
+                    aria-hidden="true"
+                  />
+                </button>
               </div>
               <div class="toolbar-group pagination-controls">
                 <label for="page-size">Rows</label>
                 <select id="page-size">
-                  <option value="50">50</option>
-                  <option value="100" selected>100</option>
+                  <option value="10">10</option>
+                  <option value="50" selected>50</option>
+                  <option value="100">100</option>
                   <option value="200">200</option>
                   <option value="500">500</option>
                 </select>
                 <div class="pagination">
-                  <button class="ghost" id="prev-page">Prev</button>
+                  <button
+                    class="ghost icon-action-btn"
+                    id="prev-page"
+                    type="button"
+                    aria-label="Previous page"
+                    title="Previous page"
+                  >
+                    <img
+                      src="icons/chevron-backward.svg"
+                      alt=""
+                      aria-hidden="true"
+                    />
+                  </button>
                   <span id="page-info">-</span>
-                  <button class="ghost" id="next-page">Next</button>
+                  <button
+                    class="ghost icon-action-btn"
+                    id="next-page"
+                    type="button"
+                    aria-label="Next page"
+                    title="Next page"
+                  >
+                    <img
+                      src="icons/chevron-forward.svg"
+                      alt=""
+                      aria-hidden="true"
+                    />
+                  </button>
                 </div>
               </div>
             </div>
@@ -156,7 +228,7 @@ SELECT * FROM data LIMIT 100</textarea
               <button id="run-eda-query">Run EDA on Query Results</button>
             </div>
             <div class="eda-controls">
-              <label for="eda-profile-mode">Profile mode</label>
+              <label for="eda-profile-mode">Profile Mode</label>
               <select id="eda-profile-mode">
                 <option value="minimal" selected>Minimal</option>
                 <option value="maximal">Maximal</option>
@@ -267,22 +339,26 @@ SELECT * FROM data LIMIT 100</textarea
                   aria-label="Copy row"
                   title="Copy row"
                 >
-                  <img
-                    src="icons/content-copy.svg"
-                    alt=""
-                    aria-hidden="true"
-                  />
+                  <img src="icons/content-copy.svg" alt="" aria-hidden="true" />
                 </button>
                 <button
-                  class="copy-btn"
+                  class="copy-btn icon-action-btn"
                   id="row-inspector-raw"
                   type="button"
+                  aria-label="Show raw row"
+                  title="Show raw row"
                   disabled
                 >
-                  Raw
+                  <img src="icons/unfold-more.svg" alt="" aria-hidden="true" />
                 </button>
-                <button class="delete-btn" id="delete-row" type="button">
-                  Delete
+                <button
+                  class="delete-btn icon-action-btn"
+                  id="delete-row"
+                  type="button"
+                  aria-label="Delete row"
+                  title="Delete row"
+                >
+                  <img src="icons/delete-row.svg" alt="" aria-hidden="true" />
                 </button>
               </div>
               <pre id="row-inspector" class="row-inspector">
@@ -344,7 +420,7 @@ Select a row to inspect</pre
         <div class="json-header">
           <div class="json-title" id="json-title">JSON View</div>
           <button class="json-close" id="json-close" aria-label="Close JSON">
-            &times;
+            <img src="icons/close.svg" alt="" aria-hidden="true" />
           </button>
         </div>
         <div class="json-body-wrap">
@@ -356,11 +432,7 @@ Select a row to inspect</pre
               aria-label="Copy value"
               title="Copy value"
             >
-              <img
-                src="icons/content-copy.svg"
-                alt=""
-                aria-hidden="true"
-              />
+              <img src="icons/content-copy.svg" alt="" aria-hidden="true" />
             </button>
             <div id="json-translate-action"></div>
           </div>
@@ -415,12 +487,31 @@ Select a row to inspect</pre
     </div>
 
     <div class="confirm-overlay" id="translation-confirm-overlay">
-      <div class="confirm-card" role="dialog" aria-modal="true" aria-labelledby="translation-confirm-title">
-        <div class="confirm-title" id="translation-confirm-title">Send visible text for translation?</div>
+      <div
+        class="confirm-card"
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby="translation-confirm-title"
+      >
+        <div class="confirm-title" id="translation-confirm-title">
+          Send visible text for translation?
+        </div>
         <div class="confirm-message" id="translation-confirm-message"></div>
         <div class="confirm-actions">
-          <button class="confirm-btn" id="translation-confirm-cancel" type="button">Cancel</button>
-          <button class="confirm-btn confirm-btn--danger" id="translation-confirm-run" type="button">Translate</button>
+          <button
+            class="confirm-btn"
+            id="translation-confirm-cancel"
+            type="button"
+          >
+            Cancel
+          </button>
+          <button
+            class="confirm-btn confirm-btn--danger"
+            id="translation-confirm-run"
+            type="button"
+          >
+            Translate
+          </button>
         </div>
       </div>
     </div>
