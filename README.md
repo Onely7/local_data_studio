@@ -426,7 +426,7 @@ The link uses `/atlas/{instance_id}/` on the same Local Data Studio origin, so i
 
 Click a row to display the full contents of each column in the **Row Inspector**.
 On desktop-sized viewports, the dataset list, Preview, and inspector share the available viewport height and scroll independently, keeping the application page itself fixed.
-On mobile and tablet layouts, the page returns to normal vertical scrolling.
+On mobile and tablet layouts, the page returns to normal vertical scrolling and places the **DATASETS** block directly below the title bar, before the Preview controls.
 Long values are shortened by default. Switch to **Raw** to view the complete value.
 
 Values recognized as images can be clicked to open an enlarged preview.
