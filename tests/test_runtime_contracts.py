@@ -37,7 +37,6 @@ class _ElementCollector(HTMLParser):
 
 
 EXPECTED_STATIC_IDS = (
-    "current-file",
     "refresh-files",
     "dataset-search",
     "dataset-empty",
@@ -168,7 +167,7 @@ class RuntimeContractTests(TestCase):
         self.assertIn(".translation-result-header .expanded-copy-btn", stylesheet.text)
         self.assertIn(".json-actions .icon-action-btn", stylesheet.text)
         self.assertIn("#json-translate-action", stylesheet.text)
-        self.assertIn("padding: 10px 12px 0;", stylesheet.text)
+        self.assertIn("padding: 8px 20px 4px;", stylesheet.text)
         self.assertIn(".json-actions .field-translate-btn", stylesheet.text)
         self.assertIn(".sidebar {\n    order: 1;", stylesheet.text)
         self.assertIn(".main {\n    order: 2;", stylesheet.text)
