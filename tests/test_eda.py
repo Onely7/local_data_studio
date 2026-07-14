@@ -85,6 +85,52 @@ def test_unlimited_eda_loads_the_complete_dataset(tmp_path: Path) -> None:
     assert frame["value"].tolist() == [1, 2, 3]
 
 
+def test_bounded_eda_load_applies_limit_before_row_numbering(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """Avoid a full source scan for normal EDA samples without hidden rows."""
+    dataset = tmp_path / "dataset.jsonl"
+    dataset.write_text('{"value": 1}\n', encoding="utf-8")
+    queries: list[str] = []
+
+    class FakeResult:
+        """Return a minimal DataFrame from the recorded query."""
+
+        def df(self) -> pd.DataFrame:
+            """Return the test result without invoking DuckDB."""
+            return pd.DataFrame({"value": [1]})
+
+    class FakeConnection:
+        """Record generated EDA SQL for its query-shape contract."""
+
+        def __enter__(self) -> "FakeConnection":
+            """Provide the connection inside the EDA context manager."""
+            return self
+
+        def __exit__(self, *_: object) -> None:
+            """Close the no-op test connection."""
+
+        def execute(self, query: str, _: list[object]) -> FakeResult:
+            """Record the query and return a bounded fake result."""
+            queries.append(query)
+            return FakeResult()
+
+    def fake_relation_sql(_: Path) -> tuple[str, list[str]]:
+        """Return the synthetic source relation used by this contract test."""
+        return "read_json_auto(?)", [str(dataset)]
+
+    def fail_rowid_relation(*_: object) -> tuple[str, list[object]]:
+        """Fail if the bounded no-delete path tries to number every row."""
+        pytest.fail("row IDs are unnecessary without hidden rows")
+
+    monkeypatch.setattr(eda, "open_connection", FakeConnection)
+    monkeypatch.setattr(eda, "relation_sql", fake_relation_sql)
+    monkeypatch.setattr(eda, "relation_with_rowid_sql", fail_rowid_relation)
+
+    frame = load_eda_dataframe(dataset, 100_000, [])
+
+    assert frame["value"].tolist() == [1]
+    assert queries == ["SELECT * FROM read_json_auto(?) LIMIT 100000"]
+
+
 def test_eda_reports_use_dedicated_cache_and_prune_oldest(tmp_path: Path) -> None:
     """Store report files under cache/eda and retain the newest artifact within capacity."""
     dataset = tmp_path / "dataset.csv"
