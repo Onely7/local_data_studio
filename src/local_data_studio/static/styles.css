@@ -1804,20 +1804,24 @@ tr.expanded {
   align-items: center;
   justify-content: flex-end;
   gap: 8px;
-  margin: 0;
-  margin-bottom: 8px;
-  padding: 0 12px;
+  margin: 0 0 8px;
+  padding: 10px 12px 0;
 }
 
-.json-actions .copy-btn {
+.json-actions .copy-btn.copy-btn--light {
   position: static;
+  background: #fff;
+  border-color: rgba(30, 42, 59, 0.18);
+  box-shadow: 0 2px 6px rgba(30, 42, 59, 0.1);
 }
 
-.json-actions .icon-action-btn {
+.json-actions .icon-action-btn,
+.json-actions .field-translate-btn {
   width: 32px;
   height: 32px;
   min-width: 32px;
   min-height: 32px;
+  box-sizing: border-box;
 }
 
 #json-translate-action {
@@ -1826,6 +1830,7 @@ tr.expanded {
 }
 
 .json-actions .field-translate-btn {
+  width: auto;
   min-height: 32px;
   padding: 5px 10px;
 }
