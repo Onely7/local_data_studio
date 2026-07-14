@@ -14,7 +14,7 @@ from .config import (
     EDA_CELL_MAX_CHARS,
     EDA_NESTED_POLICY,
 )
-from .db import open_connection, relation_with_rowid_sql
+from .db import open_connection, relation_sql, relation_with_rowid_sql
 
 EDA_CACHE_VERSION = "ydata-v2"
 
@@ -38,11 +38,18 @@ def load_eda_dataframe(path: Path, sample_rows: int, deleted_ids: list[int]) -> 
     """Load a configured pandas sample suitable for YData Profiling.
 
     A row limit of ``-1`` intentionally materializes the complete relation.
+    When no rows are hidden, the limit is applied directly to the source
+    relation. This avoids assigning row numbers to every source row before
+    materializing the bounded EDA sample.
     """
     with open_connection() as con:
-        rel_sql, params = relation_with_rowid_sql(path, deleted_ids)
         limit_clause = "" if sample_rows == -1 else f" LIMIT {sample_rows}"
-        query = f"SELECT * EXCLUDE(__rowid) FROM ({rel_sql}){limit_clause}"
+        if deleted_ids:
+            rel_sql, params = relation_with_rowid_sql(path, deleted_ids)
+            query = f"SELECT * EXCLUDE(__rowid) FROM ({rel_sql}){limit_clause}"
+        else:
+            rel_sql, params = relation_sql(path)
+            query = f"SELECT * FROM {rel_sql}{limit_clause}"
         return con.execute(query, params).df()
 
 
