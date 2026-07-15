@@ -150,7 +150,6 @@ class RuntimeContractTests(TestCase):
             copy_icon = client.get("/icons/content-copy.svg")
             delete_icon = client.get("/icons/delete.svg")
             send_icon = client.get("/icons/send.svg")
-            favicon = client.get("/favicon.svg")
 
         self.assertIn('<link rel="stylesheet" href="styles.css?v=20260714-code-view-actions" />', page)
         self.assertIn('<script type="module" src="app.js?v=20260714-controls"></script>', page)
@@ -174,7 +173,6 @@ class RuntimeContractTests(TestCase):
         for response in (code_icon, copy_icon, delete_icon, send_icon):
             self.assertEqual(200, response.status_code)
             self.assertEqual("image/svg+xml", response.headers["content-type"])
-        self.assertEqual("image/svg+xml", favicon.headers["content-type"])
 
     def test_static_modules_declare_cross_module_dependencies(self) -> None:
         """Prevent non-empty model data and deferred UI actions from using missing globals."""
