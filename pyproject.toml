@@ -83,6 +83,7 @@ include = [
   "/docs",
   "/images",
   "/README.md",
+  "/CHANGELOG.md",
   "/LICENSE",
   "/local_data_studio.example.toml",
   "/pyproject.toml",
