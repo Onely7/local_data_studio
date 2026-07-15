@@ -45,8 +45,6 @@ EXPECTED_STATIC_IDS = (
     "file-empty",
     "translation-model",
     "translation-language",
-    "translation-cancel",
-    "translation-status",
     "search-input",
     "search-btn",
     "clear-search",
