@@ -64,10 +64,7 @@
 
         <main class="main">
           <div class="toolbar">
-            <div
-              class="toolbar-group translation-controls"
-              title="Visible values are sent to the selected LLM only when you request translation."
-            >
+            <div class="toolbar-group translation-controls">
               <label for="translation-model">Translator</label>
               <select id="translation-model" disabled>
                 <option value="">No translation models</option>
@@ -76,20 +73,6 @@
               <select id="translation-language" disabled>
                 <option value="ja">日本語</option>
               </select>
-              <button
-                class="ghost translation-cancel"
-                id="translation-cancel"
-                type="button"
-                hidden
-              >
-                Cancel
-              </button>
-              <span
-                class="translation-status"
-                id="translation-status"
-                role="status"
-                aria-live="polite"
-              ></span>
             </div>
             <div class="toolbar-actions">
               <div class="toolbar-group search-controls">

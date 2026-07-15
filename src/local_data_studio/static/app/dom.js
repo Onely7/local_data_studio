@@ -14,8 +14,6 @@ export const elements = {
   clearSearch: document.getElementById("clear-search"),
   translationModel: document.getElementById("translation-model"),
   translationLanguage: document.getElementById("translation-language"),
-  translationStatus: document.getElementById("translation-status"),
-  translationCancel: document.getElementById("translation-cancel"),
   pageSize: document.getElementById("page-size"),
   prevPage: document.getElementById("prev-page"),
   nextPage: document.getElementById("next-page"),

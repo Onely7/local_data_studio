@@ -4,7 +4,6 @@ import {
   cancelJob,
   extractErrorMessage,
   fetchJSON,
-  formatJobProgress,
   startJob,
   waitForJob,
 } from "./http.js";
@@ -252,8 +251,13 @@ function updateTranslationButtons() {
   });
 }
 
-function showStatus(message) {
-  if (elements.translationStatus) elements.translationStatus.textContent = message;
+function showTranslationError(message) {
+  if (elements.errorMessage) elements.errorMessage.textContent = message;
+  if (elements.errorOverlay) {
+    elements.errorOverlay.classList.add("active");
+  } else {
+    console.error(message);
+  }
 }
 
 function requestConfirmation({ rows, characters }) {
@@ -305,7 +309,7 @@ async function translateTargets(targets, columnName, renderTable) {
   const characters = strings.reduce((total, value) => total + value.length, 0);
   const limits = state.translationLimits;
   if (targets.length > (limits.max_batch_rows || 500) || strings.length > (limits.max_strings || 2000) || characters > (limits.max_total_characters || 50000)) {
-    showStatus("Visible values exceed the configured translation limit.");
+    showTranslationError("Visible values exceed the configured translation limit.");
     return;
   }
   if (!(await requestConfirmation({ rows: targets.length, characters }))) return;
@@ -317,8 +321,6 @@ async function translateTargets(targets, columnName, renderTable) {
   state.translationController = controller;
   targets.forEach((target) => state.translationPendingKeys.add(target.key));
   renderTable();
-  elements.translationCancel.hidden = false;
-  showStatus("Starting translation...");
   try {
     const started = await startJob("translation", {
       model: model.id,
@@ -329,22 +331,21 @@ async function translateTargets(targets, columnName, renderTable) {
     state.translationJobId = started.id;
     const result = await waitForJob(started.id, {
       signal: controller.signal,
-      onUpdate: (job) => showStatus(formatJobProgress(job, "Translating")),
     });
     if (generation !== state.translationGeneration) return;
     const byId = new Map((result.items || []).map((item) => [item.id, item.value]));
     targets.forEach((target, index) => {
       if (byId.has(`r${index}`)) state.translationCache.set(target.key, byId.get(`r${index}`));
     });
-    showStatus(`Translated ${result.string_count || 0} strings into ${result.target_language_name || language.name}.`);
     renderTable();
   } catch (err) {
-    if (err?.name !== "AbortError" && generation === state.translationGeneration) showStatus(extractErrorMessage(err));
+    if (err?.name !== "AbortError" && generation === state.translationGeneration) {
+      showTranslationError(extractErrorMessage(err));
+    }
   } finally {
     if (generation === state.translationGeneration) {
       state.translationJobId = null;
       state.translationController = null;
-      elements.translationCancel.hidden = true;
       targets.forEach((target) => state.translationPendingKeys.delete(target.key));
       renderTable();
     }
@@ -364,7 +365,7 @@ export function translateColumn(column, renderTable) {
     .map((row, rowIndex) => ({ rowIndex, columnIndex, value: row[columnIndex], key: cacheKey(rowIndex, columnIndex, row[columnIndex]) }))
     .filter((target) => hasTranslatableText(target.value));
   if (!targets.length) {
-    showStatus(`No translatable text is visible in ${column}.`);
+    showTranslationError(`No translatable text is visible in ${column}.`);
     return;
   }
   return translateTargets(targets, column, renderTable);
@@ -381,13 +382,6 @@ export function bindTranslationControls(renderTable) {
     storageSet(LANGUAGE_STORAGE_KEY, selectedLanguage());
     state.translationGeneration += 1;
     await cancelActiveTranslation();
-    renderTable();
-  });
-  elements.translationCancel?.addEventListener("click", async () => {
-    state.translationGeneration += 1;
-    await cancelActiveTranslation();
-    elements.translationCancel.hidden = true;
-    showStatus("Translation cancelled.");
     renderTable();
   });
   elements.translationConfirmCancel?.addEventListener("click", () => closeConfirmation(false));
