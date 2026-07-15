@@ -2,9 +2,11 @@
 
 from __future__ import annotations
 
+import json
 import shutil
 import subprocess
 import tempfile
+import tomllib
 from html.parser import HTMLParser
 from pathlib import Path
 from unittest import TestCase
@@ -123,6 +125,14 @@ EXPECTED_STATIC_IDS = (
 
 class RuntimeContractTests(TestCase):
     """Keep public imports and packaged UI wiring stable across refactors."""
+
+    def test_release_metadata_versions_are_aligned(self) -> None:
+        """Keep the package and Release Please versions synchronized."""
+        root = Path(__file__).parents[1]
+        pyproject = tomllib.loads((root / "pyproject.toml").read_text(encoding="utf-8"))
+        manifest = json.loads((root / ".release-please-manifest.json").read_text(encoding="utf-8"))
+
+        self.assertEqual(pyproject["project"]["version"], manifest["."])
 
     def test_packaged_ui_keeps_dom_order_and_stable_asset_urls(self) -> None:
         """Keep the existing DOM contract while client code moves into modules."""
