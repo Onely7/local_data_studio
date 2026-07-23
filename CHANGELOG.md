@@ -3,6 +3,18 @@
 Notable changes to Local Data Studio are recorded here. Release Please updates
 this file from Conventional Commits when it prepares a release pull request.
 
+## [1.1.1](https://github.com/Onely7/local_data_studio/compare/v1.1.0...v1.1.1) (2026-07-23)
+
+
+### Bug Fixes
+
+* preserve compatibility in dependency updates ([caf5beb](https://github.com/Onely7/local_data_studio/commit/caf5bebafbb3da47432b27bef5caf78304328f76))
+
+
+### Dependencies
+
+* **deps:** bump the python-dependencies group with 9 updates ([c7a47e5](https://github.com/Onely7/local_data_studio/commit/c7a47e50df31b5285fc669a4fe8a2a2bfceb4904))
+
 ## [1.1.0](https://github.com/Onely7/local_data_studio/compare/v1.0.0...v1.1.0) (2026-07-15)
 
 ### Translation
