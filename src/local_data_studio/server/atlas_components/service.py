@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from dataclasses import replace
 from pathlib import Path
-from typing import Any, cast
+from typing import Any
 
 from fastapi import HTTPException
 
@@ -209,9 +209,12 @@ def _resolve_backend(
     options: AtlasOptions,
 ) -> BackendName:
     selected = requested or capabilities.default_backend
-    if selected not in {"transformers", "sentence-transformers"}:
+    if selected == "transformers":
+        backend: BackendName = "transformers"
+    elif selected == "sentence-transformers":
+        backend = "sentence-transformers"
+    else:
         raise HTTPException(status_code=400, detail="no supported embedding backend is available for this model")
-    backend = cast(BackendName, selected)
     capability = capabilities.backend(backend)
     if not capability.available:
         raise HTTPException(status_code=400, detail=f"{backend} is unavailable for this model: {capability.reason}")
