@@ -23,6 +23,18 @@ class RawRowRequest(BaseModel):
     offset: int | None = Field(default=None, ge=0)
 
 
+class RawMediaRequest(RawRowRequest):
+    """Input selecting one audio value inside a dataset row or SQL result row.
+
+    ``pointer`` follows dictionary keys and list indexes from the column value
+    to the audio item, such as ``[]`` for a bare value or ``[2]`` for the third
+    item of a list.
+    """
+
+    column: str = Field(min_length=1, max_length=1024)
+    pointer: list[str | int] = Field(default_factory=list, max_length=32)
+
+
 class EdaRequest(BaseModel):
     """Input controlling bounded EDA generation and report cache reuse."""
 

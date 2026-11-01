@@ -7,9 +7,11 @@ from pathlib import Path
 
 from fastapi import HTTPException
 
+from .audio_values import AUDIO_FILE_EXTENSIONS
 from .config import ALLOWED_EXTENSIONS, DATA_ROOT, SINGLE_FILE, VIS_EXCLUDE_FILE_PATHS, VIS_EXCLUDE_PATHS
 
 IMAGE_PREVIEW_EXTENSIONS: set[str] = {".png", ".jpg", ".jpeg", ".gif", ".webp", ".svg"}
+MEDIA_PREVIEW_EXTENSIONS: frozenset[str] = frozenset(IMAGE_PREVIEW_EXTENSIONS | AUDIO_FILE_EXTENSIONS)
 
 _DATASET_CATALOG_LOCK = threading.Lock()
 _DATASET_CATALOG: dict[str, Path] = {}
@@ -152,7 +154,7 @@ def is_path_within_roots(path: Path, roots: Sequence[Path]) -> bool:
     return any(_is_path_within(path, root) for root in resolved_roots)
 
 
-def _resolved_path_within_allowed_root(requested_path: str, allowed_roots: Sequence[Path]) -> Path | None:
+def resolve_path_within_allowed_roots(requested_path: str, allowed_roots: Sequence[Path]) -> Path | None:
     """Normalize a requested path and return it only when it is below an allowed root."""
     try:
         resolved_path = os.path.realpath(os.path.expanduser(requested_path))
@@ -171,20 +173,20 @@ def _resolved_path_within_allowed_root(requested_path: str, allowed_roots: Seque
     return None
 
 
-def resolve_raw_image_file(raw_path: str | None, allowed_roots: Sequence[Path]) -> Path:
-    """Resolve a local image path that may be safely served by /api/raw."""
+def resolve_raw_media_file(raw_path: str | None, allowed_roots: Sequence[Path]) -> Path:
+    """Resolve a local image or audio path that may be safely served by /api/raw."""
     requested_path = _strip_file_url_scheme((raw_path or "").strip())
     if not requested_path:
         raise HTTPException(status_code=400, detail="path is required")
 
-    resolved = _resolved_path_within_allowed_root(requested_path, allowed_roots)
+    resolved = resolve_path_within_allowed_roots(requested_path, allowed_roots)
     if resolved is None:
         raise HTTPException(status_code=403, detail="path is outside allowed roots")
 
     if not resolved.exists() or not resolved.is_file():
         raise HTTPException(status_code=404, detail="file not found")
 
-    if resolved.suffix.lower() not in IMAGE_PREVIEW_EXTENSIONS:
+    if resolved.suffix.lower() not in MEDIA_PREVIEW_EXTENSIONS:
         raise HTTPException(status_code=400, detail="unsupported file type")
 
     return resolved

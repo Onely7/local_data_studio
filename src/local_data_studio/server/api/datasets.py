@@ -5,9 +5,10 @@ import mimetypes
 from pathlib import Path
 from typing import Any
 
-from fastapi import APIRouter, File, HTTPException, Query, UploadFile
+from fastapi import APIRouter, File, HTTPException, Query, Response, UploadFile
 from fastapi.responses import FileResponse
 
+from ..audio_values import audio_mime_from_path, find_audio_source, resolve_audio_path, value_at_pointer
 from ..config import (
     ALLOW_DELETE_DATA,
     DATA_ROOT,
@@ -23,11 +24,11 @@ from ..db import open_connection, quote_ident, relation_sql
 from ..deleted_rows import deleted_row_ids_for
 from ..embedder_capabilities import library_versions
 from ..embedder_models import discover_embedder_models
-from ..files import refresh_dataset_file_catalog, resolve_data_file, resolve_raw_image_file, unique_path
+from ..files import refresh_dataset_file_catalog, resolve_data_file, resolve_raw_media_file, unique_path
 from ..readers import fetch_preview_page, fetch_raw_row, load_dataset_metadata
 from ..serialization import serialize_raw_value, serialize_value
 from ..sql import fetch_raw_query_row_guarded
-from .schemas import RawRowRequest
+from .schemas import RawMediaRequest, RawRowRequest
 from .services import reject_large_sync_operation
 
 router = APIRouter()
@@ -69,9 +70,9 @@ def embedder_models() -> dict[str, Any]:
 
 @router.get("/api/raw")
 def raw_file(path: str = Query(..., description="Absolute file path on the server")) -> FileResponse:
-    """Serve an allowed local image path after root-boundary validation."""
-    resolved = resolve_raw_image_file(path, FILE_SERVE_ROOTS)
-    media_type, _ = mimetypes.guess_type(str(resolved))
+    """Serve an allowed local image or audio path after root-boundary validation."""
+    resolved = resolve_raw_media_file(path, FILE_SERVE_ROOTS)
+    media_type = audio_mime_from_path(resolved.name) or mimetypes.guess_type(str(resolved))[0]
     return FileResponse(str(resolved), media_type=media_type or "application/octet-stream")
 
 
@@ -131,6 +132,14 @@ def preview(
     return fetch_preview_page(file, path, limit=limit, offset=offset, page_token=page_token, deleted_ids=deleted_row_ids_for(path))
 
 
+def _raw_row_values(path: Path, payload: RawRowRequest) -> tuple[list[str], list[Any]]:
+    if payload.row_id is not None:
+        return fetch_raw_row(path, payload.row_id)
+    if payload.sql:
+        return fetch_raw_query_row_guarded(path=path, sql=payload.sql, offset=max(0, payload.offset or 0))
+    raise HTTPException(status_code=400, detail="row_id or sql is required")
+
+
 @router.post("/api/raw_row")
 def raw_row(payload: RawRowRequest) -> dict[str, Any]:
     """Return an untruncated dataset row or validated SQL result row.
@@ -139,20 +148,46 @@ def raw_row(payload: RawRowRequest) -> dict[str, Any]:
         HTTPException: Neither a one-based dataset row ID nor SQL was supplied.
     """
     path = resolve_data_file(payload.file)
-    if payload.row_id is not None:
-        columns, values = fetch_raw_row(path, payload.row_id)
-        row_id = payload.row_id
-    elif payload.sql:
-        columns, values = fetch_raw_query_row_guarded(path=path, sql=payload.sql, offset=max(0, payload.offset or 0))
-        row_id = None
-    else:
-        raise HTTPException(status_code=400, detail="row_id or sql is required")
+    columns, values = _raw_row_values(path, payload)
     return {
         "file": payload.file,
-        "row_id": row_id,
+        "row_id": payload.row_id,
         "columns": columns,
         "row": [serialize_raw_value(value) for value in values],
     }
+
+
+@router.post("/api/raw_media", response_model=None)
+def raw_media(payload: RawMediaRequest) -> Response | FileResponse:
+    """Return the audio bytes or local audio file selected inside one row.
+
+    Embedded bytes are returned with the media type their signature or sibling
+    ``path`` names. Path references are resolved next to the dataset or below
+    the file-serving roots; remote URLs are left to the browser.
+
+    Raises:
+        HTTPException: The row, column, or pointer does not exist, or the
+            selected value holds no readable audio.
+    """
+    path = resolve_data_file(payload.file)
+    columns, values = _raw_row_values(path, payload)
+    if payload.column not in columns:
+        raise HTTPException(status_code=404, detail=f"column not found: {payload.column}")
+    try:
+        value = value_at_pointer(values[columns.index(payload.column)], payload.pointer)
+    except KeyError as exc:
+        raise HTTPException(status_code=404, detail="audio value not found in the row") from exc
+    source = find_audio_source(value)
+    if source is None:
+        raise HTTPException(status_code=415, detail="the selected value does not contain audio")
+    if isinstance(source, tuple):
+        data, media_type = source
+        return Response(content=data, media_type=media_type, headers={"Cache-Control": "private, max-age=600"})
+    try:
+        audio_path = resolve_audio_path(source, dataset_path=path, allowed_roots=FILE_SERVE_ROOTS)
+    except ValueError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    return FileResponse(str(audio_path), media_type=audio_mime_from_path(audio_path.name) or "application/octet-stream")
 
 
 @router.get("/api/column_sample")

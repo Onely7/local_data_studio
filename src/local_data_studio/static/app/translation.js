@@ -13,7 +13,7 @@ import { state } from "./state.js";
 const MODEL_STORAGE_KEY = "local-data-studio.translation-model";
 const LANGUAGE_STORAGE_KEY = "local-data-studio.translation-language";
 const MEDIA_PATH_RE =
-  /\.(?:aac|avif|bmp|flac|gif|heic|jpe?g|m4a|mp3|mp4|oga|ogg|png|svg|tiff?|wav|webm|webp)(?:[?#].*)?$/i;
+  /\.(?:aac|aiff?|avif|bmp|flac|gif|heic|jpe?g|m4a|mp3|mp4|oga|ogg|opus|png|svg|tiff?|wav|wave|weba|webm|webp)(?:[?#].*)?$/i;
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 const NUMERIC_STRING_RE =
   /^[+-]?(?:(?:\d+(?:\.\d*)?)|(?:\.\d+))(?:e[+-]?\d+)?$/i;
