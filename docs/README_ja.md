@@ -29,10 +29,12 @@ LLM（大規模言語モデル）を設定すると、日本語などの自然�
 * DuckDB SQL を使った、データを書き換えない検索・集計
 * SQL 実行時のタイムアウト、メモリ制限、大量読み込みの警告
 * データセット全体または SQL の実行結果を対象とした EDA レポートの生成
-* テキスト列、画像列、または SQL の実行結果を対象とした Embedding Atlas 可視化
+* テキスト列、画像列、音声列、または SQL の実行結果を対象とした Embedding Atlas 可視化
 * 行の内容を詳しく確認できる **Row Inspector**
 * URL、ローカルファイルのパス、`{bytes, path}` 形式で保存された画像の表示
 * 画像の拡大表示と、同じ行に含まれる複数画像の切り替え
+* バイト列、Hugging Face の `Audio` 形式、data URL、ファイルのパスで保存された音声の再生
+* Qwen3-ASR や Whisper など、設定した音声認識モデルによる音声の文字起こし
 * 設定済みの LLM（LiteLLM 対応モデル）を使った、表示中のセルまたは列の手動翻訳
 * ドラッグ＆ドロップによるファイルのアップロード
 * アプリを開いている間だけの行の非表示と、必要に応じた元ファイルからの削除
@@ -149,7 +151,7 @@ EDA パネルの **Profile mode** では、分析の詳しさを実行ごとに�
 
 ### 5. 埋め込みを可視化する
 
-埋め込みとは、テキストや画像の特徴を、数値の並び（ベクトル）として表したものです。
+埋め込みとは、テキスト、画像、音声の特徴を、数値の並び（ベクトル）として表したものです。
 埋め込みは通常、多くの数値から構成されるため、そのままでは画面上で比較しにくくなります。
 Local Data Studio は、UMAP、t-SNE、PCA などを使って埋め込みを 2 次元の座標へ変換し、Embedding Atlas で表示します。
 この変換処理を「次元削減」と呼びます。
@@ -157,7 +159,7 @@ Local Data Studio は、UMAP、t-SNE、PCA などを使って埋め込みを 2 �
 
 この機能を使うには、Hugging Face 形式のローカルエンコーダーモデルを自分で配置する必要があります。
 Hugging Face 形式とは、モデルの設定ファイルなどを所定の構成で保存した形式です。
-エンコーダーモデルは、テキストや画像を埋め込みへ変換するモデルです。
+エンコーダーモデルは、テキスト、画像、音声を埋め込みへ変換するモデルです。
 
 モデルは、`models/embedder`、または `--models-dir`／`EMBEDDER_MODELS_DIR` で指定したディレクトリの下へ配置します。
 
@@ -174,7 +176,7 @@ models/embedder/Qwen/Qwen3-VL-Embedding-2B
 
 **Visualize Embedding** で、次の項目を選択します。
 
-1. テキスト列または画像列
+1. テキスト列、画像列、または音声列
 2. 使用するモデル
 3. モデルを読み込み、埋め込みを計算するライブラリ（バックエンド）
 4. 2 次元へ変換する方法（次元削減手法）
@@ -209,7 +211,7 @@ Sentence Transformers を選択すると、モデルへ追加の指示を渡す 
 <details>
 <summary><strong>EmbeddingGemma 2 を使う</strong></summary>
 
-[EmbeddingGemma 2](https://huggingface.co/google/embeddinggemma-2) は、テキストと画像を同じ 768 次元の空間へ埋め込むモデルです。
+[EmbeddingGemma 2](https://huggingface.co/google/embeddinggemma-2) は、テキスト、画像、音声を同じ 768 次元の空間へ埋め込むモデルです。
 利用規約への同意が不要なため、Hugging Face のトークンがなくてもダウンロードできます。
 
 ```bash
@@ -217,9 +219,12 @@ hf download google/embeddinggemma-2 --local-dir models/embedder/google/embedding
 ```
 
 **Model** で `google/embeddinggemma-2` を選択します。
-Sentence Transformers ではテキストと画像の列を、Transformers ではテキストの列を埋め込めます。
+Sentence Transformers ではテキスト、画像、音声の列を、Transformers ではテキストの列を埋め込めます。
 このモデルは、テキストの先頭にタスクを示す接頭辞を付けて使う前提です。可視化では、**Prompt** に `task: clustering | query: ` を入力してください。
 画像は接頭辞を付けずに埋め込むため、画像の列では **Prompt** を空欄にしてください。
+音声も接頭辞を付けずに埋め込むため、音声の列では **Prompt** を無視します。
+音声は 16 kHz に変換して埋め込み、300 秒を超えるものは先頭の 300 秒を使います。
+Atlas の画面では、音声の列に各音声のファイル名と長さを表示します。
 
 </details>
 
@@ -245,7 +250,56 @@ Sentence Transformers ではテキストと画像の列を、Transformers では
 
 <img src="../images/local_data_studio_09.png" alt="Row Inspector の画面" width="45%"> <img src="../images/local_data_studio_10.png" alt="画像の拡大表示画面" width="45%">
 
-### 7. 表示中の値を翻訳する
+### 7. 音声を再生して文字起こしする
+
+Local Data Studio は、次の形で保存された WAV、FLAC、MP3、OGG（Opus を含む）、AAC、M4A、AIFF の音声を認識します。
+
+* バイナリ列のバイト列
+* Hugging Face の `Audio` のような `{ "bytes": ..., "path": ... }` 形式の辞書（オブジェクト）
+* `data:audio/...` 形式の URL
+* 音声の URL と、相対パスまたは絶対パス
+
+表では、音声を再生ボタンと長さ、形式、サイズで表示します。
+WAV と FLAC は再生前から長さを表示し、そのほかの形式は一度再生すると長さを表示します。
+行を展開した欄には、シークバーと音量の操作を備えたプレーヤーを表示します。
+同時に再生できる音声は 1 つで、表が更新されても再生は続きます。
+
+プレビューのページには音声のバイト列を含めません。
+音声は再生したときか行を展開したときにだけ読み込むため、大きな音声を含むページも軽く表示できます。
+相対パスは、まずデータファイルと同じディレクトリから、次にデータディレクトリと `file_serve_roots` の下から探し、それ以外の場所のファイルは返しません。
+音声の URL は、ブラウザーが直接読み込みます。
+
+文字起こしを使うには、`local_data_studio.toml` の `[transcription]` に音声認識モデルを追加し、ツールバーの **Transcriber** で選択します。
+たとえば、Qwen3-ASR 1.7B は次のようにダウンロードして設定します。
+
+```bash
+hf download Qwen/Qwen3-ASR-1.7B-hf --local-dir models/asr/Qwen/Qwen3-ASR-1.7B-hf
+```
+
+```toml
+[transcription]
+default_model = "qwen3-asr-1.7b"
+
+[[transcription.models]]
+id = "qwen3-asr-1.7b"
+label = "Qwen3-ASR 1.7B"
+model = "models/asr/Qwen/Qwen3-ASR-1.7B-hf"
+```
+
+Transformers は元の `Qwen/Qwen3-ASR-1.7B` を読み込めないため、`-hf` の付いたリポジトリを使ってください。
+`model` には、`openai/whisper-large-v3-turbo` のような Hugging Face のモデル ID も指定できます。Transformers の音声認識パイプラインが読み込めるモデルであれば使えます。
+言語を自動判定せずに固定するときはモデルに `language = "ja"` を、実行するデバイスを選ぶときは `device = "cpu"` や `device = "cuda:1"` を追加します。
+
+列見出しの文字起こしアイコンは、その列で表示中の音声を文字起こしします。もう一度押すと中止します。
+行を展開した欄の **Transcribe** ボタンは、その欄の音声を文字起こしします。
+文字起こしの結果は、判定した言語とコピーのアイコンとともに、音声の下に表示します。
+
+モデルは最初に使うときに読み込み（1 分ほどかかることがあります）、`idle_unload_seconds`（既定は 600 秒）使わないと解放します。
+Qwen3-ASR 1.7B は GPU のメモリを約 4 GB 使います。
+`chunk_seconds` より長い音声は静かな箇所で分割して処理し、`max_audio_seconds` より長い音声は受け付けません。
+文字起こしの結果は、音声の内容とモデルごとにキャッシュディレクトリへ保存し、同じ音声を二度処理しません。
+
+### 8. 表示中の値を翻訳する
 
 翻訳機能を使うには、LLM モデルプロファイルで `translation = true` を設定します。
 その後、画面上部のツールバーでモデルと翻訳先の言語を選択します。
@@ -320,6 +374,7 @@ cp local_data_studio.example.toml local_data_studio.toml
 * `[server]`：サーバーの設定
 * `[settings]`：EDA、Embedding Atlas、元ファイルからの削除許可などの設定
 * `[llm]`：SQL 生成と手動翻訳に使う LLM モデルプロファイル
+* `[transcription]`：音声の文字起こしに使う音声認識モデルと上限
 * `[translation]`：翻訳先の初期値や翻訳リクエストの上限
 
 たとえば、データの保存先と EDA で読み込む最大行数は、次のように指定します。
