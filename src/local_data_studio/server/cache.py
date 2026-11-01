@@ -132,9 +132,9 @@ def index_cache_path(path: Path) -> Path:
     return INDEX_CACHE_DIR / f"{DatasetFingerprint.from_path(path).key}.sqlite"
 
 
-def search_cache_path(path: Path, *, query: str, limit: int, deleted_ids: list[int]) -> Path:
-    """Return the cached search result path for a dataset and search parameters."""
-    key = _operation_cache_key(path, {"query": query, "limit": limit, "deleted_ids": sorted(deleted_ids)})
+def search_cache_path(path: Path, *, query: str, limit: int, deleted_ids: list[int], page_token: str | None = None) -> Path:
+    """Return the cached search result path for a dataset, search parameters, and resume token."""
+    key = _operation_cache_key(path, {"query": query, "limit": limit, "deleted_ids": sorted(deleted_ids), "page_token": page_token})
     return SEARCH_CACHE_DIR / f"{key}.json"
 
 

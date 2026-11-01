@@ -77,11 +77,16 @@ class IndexJobRequest(BaseModel):
 
 
 class SearchJobRequest(BaseModel):
-    """Input for a bounded background dataset search."""
+    """Input for a bounded background dataset search.
+
+    ``page_token`` is the previous result's ``next_page_token`` and resumes
+    the scan after that page's last match.
+    """
 
     file: str = Field(min_length=1)
     query: str = Field(min_length=1)
     limit: int | None = Field(default=None, ge=1)
+    page_token: str | None = Field(default=None, max_length=4096)
 
 
 class StatsJobRequest(BaseModel):

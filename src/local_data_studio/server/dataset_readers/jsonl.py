@@ -8,9 +8,10 @@ from typing import Any
 
 from fastapi import HTTPException
 
-from ..config import COLUMN_LIMIT_WARNING, MAX_COLUMNS
+from ..config import COLUMN_LIMIT_WARNING, MAX_COLUMNS, PREVIEW_PAGE_MAX_BYTES
 from ..db import build_table_response
 from ..line_index import LineOffsetIndex
+from ..serialization import serialize_rows
 from .common import (
     align_existing_rows,
     decode_page_token_for,
@@ -24,8 +25,8 @@ from .common import (
     row_from_mapping,
     token_int,
 )
-from .contracts import DatasetMetadata, ScanControl
-from .line_cursor import _line_cursor_for_offset, _raw_line_value
+from .contracts import DatasetMetadata, ScanControl, SearchPage
+from .line_cursor import _line_cursor_for_offset, _raw_line_value, iter_candidate_rows, iter_line_blocks, line_search_needle
 
 JSONL_SCHEMA_SAMPLE_ROWS = 100
 JSONL_SCHEMA_MAX_SCANNED_LINES = 10_000
@@ -97,7 +98,7 @@ def preview_jsonl(
         byte_offset, row_number = _line_cursor_for_offset(path, offset, deleted_ids=deleted_ids)
     metadata = load_jsonl_metadata(path)
     columns = [column["name"] for column in metadata.columns]
-    rows: list[list[Any]] = []
+    values: list[Any] = []
     row_ids: list[int] = []
     next_byte_offset = byte_offset
     next_row_number = row_number
@@ -105,7 +106,7 @@ def preview_jsonl(
 
     with path.open("rb") as file:
         file.seek(byte_offset)
-        while len(rows) < limit:
+        while len(values) < limit and (not values or next_byte_offset - byte_offset < PREVIEW_PAGE_MAX_BYTES):
             line = file.readline()
             if not line:
                 next_byte_offset = file.tell()
@@ -118,16 +119,15 @@ def preview_jsonl(
             if current_row_id in deleted_ids:
                 continue
             value = json.loads(line)
-            old_column_count = len(columns)
             columns, row_columns_truncated = extend_columns_from_value(columns, value)
             columns_truncated = columns_truncated or row_columns_truncated
-            align_existing_rows(rows, old_column_count, len(columns))
-            rows.append(row_from_mapping(columns, value))
+            values.append(value)
             row_ids.append(current_row_id)
 
+    raw_rows = [[value.get(column) for column in columns] if isinstance(value, dict) else [value] for value in values]
     has_next = next_byte_offset < path.stat().st_size
     next_token = encode_page_token({"kind": "jsonl", "byte_offset": next_byte_offset, "row_number": next_row_number}) if has_next else None
-    response = build_table_response(file_name, columns, rows, limit, max(0, row_number - 1), row_ids)
+    response = build_table_response(file_name, columns, serialize_rows(raw_rows), limit, max(0, row_number - 1), row_ids)
     response.update({"next_page_token": next_token, "has_next": has_next})
     warning = merge_warnings(metadata.warning, COLUMN_LIMIT_WARNING if columns_truncated else None, response.get("warning"))
     if warning:
@@ -143,31 +143,31 @@ def search_jsonl(
     limit: int,
     deleted_ids: set[int],
     control: ScanControl,
-) -> tuple[list[str], list[list[Any]], list[int], bool, str | None]:
-    """Scan JSONL incrementally for at most ``limit`` matching visible rows."""
+    cursor: dict[str, Any] | None = None,
+) -> SearchPage:
+    """Scan JSONL from ``cursor`` for at most ``limit`` matching visible rows.
+
+    Raw blocks are filtered with a byte pattern first, so only candidate lines
+    are decoded and parsed. The returned cursor resumes after the last match.
+    """
     metadata = load_jsonl_metadata(path)
     columns = [column["name"] for column in metadata.columns]
     rows: list[list[Any]] = []
     row_ids: list[int] = []
     lowered = query.lower()
-    row_number = 0
+    needle = line_search_needle(query)
     size = max(path.stat().st_size, 1)
     columns_truncated = False
     index = LineOffsetIndex(path)
-    with path.open("rb") as file:
-        while len(rows) < limit:
-            control.check_cancelled()
-            line_start = file.tell()
-            line = file.readline()
-            if not line:
-                warning = merge_warnings(metadata.warning, COLUMN_LIMIT_WARNING if columns_truncated else None)
-                return columns, rows, row_ids, False, warning
-            if not line.strip():
-                continue
-            row_number += 1
-            index.record(row_number, line_start)
+    start_offset = token_int(cursor or {}, "byte_offset", 0)
+    first_row = token_int(cursor or {}, "row_number", 1, minimum=1)
+    for block in iter_line_blocks(path, start_offset=start_offset, first_row=first_row, control=control, needle=needle, parallel=True):
+        index.record_checkpoints(block.checkpoints(index.stride))
+        for position in iter_candidate_rows(block, needle):
+            row_number = block.first_row + position
             if row_number in deleted_ids:
                 continue
+            line = block.line(position)
             if lowered not in line.decode("utf-8", "replace").lower():
                 continue
             value = json.loads(line)
@@ -177,6 +177,10 @@ def search_jsonl(
             align_existing_rows(rows, old_column_count, len(columns))
             rows.append(row_from_mapping(columns, value))
             row_ids.append(row_number)
-            control.update(progress=min(file.tell() / size, 0.999), message=f"Found {len(rows):,} rows")
+            if len(rows) >= limit:
+                warning = merge_warnings(metadata.warning, COLUMN_LIMIT_WARNING if columns_truncated else None)
+                next_cursor = {"byte_offset": block.offset + int(block.ends[position]), "row_number": row_number + 1}
+                return SearchPage(columns, rows, row_ids, warning, next_cursor)
+        control.update(progress=min(block.end_offset / size, 0.999), message=f"Found {len(rows):,} rows")
     warning = merge_warnings(metadata.warning, COLUMN_LIMIT_WARNING if columns_truncated else None)
-    return columns, rows, row_ids, True, warning
+    return SearchPage(columns, rows, row_ids, warning)

@@ -1,6 +1,7 @@
 """Tests for readers behavior."""
 
 import json
+import os
 from io import BytesIO
 from pathlib import Path
 from tempfile import TemporaryDirectory
@@ -14,8 +15,9 @@ from fastapi import HTTPException
 from local_data_studio.server.config import MAX_COLUMNS, MAX_JSON_PREVIEW_BYTES, MAX_OFFSET_FALLBACK
 from local_data_studio.server.dataset_readers import jsonl as jsonl_reader
 from local_data_studio.server.dataset_readers import line as line_reader
-from local_data_studio.server.dataset_readers import line_indexing
+from local_data_studio.server.dataset_readers import line_cursor, line_indexing
 from local_data_studio.server.dataset_readers import parquet as parquet_reader
+from local_data_studio.server.dataset_readers.common import encode_page_token
 from local_data_studio.server.readers import count_rows_with_progress, fetch_preview_page, fetch_raw_row, load_dataset_metadata, search_dataset
 
 
@@ -144,60 +146,88 @@ class ReaderPreviewTests(TestCase):
             self.assertEqual(1, len(fake_index.batches))
             self.assertEqual([2, 4, 6, 8, 10], [line_number for line_number, _ in fake_index.batches[0]])
 
-    def test_parquet_raw_row_uses_bounded_record_batches(self) -> None:
-        """Verify that parquet raw row uses bounded record batches."""
+    def test_parquet_rows_are_addressed_by_physical_row_number(self) -> None:
+        """Read any Parquet page directly, across row groups and beyond the offset fallback."""
+        with TemporaryDirectory() as tmpdir:
+            path = Path(tmpdir) / "data.parquet"
+            pq.write_table(pa.Table.from_pylist([{"id": index} for index in range(MAX_OFFSET_FALLBACK + 50)]), path, row_group_size=1_000)
 
-        class FakeMetadata:
-            """Test fake metadata behavior."""
+            deep = fetch_preview_page("data.parquet", path, limit=3, offset=MAX_OFFSET_FALLBACK + 10)
+            after = fetch_preview_page("data.parquet", path, limit=3, page_token=deep["next_page_token"])
+            columns, values = fetch_raw_row(path, MAX_OFFSET_FALLBACK + 1)
 
-            def row_group(self, row_group: int):  # noqa: ANN001, ARG002
-                """Exercise row group behavior."""
-                return type("Group", (), {"num_rows": 100})()
+            self.assertEqual([[MAX_OFFSET_FALLBACK + 10], [MAX_OFFSET_FALLBACK + 11], [MAX_OFFSET_FALLBACK + 12]], deep["rows"])
+            self.assertEqual([MAX_OFFSET_FALLBACK + 11, MAX_OFFSET_FALLBACK + 12, MAX_OFFSET_FALLBACK + 13], deep["row_ids"])
+            self.assertEqual([MAX_OFFSET_FALLBACK + 14, MAX_OFFSET_FALLBACK + 15, MAX_OFFSET_FALLBACK + 16], after["row_ids"])
+            self.assertEqual((["id"], [MAX_OFFSET_FALLBACK]), (columns, values))
 
-        class FakeParquet:
-            """Test fake parquet behavior."""
+    def test_parquet_column_named_file_row_number_uses_arrow_batches(self) -> None:
+        """Fall back to bounded Arrow batches when DuckDB's virtual row column would collide."""
+        with TemporaryDirectory() as tmpdir:
+            path = Path(tmpdir) / "data.parquet"
+            pq.write_table(pa.Table.from_pylist([{"file_row_number": index * 10} for index in range(5)]), path, row_group_size=2)
 
-            num_row_groups = 1
-            metadata = FakeMetadata()
-            schema_arrow = type("Schema", (), {"names": ["id"]})()
+            page = fetch_preview_page("data.parquet", path, limit=2, offset=3)
 
-            def __init__(self) -> None:
-                self.batch_sizes: list[int] = []
+            self.assertEqual([[30], [40]], page["rows"])
+            self.assertEqual([4, 5], page["row_ids"])
 
-            def iter_batches(self, *, batch_size: int, row_groups: list[int], columns: list[str]):  # noqa: ANN001, ARG002
-                """Exercise iter batches behavior."""
-                self.batch_sizes.append(batch_size)
-                yield pa.RecordBatch.from_pylist([{"id": index} for index in range(100)])
+    def test_parquet_offset_maps_visible_rows_with_binary_search(self) -> None:
+        """Map a visible offset to a physical row while skipping hidden rows."""
+        self.assertEqual(750_003, parquet_reader._absolute_row_for_offset(1_000_000, 750_000, {2, 500_000}))
+        self.assertEqual(1_000_001, parquet_reader._absolute_row_for_offset(1_000_000, 999_999, {7}))
 
-        fake = FakeParquet()
-        with patch("pyarrow.parquet.ParquetFile", return_value=fake):
-            columns, values = parquet_reader.raw_row(Path("data.parquet"), 75)
+    def test_parquet_page_rows_follow_the_byte_budget(self) -> None:
+        """Shrink pages of wide Parquet rows to the preview byte budget."""
+        with TemporaryDirectory() as tmpdir:
+            path = Path(tmpdir) / "wide.parquet"
+            pq.write_table(pa.Table.from_pylist([{"blob": os.urandom(4_096)} for _ in range(20)]), path)
 
-        self.assertEqual(["id"], columns)
-        self.assertEqual([74], values)
-        self.assertGreater(fake.batch_sizes[0], 1)
+            with patch.object(parquet_reader, "PREVIEW_PAGE_MAX_BYTES", 10_000):
+                page = fetch_preview_page("wide.parquet", path, limit=10)
 
-    def test_parquet_offset_cursor_uses_metadata_and_binary_search(self) -> None:
-        """Verify that parquet offset cursor uses metadata and binary search."""
+            self.assertEqual([1, 2], page["row_ids"])
+            self.assertTrue(page["has_next"])
 
-        class FakeMetadata:
-            """Test fake metadata behavior."""
+    def test_line_blocks_skip_blank_lines_and_keep_long_rows_whole(self) -> None:
+        """Number only non-blank lines and never split a line across blocks."""
+        with TemporaryDirectory() as tmpdir:
+            path = Path(tmpdir) / "data.jsonl"
+            long_value = "y" * 50
+            path.write_bytes(f'{{"id": 1}}\r\n \t\r\n\n{{"text": "{long_value}"}}\n{{"id": 3}}'.encode())
 
-            def __init__(self) -> None:
-                self.calls = 0
+            blocks = list(line_cursor.iter_line_blocks(path, start_offset=0, first_row=1, block_bytes=16))
+            rows = [(block.first_row + index, block.line(index)) for block in blocks for index in range(block.row_count)]
 
-            def row_group(self, row_group: int):  # noqa: ANN001, ARG002
-                """Exercise row group behavior."""
-                self.calls += 1
-                return type("Group", (), {"num_rows": 100_000})()
+            self.assertEqual([1, 2, 3], [row for row, _ in rows])
+            self.assertEqual(b'{"id": 1}\r\n', rows[0][1])
+            self.assertEqual(f'{{"text": "{long_value}"}}\n'.encode(), rows[1][1])
+            self.assertEqual(b'{"id": 3}', rows[2][1])
 
-        metadata = FakeMetadata()
-        fake = type("Parquet", (), {"num_row_groups": 10, "metadata": metadata})()
+    def test_line_block_checkpoints_are_stride_aligned(self) -> None:
+        """Report checkpoints only for row numbers that are multiples of the stride."""
+        with TemporaryDirectory() as tmpdir:
+            path = Path(tmpdir) / "data.jsonl"
+            path.write_text("".join(f'{{"id": {index}}}\n' for index in range(1, 11)), encoding="utf-8")
 
-        row_group, row_offset, absolute_row = parquet_reader._cursor_for_offset(fake, 750_000, {2, 500_000})
+            block = next(line_cursor.iter_line_blocks(path, start_offset=0, first_row=4))
 
-        self.assertEqual((7, 50_002, 750_003), (row_group, row_offset, absolute_row))
-        self.assertEqual(10, metadata.calls)
+            self.assertEqual([(6, block.starts[2]), (9, block.starts[5]), (12, block.starts[8])], block.checkpoints(3))
+
+    def test_candidate_rows_match_ascii_case_and_caseless_text(self) -> None:
+        """Match ASCII case-insensitively, caseless scripts exactly, and defer cased non-ASCII queries."""
+        with TemporaryDirectory() as tmpdir:
+            path = Path(tmpdir) / "data.jsonl"
+            path.write_text('{"name": "ADA ada"}\n{"name": "Linus"}\n{"city": "東京都"}\n{"name": "ada"}\n', encoding="utf-8")
+            block = next(line_cursor.iter_line_blocks(path, start_offset=0, first_row=1))
+
+            ascii_rows = list(line_cursor.iter_candidate_rows(block, line_cursor.line_search_needle("Ada")))
+            japanese_rows = list(line_cursor.iter_candidate_rows(block, line_cursor.line_search_needle("東京")))
+            all_rows = list(line_cursor.iter_candidate_rows(block, line_cursor.line_search_needle("Émile")))
+
+        self.assertEqual([0, 3], ascii_rows)
+        self.assertEqual([2], japanese_rows)
+        self.assertEqual([0, 1, 2, 3], all_rows)
 
     def test_raw_jsonl_row_is_not_limited_like_preview(self) -> None:
         """Verify that raw jsonl row is not limited like preview."""
@@ -330,16 +360,42 @@ class ReaderPreviewTests(TestCase):
 
             self.assertEqual(400, raised.exception.status_code)
 
-    def test_large_offset_without_page_token_is_rejected(self) -> None:
-        """Verify that large offset without page token is rejected."""
+    def test_line_offset_far_from_checkpoints_is_rejected_until_indexed(self) -> None:
+        """Reject long unindexed skips, then jump directly once the row index exists."""
         with TemporaryDirectory() as tmpdir:
             path = Path(tmpdir) / "data.jsonl"
-            path.write_text('{"id": 1}\n', encoding="utf-8")
+            path.write_text("".join(f"{index}\n" for index in range(1, 30_001)), encoding="utf-8")
 
-            with self.assertRaises(HTTPException) as raised:
-                fetch_preview_page("data.jsonl", path, limit=1, offset=MAX_OFFSET_FALLBACK + 1)
+            with patch.object(line_cursor, "MAX_OFFSET_SCAN_ROWS", 5_000):
+                with self.assertRaises(HTTPException) as raised:
+                    fetch_preview_page("data.jsonl", path, limit=1, offset=24_000)
+                line_reader.build_line_index_with_progress(path, _NoCancelControl())
+                far = fetch_preview_page("data.jsonl", path, limit=1, offset=24_000)
+                columns, raw = fetch_raw_row(path, 24_500)
 
             self.assertEqual(400, raised.exception.status_code)
+            self.assertEqual([[24_001]], far["rows"])
+            self.assertEqual([24_001], far["row_ids"])
+            self.assertEqual((["value"], [24_500]), (columns, raw))
+
+    def test_large_offset_without_page_token_is_rejected_for_duckdb_fallback(self) -> None:
+        """Keep the plain-offset guard for formats that only have a DuckDB OFFSET path."""
+        with self.assertRaises(HTTPException) as raised:
+            fetch_preview_page("data.unknown", Path("data.unknown"), limit=1, offset=MAX_OFFSET_FALLBACK + 1)
+
+        self.assertEqual(400, raised.exception.status_code)
+
+    def test_line_preview_stops_at_the_page_byte_budget(self) -> None:
+        """Return a short page with a resume token when rows exceed the byte budget."""
+        with TemporaryDirectory() as tmpdir:
+            path = Path(tmpdir) / "data.jsonl"
+            path.write_text("".join(json.dumps({"text": "z" * 100}) + "\n" for _ in range(10)), encoding="utf-8")
+
+            with patch.object(jsonl_reader, "PREVIEW_PAGE_MAX_BYTES", 250):
+                page = fetch_preview_page("data.jsonl", path, limit=10)
+
+            self.assertEqual([1, 2, 3], page["row_ids"])
+            self.assertTrue(page["has_next"])
 
     def test_json_metadata_is_bounded_and_warns(self) -> None:
         """Verify that json metadata is bounded and warns."""
@@ -420,3 +476,34 @@ class ReaderPreviewTests(TestCase):
 
             self.assertEqual([[2, "Ada"]], result["rows"])
             self.assertEqual([2], result["row_ids"])
+
+    def test_search_pages_resume_after_the_last_match(self) -> None:
+        """Continue line, delimited, and Parquet searches from the previous page token."""
+        with TemporaryDirectory() as tmpdir:
+            root = Path(tmpdir)
+            names = ["Ada", "Linus", "ada lovelace", "Grace", "ADA"]
+            (root / "data.jsonl").write_text("".join(json.dumps({"name": name}) + "\n\n" for name in names), encoding="utf-8")
+            (root / "data.csv").write_text("name\n" + "".join(f"{name}\n" for name in names), encoding="utf-8")
+            pq.write_table(pa.Table.from_pylist([{"name": name} for name in names]), root / "data.parquet", row_group_size=2)
+
+            for file_name in ("data.jsonl", "data.csv", "data.parquet"):
+                with self.subTest(file_name=file_name):
+                    first = search_dataset(file_name, root / file_name, query="ada", limit=2, control=_NoCancelControl())
+                    second = search_dataset(file_name, root / file_name, query="ada", limit=2, control=_NoCancelControl(), page_token=first["next_page_token"])
+
+                    self.assertEqual([1, 3], first["row_ids"])
+                    self.assertTrue(first["truncated"])
+                    self.assertEqual([5], second["row_ids"])
+                    self.assertIsNone(second["next_page_token"])
+
+    def test_search_rejects_a_token_from_another_format(self) -> None:
+        """Refuse to resume a search with a cursor created for a different reader."""
+        with TemporaryDirectory() as tmpdir:
+            path = Path(tmpdir) / "data.csv"
+            path.write_text("name\nAda\nAda\n", encoding="utf-8")
+            jsonl_token = encode_page_token({"kind": "search-jsonl", "byte_offset": 0, "row_number": 1})
+
+            with self.assertRaises(HTTPException) as raised:
+                search_dataset("data.csv", path, query="Ada", limit=1, control=_NoCancelControl(), page_token=jsonl_token)
+
+            self.assertEqual(400, raised.exception.status_code)

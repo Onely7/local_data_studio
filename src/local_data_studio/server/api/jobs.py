@@ -84,12 +84,20 @@ def start_search_job(payload: SearchJobRequest, request: Request = REQUEST_DEFAU
     limit_value, _ = normalize_pagination(payload.limit, 0)
 
     def _work(context: JobContext) -> dict[str, Any]:
-        cache_path = search_cache_path(path, query=search_term, limit=limit_value, deleted_ids=deleted_ids)
+        cache_path = search_cache_path(path, query=search_term, limit=limit_value, deleted_ids=deleted_ids, page_token=payload.page_token)
         cached = load_cached_result(cache_path)
         if cached is not None and cached.get("query") == search_term:
             context.update(progress=1.0, message="Search loaded from cache")
             return {**cached, "cached": True}
-        result = search_dataset(payload.file, path, query=search_term, limit=limit_value, control=context, deleted_ids=deleted_ids)
+        result = search_dataset(
+            payload.file,
+            path,
+            query=search_term,
+            limit=limit_value,
+            control=context,
+            deleted_ids=deleted_ids,
+            page_token=payload.page_token,
+        )
         write_cached_result(cache_path, result)
         return {**result, "cached": False}
 

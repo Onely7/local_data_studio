@@ -8,7 +8,7 @@ from pathlib import Path
 from threading import Lock
 from typing import Any
 
-from ..config import COLUMN_LIMIT_WARNING, MAX_COLUMNS
+from ..config import COLUMN_LIMIT_WARNING, MAX_COLUMNS, PREVIEW_PAGE_MAX_BYTES
 from ..db import build_table_response
 from ..line_index import LineOffsetIndex
 from ..serialization import serialize_value
@@ -20,8 +20,8 @@ from .common import (
     merge_warnings,
     token_int,
 )
-from .contracts import DatasetMetadata, ScanControl
-from .line_cursor import _line_cursor_for_offset, _raw_line_value
+from .contracts import DatasetMetadata, ScanControl, SearchPage
+from .line_cursor import _line_cursor_for_offset, _raw_line_value, iter_candidate_rows, iter_line_blocks, line_search_needle
 
 CSV_FIELD_SIZE_LOCK = Lock()
 
@@ -102,7 +102,7 @@ def preview_delimited(
     next_row_number = row_number
     with path.open("rb") as file:
         file.seek(byte_offset)
-        while len(rows) < limit:
+        while len(rows) < limit and (not rows or next_byte_offset - byte_offset < PREVIEW_PAGE_MAX_BYTES):
             line = file.readline()
             if not line:
                 next_byte_offset = file.tell()
@@ -138,37 +138,39 @@ def search_delimited(
     limit: int,
     deleted_ids: set[int],
     control: ScanControl,
-) -> tuple[list[str], list[list[Any]], list[int], bool, str | None]:
-    """Scan CSV/TSV incrementally for at most ``limit`` matching visible rows."""
+    cursor: dict[str, Any] | None = None,
+) -> SearchPage:
+    """Scan CSV/TSV from ``cursor`` for at most ``limit`` matching visible rows.
+
+    Raw blocks are filtered with a byte pattern first, so only candidate lines
+    are decoded and parsed. The returned cursor resumes after the last match.
+    """
     source_columns, first_data_offset = read_delimited_header(path, delimiter)
     columns = source_columns[:MAX_COLUMNS]
     warning = COLUMN_LIMIT_WARNING if len(source_columns) > MAX_COLUMNS else None
     rows: list[list[Any]] = []
     row_ids: list[int] = []
     lowered = query.lower()
-    row_number = 0
+    needle = line_search_needle(query)
     size = max(path.stat().st_size, 1)
     index = LineOffsetIndex(path)
-    with path.open("rb") as file:
-        file.seek(first_data_offset)
-        while len(rows) < limit:
-            control.check_cancelled()
-            line_start = file.tell()
-            line = file.readline()
-            if not line:
-                return columns, rows, row_ids, False, warning
-            if not line.strip():
-                continue
-            row_number += 1
-            index.record(row_number, line_start)
+    start_offset = max(first_data_offset, token_int(cursor or {}, "byte_offset", first_data_offset))
+    first_row = token_int(cursor or {}, "row_number", 1, minimum=1)
+    for block in iter_line_blocks(path, start_offset=start_offset, first_row=first_row, control=control, needle=needle, parallel=True):
+        index.record_checkpoints(block.checkpoints(index.stride))
+        for position in iter_candidate_rows(block, needle):
+            row_number = block.first_row + position
             if row_number in deleted_ids:
                 continue
-            text = line.decode("utf-8-sig", "replace").rstrip("\r\n")
+            text = block.line(position).decode("utf-8-sig", "replace").rstrip("\r\n")
             if lowered not in text.lower():
                 continue
             values = parse_delimited_record(text, delimiter)
             padded = values + [None] * max(0, len(columns) - len(values))
             rows.append([serialize_value(value) for value in padded[: len(columns)]])
             row_ids.append(row_number)
-            control.update(progress=min(file.tell() / size, 0.999), message=f"Found {len(rows):,} rows")
-    return columns, rows, row_ids, True, warning
+            if len(rows) >= limit:
+                next_cursor = {"byte_offset": block.offset + int(block.ends[position]), "row_number": row_number + 1}
+                return SearchPage(columns, rows, row_ids, warning, next_cursor)
+        control.update(progress=min(block.end_offset / size, 0.999), message=f"Found {len(rows):,} rows")
+    return SearchPage(columns, rows, row_ids, warning)

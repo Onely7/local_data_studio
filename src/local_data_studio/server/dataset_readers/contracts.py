@@ -19,6 +19,20 @@ class ScanControl(Protocol):
 
 
 @dataclass(frozen=True, slots=True)
+class SearchPage:
+    """One page of search matches and the cursor that resumes after its last match.
+
+    ``next_cursor`` is ``None`` when the scan reached the end of the dataset.
+    """
+
+    columns: list[str]
+    rows: list[list[Any]]
+    row_ids: list[int]
+    warning: str | None = None
+    next_cursor: dict[str, Any] | None = None
+
+
+@dataclass(frozen=True, slots=True)
 class DatasetMetadata:
     """Cached lightweight dataset metadata used by the UI."""
 

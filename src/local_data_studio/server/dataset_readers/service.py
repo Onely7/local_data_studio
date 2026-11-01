@@ -32,7 +32,7 @@ from .common import (
     token_int,
     visible_row_count,
 )
-from .contracts import DatasetMetadata, ScanControl
+from .contracts import DatasetMetadata, ScanControl, SearchPage
 
 
 def _create_duckdb_metadata(path: Path) -> DatasetMetadata:
@@ -118,9 +118,13 @@ def fetch_preview_page(
     page_token: str | None = None,
     deleted_ids: list[int] | None = None,
 ) -> dict[str, Any]:
-    """Fetch one preview page using a format-specific cursor token."""
+    """Fetch one preview page using a format-specific cursor token.
+
+    Parquet addresses any offset through footer metadata and line formats skip
+    from the nearest sparse checkpoint, so only the DuckDB fallback limits
+    plain ``offset`` paging.
+    """
     limit_value, offset_value = normalize_pagination(limit, offset)
-    reject_large_offset_without_token(offset_value, page_token)
     hidden = set(deleted_ids or [])
     suffix = path.suffix.lower()
     if suffix == ".jsonl":
@@ -139,6 +143,7 @@ def fetch_preview_page(
         return parquet.preview(file_name, path, limit_value, offset_value, page_token, hidden)
     if suffix == ".json":
         return json_reader.preview(file_name, path, limit_value)
+    reject_large_offset_without_token(offset_value, page_token)
     return _duckdb_preview(file_name, path, limit_value, offset_value, page_token, deleted_ids or [])
 
 
@@ -175,23 +180,26 @@ def _search_duckdb(
     limit: int,
     deleted_ids: list[int],
     control: ScanControl,
-) -> tuple[list[str], list[list[Any]], list[int], bool, str | None]:
+    cursor: dict[str, Any],
+) -> SearchPage:
     relation, params = relation_with_rowid_sql(path, deleted_ids)
+    after_row_id = token_int(cursor, "row_id", 0)
     with open_connection() as connection:
         base_relation, base_params = relation_sql(path)
         columns_meta = describe_relation(connection, base_relation, base_params)
         text_columns = [column["name"] for column in columns_meta if "CHAR" in column["type"].upper() or "TEXT" in column["type"].upper()]
         if not text_columns:
-            return [column["name"] for column in columns_meta], [], [], False, None
+            return SearchPage([column["name"] for column in columns_meta], [], [])
         clauses = " OR ".join(f"CAST({quote_ident(column)} AS VARCHAR) ILIKE ?" for column in text_columns)
-        values = params + [f"%{query}%"] * len(text_columns)
+        values = params + [after_row_id] + [f"%{query}%"] * len(text_columns)
         control.check_cancelled()
         result_columns, rows, row_ids = fetch_rows_with_rowid(
             connection,
-            f"SELECT * FROM ({relation}) WHERE {clauses} LIMIT {limit}",
+            f"SELECT * FROM ({relation}) WHERE __rowid > ? AND ({clauses}) LIMIT {limit}",
             values,
         )
-    return result_columns, rows, row_ids, len(rows) == limit, None
+    next_cursor = {"row_id": row_ids[-1]} if len(rows) == limit and row_ids else None
+    return SearchPage(result_columns, rows, row_ids, None, next_cursor)
 
 
 def search_dataset(
@@ -202,25 +210,30 @@ def search_dataset(
     limit: int | None,
     control: ScanControl,
     deleted_ids: list[int] | None = None,
+    page_token: str | None = None,
 ) -> dict[str, Any]:
-    """Search a dataset in a background job and return first matching rows."""
+    """Search a dataset in a background job and return the next matching rows.
+
+    ``page_token`` comes from a previous response's ``next_page_token`` and
+    resumes the scan after that page's last match instead of restarting it.
+    """
     search_term = query.strip()
     if not search_term:
         raise HTTPException(status_code=400, detail="query must not be empty")
     limit_value, _ = normalize_pagination(limit, 0)
     hidden = set(deleted_ids or [])
-    searchers: dict[str, Callable[[], tuple[list[str], list[list[Any]], list[int], bool, str | None]]] = {
-        ".jsonl": lambda: line.search_jsonl(path, search_term, limit_value, hidden, control),
-        ".csv": lambda: line.search_delimited(path, search_term, ",", limit_value, hidden, control),
-        ".tsv": lambda: line.search_delimited(path, search_term, "\t", limit_value, hidden, control),
+    suffix = path.suffix.lower()
+    cursor = decode_page_token_for(page_token, f"search-{format_name(path)}")
+    searchers: dict[str, Callable[[], SearchPage]] = {
+        ".jsonl": lambda: line.search_jsonl(path, search_term, limit_value, hidden, control, cursor),
+        ".csv": lambda: line.search_delimited(path, search_term, ",", limit_value, hidden, control, cursor),
+        ".tsv": lambda: line.search_delimited(path, search_term, "\t", limit_value, hidden, control, cursor),
     }
-    columns, rows, row_ids, truncated, warning = searchers.get(
-        path.suffix.lower(),
-        lambda: _search_duckdb(path, search_term, limit_value, deleted_ids or [], control),
-    )()
-    response = build_table_response(file_name, columns, rows, limit_value, 0, row_ids)
-    response.update({"query": search_term, "truncated": truncated})
-    warning = merge_warnings(response.get("warning"), warning)
+    page = searchers.get(suffix, lambda: _search_duckdb(path, search_term, limit_value, deleted_ids or [], control, cursor))()
+    next_token = encode_page_token({"kind": f"search-{format_name(path)}", **page.next_cursor}) if page.next_cursor else None
+    response = build_table_response(file_name, page.columns, page.rows, limit_value, 0, page.row_ids)
+    response.update({"query": search_term, "truncated": next_token is not None, "next_page_token": next_token})
+    warning = merge_warnings(response.get("warning"), page.warning)
     if warning:
         response["warning"] = warning
     if warning and COLUMN_LIMIT_WARNING in warning:
