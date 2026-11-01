@@ -3,6 +3,7 @@ import {
   cancelJob,
   extractErrorMessage,
   formatJobProgress,
+  isAbortError,
   startJob,
   waitForJob,
 } from "./http.js";
@@ -294,12 +295,15 @@ async function runAtlasJob(kind) {
   }
   state.atlasUrl = "";
 
+  const fileAtStart = state.file;
+  let job = null;
+  const isCurrent = () => state.file === fileAtStart && job !== null && state.atlasJobId === job.id;
   try {
-    const fileAtStart = state.file;
-    const job = await startJob(jobKind, payload);
+    job = await startJob(jobKind, payload);
     state.atlasJobId = job.id;
     const data = await waitForJob(job.id, {
       intervalMs: 1000,
+      isCurrent,
       onUpdate: (nextJob) => {
         if (elements.atlasStatus) {
           elements.atlasStatus.textContent = formatJobProgress(
@@ -309,7 +313,6 @@ async function runAtlasJob(kind) {
         }
       },
     });
-    if (state.file !== fileAtStart || state.atlasJobId !== job.id) return;
     if (elements.atlasStatus) {
       const modalityNote = data.modality ? ` (${data.modality})` : "";
       const sampleNote = data.sample ? ` Sample limit: ${data.sample}.` : "";
@@ -333,15 +336,18 @@ async function runAtlasJob(kind) {
       elements.atlasLink.style.display = "inline-flex";
     }
   } catch (err) {
+    if (isAbortError(err)) return;
     if (elements.atlasStatus) {
       elements.atlasStatus.textContent = extractErrorMessage(err);
     }
     console.error(err);
   } finally {
-    state.atlasJobId = null;
-    state.atlasJobKind = "";
-    state.atlasCancelling = false;
-    setAtlasButtonsRunning("");
+    if (job === null || state.atlasJobId === job.id) {
+      state.atlasJobId = null;
+      state.atlasJobKind = "";
+      state.atlasCancelling = false;
+      setAtlasButtonsRunning("");
+    }
   }
 }
 

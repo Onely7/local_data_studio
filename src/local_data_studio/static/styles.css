@@ -330,6 +330,23 @@ body {
   text-align: center;
 }
 
+.jump-row {
+  width: 104px;
+  min-width: 0;
+  appearance: textfield;
+  -moz-appearance: textfield;
+}
+
+.jump-row::-webkit-outer-spin-button,
+.jump-row::-webkit-inner-spin-button {
+  margin: 0;
+  -webkit-appearance: none;
+}
+
+.jump-row:disabled {
+  opacity: 0.5;
+}
+
 .translation-controls {
   grid-column: 1 / -1;
   grid-row: 1;

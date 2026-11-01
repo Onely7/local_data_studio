@@ -73,11 +73,21 @@ function isHexImageBytes(text) {
 
 function hexToBase64(hex) {
   const compact = hex.replace(/\s+/g, "");
+  const bytes = new Uint8Array(compact.length / 2);
+  for (let index = 0; index < bytes.length; index += 1) {
+    bytes[index] = parseInt(compact.substr(index * 2, 2), 16);
+  }
   let binary = "";
-  for (let index = 0; index < compact.length; index += 2) {
-    binary += String.fromCharCode(parseInt(compact.slice(index, index + 2), 16));
+  for (let start = 0; start < bytes.length; start += 0x8000) {
+    binary += String.fromCharCode(...bytes.subarray(start, start + 0x8000));
   }
   return btoa(binary);
+}
+
+// The server marks downscaled preview images in the data URL media type; the
+// full-resolution image is loaded from the raw row when it is enlarged.
+export function isThumbnailImage(src) {
+  return typeof src === "string" && src.startsWith("data:image/webp;thumbnail=1;");
 }
 
 function bytesToImageDataUrl(bytes, pathHint = "") {
