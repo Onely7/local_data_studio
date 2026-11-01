@@ -697,13 +697,6 @@ th {
   opacity: 0.6;
 }
 
-.col-hidden .col-meta,
-.col-hidden .sparkline,
-.col-hidden .sparkline-labels,
-.col-hidden .sparkline-axis {
-  opacity: 0.45;
-}
-
 .col-header {
   display: flex;
   flex-direction: column;
@@ -814,76 +807,6 @@ th:focus-within .col-delete-btn {
   font-weight: 600;
   color: var(--ink);
   text-transform: none;
-}
-
-.col-meta {
-  font-size: 11px;
-  text-transform: none;
-  letter-spacing: 0;
-  color: var(--muted);
-}
-
-.sparkline {
-  height: 26px;
-  display: grid;
-  grid-auto-flow: column;
-  gap: 3px;
-  align-items: end;
-}
-
-.sparkline span {
-  width: 100%;
-  border-radius: 3px;
-  background: rgba(38, 70, 83, 0.25);
-}
-
-.sparkline-labels {
-  display: grid;
-  grid-auto-flow: column;
-  gap: 3px;
-  justify-items: center;
-  font-size: 11px;
-  color: var(--muted);
-  line-height: 1;
-}
-
-.sparkline-labels span {
-  max-width: 100%;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-.sparkline-axis {
-  display: flex;
-  justify-content: space-between;
-  font-size: 11px;
-  color: var(--muted);
-  line-height: 1;
-}
-
-.sparkline-axis.center {
-  justify-content: center;
-}
-
-.sparkline[data-kind="string"] span {
-  background: rgba(42, 157, 143, 0.55);
-}
-
-.sparkline[data-kind="list"] span {
-  background: rgba(148, 163, 184, 0.65);
-}
-
-.sparkline[data-kind="number"] span {
-  background: rgba(99, 102, 241, 0.55);
-}
-
-.sparkline[data-kind="boolean"] span {
-  background: rgba(231, 111, 81, 0.5);
-}
-
-.sparkline[data-kind="object"] span {
-  background: rgba(30, 64, 175, 0.5);
 }
 
 tr:hover {
