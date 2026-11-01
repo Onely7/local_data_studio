@@ -96,12 +96,16 @@ def preview_jsonl(
     offset: int,
     page_token: str | None,
     deleted_ids: set[int],
+    *,
+    token_kind: str = "jsonl",
 ) -> dict[str, Any]:
     """Return a bounded JSONL page and byte-offset cursor for the next page.
 
     Decoded rows are kept in the recent-row cache for raw row requests.
+    ``token_kind`` names the page token format, so JSON Lines files with a
+    ``.json`` suffix keep their own tokens.
     """
-    token = decode_page_token_for(page_token, "jsonl")
+    token = decode_page_token_for(page_token, token_kind)
     if page_token:
         byte_offset = token_int(token, "byte_offset", 0)
         row_number = token_int(token, "row_number", 1, minimum=1)
@@ -125,7 +129,7 @@ def preview_jsonl(
 
     raw_rows = [[value.get(column) for column in columns] if isinstance(value, dict) else [value] for value in values]
     has_next = not page.at_end
-    next_token = encode_page_token({"kind": "jsonl", "byte_offset": page.next_offset, "row_number": page.next_row}) if has_next else None
+    next_token = encode_page_token({"kind": token_kind, "byte_offset": page.next_offset, "row_number": page.next_row}) if has_next else None
     response = build_table_response(file_name, columns, serialize_rows(raw_rows), limit, max(0, row_number - 1), row_ids)
     response.update({"next_page_token": next_token, "has_next": has_next})
     warning = merge_warnings(metadata.warning, COLUMN_LIMIT_WARNING if columns_truncated else None, response.get("warning"))

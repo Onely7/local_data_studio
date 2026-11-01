@@ -143,7 +143,7 @@ def fetch_preview_page(
     if suffix == ".parquet":
         return parquet.preview(file_name, path, limit_value, offset_value, page_token, hidden)
     if suffix == ".json":
-        return json_reader.preview(file_name, path, limit_value)
+        return json_reader.preview(file_name, path, limit_value, offset_value, page_token, hidden)
     reject_large_offset_without_token(offset_value, page_token)
     return _duckdb_preview(file_name, path, limit_value, offset_value, page_token, deleted_ids or [])
 
@@ -181,6 +181,8 @@ def dataset_status(file_name: str, path: Path, *, deleted_ids: list[int] | None 
         status.update(row_count=visible_row_count(rows, deleted_ids), indexed_rows=rows, indexed_bytes=size, complete=True)
         return status
     if not is_row_indexed(path):
+        if suffix == ".json":
+            status.update(row_count=visible_row_count(1, deleted_ids), indexed_rows=1, indexed_bytes=size, complete=True)
         return status
     snapshot = index_builder(path).snapshot()
     progress = snapshot.progress
@@ -205,6 +207,9 @@ def count_rows_with_progress(path: Path, control: ScanControl, *, deleted_ids: l
     if is_row_indexed(path):
         result = line.build_line_index_with_progress(path, control)
         return visible_row_count(int(result["row_count"]), deleted_ids)
+    if suffix == ".json":
+        control.check_cancelled()
+        return visible_row_count(1, deleted_ids)
     hidden = deleted_ids or []
     if hidden:
         relation, params = relation_with_rowid_sql(path, hidden)
@@ -273,6 +278,8 @@ def search_dataset(
         ".csv": lambda: line.search_delimited(path, search_term, ",", limit_value, hidden, control, cursor),
         ".tsv": lambda: line.search_delimited(path, search_term, "\t", limit_value, hidden, control, cursor),
     }
+    if suffix == ".json" and json_reader.json_layout(path) == "lines":
+        searchers[".json"] = searchers[".jsonl"]
     page = searchers.get(suffix, lambda: _search_duckdb(path, search_term, limit_value, deleted_ids or [], control, cursor))()
     next_token = encode_page_token({"kind": f"search-{format_name(path)}", **page.next_cursor}) if page.next_cursor else None
     response = build_table_response(file_name, page.columns, page.rows, limit_value, 0, page.row_ids)
