@@ -337,6 +337,10 @@ body {
   -moz-appearance: textfield;
 }
 
+.pagination-controls > .select-control {
+  flex: 0 0 auto;
+}
+
 .jump-row::-webkit-outer-spin-button,
 .jump-row::-webkit-inner-spin-button {
   margin: 0;
@@ -1134,8 +1138,13 @@ tr.expanded {
 
 .panel-actions {
   display: flex;
+  flex-wrap: wrap;
   gap: 8px;
   margin-top: 8px;
+}
+
+.panel-actions button {
+  white-space: nowrap;
 }
 
 .nl-model-control {
@@ -2151,7 +2160,13 @@ tr.expanded {
 
   .pagination-controls {
     width: 100%;
+    flex-wrap: wrap;
     justify-content: space-between;
+    row-gap: 8px;
+  }
+
+  .jump-row {
+    flex: 1 1 96px;
   }
 
   .pagination {
