@@ -342,6 +342,42 @@ A relation is a DuckDB object that represents tabular data processing.
 Generated reports are stored under `./cache/eda`.
 When the cache exceeds its size limit, shared capacity-management logic removes the oldest files first.
 
+## Audio Playback and Transcription
+
+`server/audio_values.py` recognizes WAV, FLAC, MP3, OGG, AAC, M4A, and AIFF audio by file signature, by path suffix, and in `data:audio/` URLs.
+In a `{bytes, path}` struct, such as a Hugging Face `Audio` value, the `path` suffix also names the format of bytes without a recognizable signature.
+
+Preview pages do not carry audio bytes.
+`serialize_value()` replaces them with a marker, a data URL without a payload whose media type carries `preview=1`, the byte size, and, for WAV and FLAC, the duration read from the header, for example `data:audio/wav;preview=1;size=48044;duration=1.500;base64,`.
+Raw rows return audio bytes as playable data URLs.
+
+`POST /api/raw_media` returns the audio that a row, column, and pointer select.
+The pointer lists the dictionary keys and list indexes from the column value to the audio item.
+Embedded bytes are returned with their media type.
+Path references are resolved next to the dataset file first and then below `FILE_SERVE_ROOTS`, and the file is returned only when it is inside those roots.
+`/api/raw` serves audio files as well as images.
+
+In the browser, `static/app/audio.js` renders compact play buttons in table cells and native players in expanded fields.
+Embedded audio is fetched from `/api/raw_media` into object URLs, of which at most 24 are kept.
+The table is rebuilt with `innerHTML`, so `refreshAudio()` moves existing players into the new markup in the same task, and playback continues.
+Audio keys combine the file, the row ID or the SQL offset with a hash of the query, the column, and the pointer, so a key never refers to another query's row.
+
+`server/audio_decode.py` reads embedded, local, or HTTP(S) audio and decodes it with PyAV into a mono float32 waveform, 16 kHz by default.
+PyAV bundles FFmpeg, so no `ffmpeg` binary is needed.
+
+The `[transcription]` section of the runtime TOML is validated by `server/transcription_config.py`.
+A model is a directory relative to the workspace, an absolute path, or a Hugging Face model ID; `/api/transcription_models` returns IDs, labels, and availability but no paths.
+`server/transcription_service.py` loads the model when it is first used.
+A `qwen3_asr` model runs through `apply_transcription_request()` and `generate()`, and every other model runs through the Transformers `automatic-speech-recognition` pipeline, which chunks Whisper and CTC models itself.
+Only one model is loaded at a time, behind a lock, and it is released `idle_unload_seconds` after its last use.
+Audio longer than `chunk_seconds` is split at the quietest 100 ms window near each limit, and the token budget is 15 tokens per second of audio.
+Segment transcripts are joined with spaces except between Chinese or Japanese text.
+
+`POST /api/jobs/transcription` reads each item's audio, decodes it, and transcribes it in order.
+Progress is reported per item, cancellation is checked between items and segments, and an item that cannot be read returns its error without failing the job.
+Results are cached in `./cache/transcripts`, keyed by the audio content and the model configuration, and are limited to 64 MiB.
+`static/app/transcription.js` sends the visible audio of a column in batches of at most `max_batch_items` and shows each job's progress message in place of the pending transcripts.
+
 ## Embedding Atlas
 
 `src/local_data_studio/server/atlas.py` remains as a compatibility entry point for existing code.
@@ -366,6 +402,19 @@ The main components include the following:
 `server/embedder_capabilities.py` inspects only local model metadata without loading model weights.
 The amount of data inspected is bounded.
 It also creates identifying values from configuration information related to model compatibility so that the application can determine whether a cache entry may be reused.
+
+### Audio Columns
+
+`infer_atlas_modality()` returns `audio` for columns of audio bytes, audio structs, and audio paths.
+`prepare_audio_projection_input()` spools readable audio to a temporary file and skips rows that cannot be read or probed.
+In the display DataFrame, the audio column holds a file and duration label instead of the audio bytes.
+Embedding Atlas plays only some formats, and audio bytes would make its dataset large.
+The command passes the column with `--audio`, which Embedding Atlas ignores when the projection is precomputed, so the map is not labeled with file names.
+
+Audio is embedded only through Sentence Transformers, whose models list `audio` in `modality_config`; the Transformers adapters handle text and images only.
+Each clip is decoded at the sampling rate of the model's feature extractor and passed as `{"array", "sampling_rate"}` without a text prompt.
+Sentence Transformers otherwise cuts audio at 30 seconds, so `processing_kwargs` raises `max_length` to the longest clip in the batch, and clips are capped at 300 seconds, which fits EmbeddingGemma 2's 8,192-token context.
+Audio is encoded four clips at a time.
 
 ### Sampling and Memory Usage
 

@@ -336,6 +336,42 @@ relation は、DuckDB で表形式のデータ処理を表すオブジェクト�
 生成したレポートは `./cache/eda` に保存します。
 キャッシュ容量が上限を超えた場合は、共通の容量管理処理によって古いファイルから削除します。
 
+## 音声の再生と文字起こし
+
+`server/audio_values.py` は、WAV、FLAC、MP3、OGG、AAC、M4A、AIFF の音声を、ファイルの先頭のシグネチャ、パスの拡張子、`data:audio/` 形式の URL から判定します。
+Hugging Face の `Audio` のような `{bytes, path}` 形式の構造体では、シグネチャで判定できないバイト列の形式を `path` の拡張子から決めます。
+
+プレビューのページには音声のバイト列を含めません。
+`serialize_value()` は、バイト列を目印に置き換えます。目印は中身を持たない data URL で、メディアタイプに `preview=1`、バイト数、WAV と FLAC ではヘッダーから読んだ長さを持ちます（例：`data:audio/wav;preview=1;size=48044;duration=1.500;base64,`）。
+生の行（Raw）では、音声のバイト列を再生できる data URL で返します。
+
+`POST /api/raw_media` は、行、列、ポインターで指定した音声を返します。
+ポインターは、列の値から音声までの辞書のキーとリストの添字を並べたものです。
+埋め込まれたバイト列は、そのメディアタイプで返します。
+パスで参照された音声は、まずデータファイルと同じディレクトリから、次に `FILE_SERVE_ROOTS` の下から探し、その範囲内にあるファイルだけを返します。
+`/api/raw` は、画像に加えて音声のファイルも返します。
+
+ブラウザーでは、`static/app/audio.js` が表のセルに小さな再生ボタンを、展開した欄にブラウザー標準のプレーヤーを表示します。
+埋め込まれた音声は `/api/raw_media` から取得してオブジェクト URL にし、最大 24 個まで保持します。
+表は `innerHTML` で作り直すため、`refreshAudio()` が既存のプレーヤーを同じタスクの中で新しい要素へ移し、再生を続けます。
+音声のキーは、ファイル、行 ID（SQL の結果ではオフセットとクエリのハッシュ）、列、ポインターを組み合わせたもので、別のクエリの行を指すことはありません。
+
+`server/audio_decode.py` は、埋め込まれた音声、ローカルのファイル、HTTP(S) の音声を読み込み、PyAV でモノラルの float32 の波形（既定は 16 kHz）へデコードします。
+PyAV は FFmpeg を同梱しているため、`ffmpeg` のコマンドは不要です。
+
+実行時の TOML の `[transcription]` は、`server/transcription_config.py` で検証します。
+モデルには、ワークスペースからの相対パス、絶対パス、Hugging Face のモデル ID を指定できます。`/api/transcription_models` は ID、表示名、利用できるかどうかを返し、パスは返しません。
+`server/transcription_service.py` は、モデルを最初に使うときに読み込みます。
+`qwen3_asr` のモデルは `apply_transcription_request()` と `generate()` で、それ以外のモデルは Transformers の `automatic-speech-recognition` パイプラインで処理します。Whisper と CTC のモデルは、パイプラインが自ら分割して処理します。
+読み込むモデルはロックのもとで一度に 1 つだけとし、最後に使ってから `idle_unload_seconds` 経つと解放します。
+`chunk_seconds` より長い音声は、区切りの付近でもっとも静かな 100 ms の位置で分割し、生成するトークン数の上限は音声 1 秒あたり 15 とします。
+分割した部分の文字起こしは空白でつなぎますが、中国語と日本語の文字どうしの間には空白を入れません。
+
+`POST /api/jobs/transcription` は、項目ごとに音声を読み込み、デコードし、順に文字起こしします。
+進捗は項目ごとに報告し、中止の要求は項目と分割した部分の間で確認します。読み込めない項目はエラーを返し、ジョブ全体は失敗させません。
+結果は `./cache/transcripts` に、音声の内容とモデルの設定をキーとして最大 64 MiB まで保存します。
+`static/app/transcription.js` は、列で表示中の音声を `max_batch_items` 件以下のまとまりで送り、処理中の項目の位置にジョブの進捗メッセージを表示します。
+
 ## Embedding Atlas
 
 `src/local_data_studio/server/atlas.py` は、既存コードとの互換性を保つための窓口として残します。
@@ -360,6 +396,19 @@ relation は、DuckDB で表形式のデータ処理を表すオブジェクト�
 `server/embedder_capabilities.py` は、モデルの重みを読み込まず、ローカルモデルのメタデータだけを検査します。
 検査するデータ量には上限を設けます。
 また、モデルの対応状況に関係する設定情報から、キャッシュを再利用できるか判断するための識別値を作成します。
+
+### 音声の列
+
+`infer_atlas_modality()` は、音声のバイト列、音声の構造体、音声のパスを持つ列に `audio` を返します。
+`prepare_audio_projection_input()` は、読み込める音声を一時ファイルへ書き出し、読み込めない行やヘッダーを確認できない行を除きます。
+表示用の DataFrame では、音声の列に音声のバイト列ではなくファイル名と長さのラベルを入れます。
+Embedding Atlas が再生できる形式は一部に限られ、音声のバイト列を含めるとデータセットが大きくなるためです。
+コマンドには列を `--audio` で渡します。座標を事前に計算している場合、Embedding Atlas はこの指定を使わないため、地図上にファイル名のラベルは付きません。
+
+音声は、`modality_config` に `audio` を持つ Sentence Transformers のモデルでだけ埋め込みます。Transformers のアダプターはテキストと画像だけを扱います。
+各音声はモデルの特徴量抽出器のサンプリングレートでデコードし、`{"array", "sampling_rate"}` の形で、テキストのプロンプトを付けずに渡します。
+Sentence Transformers は何も指定しないと音声を 30 秒で切るため、`processing_kwargs` で `max_length` をバッチ内でもっとも長い音声に合わせます。音声の長さは、EmbeddingGemma 2 の 8,192 トークンの文脈に収まる 300 秒までとします。
+音声は 4 件ずつ埋め込みます。
 
 ### サンプリングとメモリ使用量
 

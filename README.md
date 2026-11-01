@@ -29,10 +29,12 @@ Click the Local Data Studio logo in the top bar to open this GitHub repository i
 * Run read-only searches and aggregations with DuckDB SQL
 * Apply SQL timeouts, memory limits, and warnings when a query may read a large amount of data
 * Generate EDA reports for an entire dataset or SQL results
-* Visualize text columns, image columns, or SQL results with Embedding Atlas
+* Visualize text, image, or audio columns, or SQL results, with Embedding Atlas
 * Inspect complete row contents with the **Row Inspector**
 * Display images from URLs, local file paths, and values stored in `{bytes, path}` format
 * Open enlarged image previews and switch between multiple images in the same row
+* Play audio stored as bytes, Hugging Face `Audio` values, data URLs, or file paths
+* Transcribe audio with a configured speech-recognition model such as Qwen3-ASR or Whisper
 * Manually translate visible cells or columns with configured LiteLLM-compatible models
 * Upload files by dragging and dropping them into the application
 * Hide rows while the application page is open and, when needed, delete them from the source file
@@ -149,7 +151,7 @@ The default value is `minimal`.
 
 ### 5. Visualize Embeddings
 
-An embedding represents the features of text or an image as a sequence of numbers called a vector.
+An embedding represents the features of text, an image, or audio as a sequence of numbers called a vector.
 Embeddings usually contain many numbers, which makes them difficult to compare directly on a screen.
 Local Data Studio uses methods such as UMAP, t-SNE, and PCA to convert embeddings into two-dimensional coordinates and displays them with Embedding Atlas.
 This conversion is called **dimensionality reduction**.
@@ -157,7 +159,7 @@ Some configuration keys and internal code use the term `projection`, but this RE
 
 To use this feature, you must provide a local encoder model in Hugging Face format.
 Hugging Face format means that the model's configuration files and related data are stored in the expected directory structure.
-An encoder model converts text or images into embeddings.
+An encoder model converts text, images, or audio into embeddings.
 
 Place the model under `models/embedder`, or under the directory specified by `--models-dir` or `EMBEDDER_MODELS_DIR`.
 
@@ -174,7 +176,7 @@ A directory appears in the **Model** selector when it contains model-identifying
 
 Under **Visualize Embedding**, select the following:
 
-1. A text or image column
+1. A text, image, or audio column
 2. The model to use
 3. The library that loads the model and computes embeddings, referred to as the backend
 4. The dimensionality-reduction method used to convert embeddings into two dimensions
@@ -209,7 +211,7 @@ If the field is left empty, the default prompt stored with the model is used.
 <details>
 <summary><strong>Using EmbeddingGemma 2</strong></summary>
 
-[EmbeddingGemma 2](https://huggingface.co/google/embeddinggemma-2) embeds text and images into the same 768-dimensional space.
+[EmbeddingGemma 2](https://huggingface.co/google/embeddinggemma-2) embeds text, images, and audio into the same 768-dimensional space.
 The model is not gated, so you can download it without a Hugging Face token:
 
 ```bash
@@ -217,9 +219,12 @@ hf download google/embeddinggemma-2 --local-dir models/embedder/google/embedding
 ```
 
 Select `google/embeddinggemma-2` as the **Model**.
-Sentence Transformers embeds both text and image columns, and Transformers embeds text columns.
+Sentence Transformers embeds text, image, and audio columns, and Transformers embeds text columns.
 The model expects a task prefix on text, so for visualization enter `task: clustering | query: ` in **Prompt**.
 Leave **Prompt** empty for image columns, because images are embedded without a prefix.
+Audio is also embedded without a prefix, so a prompt is ignored for audio columns.
+Audio is resampled to 16 kHz, and clips longer than 300 seconds are embedded from their start.
+In Atlas, the audio column shows each clip's file name and duration.
 
 </details>
 
@@ -245,7 +250,56 @@ If that fails, it uses `path` as a fallback.
 
 <img src="images/local_data_studio_09.png" alt="Row Inspector" width="45%"> <img src="images/local_data_studio_10.png" alt="Enlarged image preview" width="45%">
 
-### 7. Translate Visible Values
+### 7. Play and Transcribe Audio
+
+Local Data Studio recognizes WAV, FLAC, MP3, OGG (including Opus), AAC, M4A, and AIFF audio stored in these forms:
+
+* Bytes in a binary column
+* Dictionaries (objects) in `{ "bytes": ..., "path": ... }` format, such as Hugging Face `Audio` values
+* `data:audio/...` URLs
+* Audio URLs and relative or absolute file paths
+
+In the table, an audio value appears as a play button with its duration, format, and size.
+WAV and FLAC show their duration before playback; other formats show it once they have been played.
+An expanded field shows a full player with a seek bar and volume control.
+Only one clip plays at a time, and playback continues while the table updates.
+
+Preview pages do not carry audio bytes.
+Audio is loaded only when you play it or expand its row, so pages of large clips stay light.
+Relative paths are resolved next to the dataset file first and then below the data directory and `file_serve_roots`; files outside those directories are not served.
+The browser loads audio URLs directly.
+
+To transcribe audio, add a speech-recognition model to the `[transcription]` section of `local_data_studio.toml` and select it in **Transcriber** in the toolbar.
+For example, download Qwen3-ASR 1.7B and configure it as follows:
+
+```bash
+hf download Qwen/Qwen3-ASR-1.7B-hf --local-dir models/asr/Qwen/Qwen3-ASR-1.7B-hf
+```
+
+```toml
+[transcription]
+default_model = "qwen3-asr-1.7b"
+
+[[transcription.models]]
+id = "qwen3-asr-1.7b"
+label = "Qwen3-ASR 1.7B"
+model = "models/asr/Qwen/Qwen3-ASR-1.7B-hf"
+```
+
+Use the `-hf` repository, because Transformers cannot load the original `Qwen/Qwen3-ASR-1.7B` checkpoint.
+`model` can also be a Hugging Face model ID such as `openai/whisper-large-v3-turbo`; any model that the Transformers speech-recognition pipeline loads works.
+Add `language = "ja"` to a model to fix the language instead of detecting it, or `device = "cpu"` or `device = "cuda:1"` to choose where it runs.
+
+The transcription icon in a column header transcribes the audio that is visible in that column; select it again to cancel.
+The **Transcribe** button in an expanded field transcribes that field's audio.
+Each transcript appears below its audio with the detected language and a copy icon.
+
+The model loads on first use, which can take a minute, and is released after `idle_unload_seconds` (600 seconds by default).
+Qwen3-ASR 1.7B uses about 4 GB of GPU memory.
+Audio longer than `chunk_seconds` is split at quiet points, and clips longer than `max_audio_seconds` are rejected.
+Transcripts are cached under the cache directory by audio content and model, so the same clip is not transcribed twice.
+
+### 8. Translate Visible Values
 
 To use translation, set `translation = true` in an LLM model profile.
 Then select a model and target language from the toolbar at the top of the page.
@@ -322,6 +376,7 @@ The main sections are as follows:
 * `[server]`: Server settings
 * `[settings]`: EDA, Embedding Atlas, source-file deletion, and related settings
 * `[llm]`: LLM model profiles used for SQL generation and manual translation
+* `[transcription]`: Speech-recognition models and limits for audio transcription
 * `[translation]`: Initial target language and translation request limits
 
 For example, configure the data location and the maximum number of rows loaded for EDA as follows:
