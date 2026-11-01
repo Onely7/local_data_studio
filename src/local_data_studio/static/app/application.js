@@ -1,3 +1,4 @@
+import { configureAudio, refreshAudio, resetAudio, toggleAudioChip } from "./audio.js";
 import { elements } from "./dom.js";
 import {
   renderAtlasBackendOptions,
@@ -248,6 +249,11 @@ function applyRowIndexStyle(cell) {
 }
 
 function renderTable() {
+  renderTableContent();
+  refreshAudio(elements.tableBody);
+}
+
+function renderTableContent() {
   elements.tableHead.innerHTML = "";
   elements.tableBody.innerHTML = "";
 
@@ -420,7 +426,7 @@ function renderTable() {
           );
           const copyButton = `<button class="expanded-copy-btn icon-action-btn" data-copy="${encodeCopyValue(value)}" type="button" title="Copy value" aria-label="Copy value"><img src="icons/content-copy.svg" alt="" aria-hidden="true" /></button>`;
           return `
-            <div class="expanded-field">
+            <div class="expanded-field" data-col-index="${idx}">
               <div class="expanded-field-header">
                 <div class="expanded-label">${escapeHtml(col)}</div>
                 <div class="expanded-field-actions">${copyButton}${translateButton}${jsonButton}</div>
@@ -1172,6 +1178,7 @@ async function selectFile(fileName) {
   ["countJobId", "statsJobId", "searchJobId", "queryJobId", "edaJobId", "atlasJobId"].forEach(cancelTrackedJob);
   state.file = fileName;
   state.loadingFile = true;
+  resetAudio();
   state.columns = [];
   state.rows = [];
   state.rowIds = [];
@@ -1884,6 +1891,12 @@ function attachEvents() {
   });
 
   elements.tableBody.addEventListener("click", (event) => {
+    const audioButton = event.target.closest(".audio-play-btn");
+    if (audioButton) {
+      event.stopPropagation();
+      toggleAudioChip(audioButton);
+      return;
+    }
     const copyBtn = event.target.closest(".expanded-copy-btn");
     if (copyBtn) {
       event.stopPropagation();
@@ -2029,6 +2042,11 @@ function attachEvents() {
 }
 
 state.limit = Number(elements.pageSize?.value) || state.limit;
+configureAudio((rowIndex, columnIndex) => ({
+  file: state.file,
+  column: state.columns[columnIndex],
+  request: rawRowRequest(rowIndex),
+}));
 attachEvents();
 enhanceSelectControls();
 updateRowActions();

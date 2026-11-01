@@ -1,3 +1,4 @@
+import { extractAudioItems, formatAudioCell, formatExpandedAudio } from "./audio.js";
 import { escapeHtml, highlightJson, shorten } from "./formatting.js";
 import { MAX_IMAGE_CANDIDATES } from "./state.js";
 
@@ -180,6 +181,10 @@ export function formatCell(value) {
   if (imageCandidates.length) {
     return renderImageGrid(imageCandidates, { className: "image-grid", max: 4 });
   }
+  const audioItems = extractAudioItems(value);
+  if (audioItems.length) {
+    return formatAudioCell(audioItems);
+  }
   if (typeof value === "string") {
     return `<span class="cell">${escapeHtml(shorten(value))}</span>`;
   }
@@ -210,6 +215,10 @@ export function formatExpandedCell(value) {
       className: "image-grid expanded-image-grid",
       max: 8,
     });
+  }
+  const audioItems = extractAudioItems(value);
+  if (audioItems.length) {
+    return formatExpandedAudio(audioItems);
   }
   if (typeof value === "string" || typeof value === "number" || typeof value === "boolean") {
     return `<pre class="expanded-text">${escapeHtml(value)}</pre>`;

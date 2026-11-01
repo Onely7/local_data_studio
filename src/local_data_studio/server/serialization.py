@@ -12,6 +12,7 @@ from io import BytesIO
 from itertools import islice
 from typing import Any, Sequence
 
+from .audio_values import audio_bytes_from_value, audio_data_url, audio_preview_marker, is_audio_bytes_string, is_audio_preview_marker, is_audio_reference
 from .config import MAX_CELL_CHARS, MAX_SEQ_ITEMS
 
 IMAGE_REFERENCE_PATTERN = re.compile(r"\.(png|jpg|jpeg|gif|webp|svg)(\?.*)?$", re.IGNORECASE)
@@ -107,8 +108,25 @@ def _is_image_bytes_string(value: str) -> bool:
     return compact.startswith(IMAGE_BASE64_PREFIXES)
 
 
-def serialize_value(value: Any, *, key: str | None = None, sibling_image_path: bool = False) -> Any:
-    """Convert values into JSON-friendly primitives with size limits."""
+def _audio_from_string(value: str, *, key: str | None, sibling_image_path: bool, sibling_audio_path: str | None) -> tuple[bytes, str] | None:
+    if value.startswith("data:audio/"):
+        return None if is_audio_preview_marker(value) else audio_bytes_from_value(value)
+    if key != "bytes" or sibling_image_path or not (sibling_audio_path or is_audio_bytes_string(value)):
+        return None
+    return audio_bytes_from_value(value, path_hint=sibling_audio_path)
+
+
+def _audio_path(value: dict[Any, Any]) -> str | None:
+    path = value.get("path")
+    return path if isinstance(path, str) and is_audio_reference(path) else None
+
+
+def serialize_value(value: Any, *, key: str | None = None, sibling_image_path: bool = False, sibling_audio_path: str | None = None) -> Any:
+    """Convert values into JSON-friendly primitives with size limits.
+
+    Image bytes become thumbnails, and audio bytes become payload-free preview
+    markers that the browser resolves through ``/api/raw_media``.
+    """
     result: Any = value
 
     if value is None:
@@ -122,9 +140,12 @@ def serialize_value(value: Any, *, key: str | None = None, sibling_image_path: b
 
     elif isinstance(value, bytes):
         image_bytes = key == "bytes" and sibling_image_path
-        image_url = image_preview_data_url(value) if image_bytes or _is_image_bytes(value) else None
-        hex_value = value.hex() if image_url is None else ""
-        if image_url is not None:
+        audio = None if image_bytes else audio_bytes_from_value(value, path_hint=sibling_audio_path if key == "bytes" else None)
+        image_url = image_preview_data_url(value) if audio is None and (image_bytes or _is_image_bytes(value)) else None
+        hex_value = value.hex() if image_url is None and audio is None else ""
+        if audio is not None:
+            result = audio_preview_marker(*audio)
+        elif image_url is not None:
             result = image_url
         elif image_bytes:
             result = hex_value
@@ -134,7 +155,10 @@ def serialize_value(value: Any, *, key: str | None = None, sibling_image_path: b
             result = hex_value
 
     elif isinstance(value, str):
-        if key == "bytes" and (_is_image_bytes_string(value) or sibling_image_path):
+        audio = _audio_from_string(value, key=key, sibling_image_path=sibling_image_path, sibling_audio_path=sibling_audio_path)
+        if audio is not None:
+            result = audio_preview_marker(*audio)
+        elif key == "bytes" and (_is_image_bytes_string(value) or sibling_image_path):
             decoded = _decode_image_string(value)
             result = (image_preview_data_url(decoded) if decoded else None) or value
         elif len(value) > MAX_CELL_CHARS and not _is_image_reference(value):
@@ -150,8 +174,10 @@ def serialize_value(value: Any, *, key: str | None = None, sibling_image_path: b
     elif isinstance(value, dict):
         image_path = value.get("path")
         has_image_path = isinstance(image_path, str) and _is_image_reference(image_path)
+        audio_path = _audio_path(value)
         result = {
-            str(item_key): serialize_value(val, key=str(item_key), sibling_image_path=has_image_path) for item_key, val in islice(value.items(), MAX_SEQ_ITEMS)
+            str(item_key): serialize_value(val, key=str(item_key), sibling_image_path=has_image_path, sibling_audio_path=audio_path)
+            for item_key, val in islice(value.items(), MAX_SEQ_ITEMS)
         }
         if len(value) > MAX_SEQ_ITEMS:
             result["__truncated__"] = f"{len(value) - MAX_SEQ_ITEMS} more fields truncated"
@@ -159,13 +185,13 @@ def serialize_value(value: Any, *, key: str | None = None, sibling_image_path: b
     return result
 
 
-def serialize_raw_value(value: Any) -> Any:
+def serialize_raw_value(value: Any, *, key: str | None = None, sibling_audio_path: str | None = None) -> Any:
     """Convert one explicitly requested row to JSON-friendly values without limits.
 
     Preview responses use size limits to remain responsive. This function is used
     only after a user explicitly requests the full selected row, so it must not
-    apply the preview's character or collection limits. Browser-native image
-    bytes become full-resolution data URLs; other bytes become hex strings.
+    apply the preview's character or collection limits. Browser-native image and
+    audio bytes become full data URLs; other bytes become hex strings.
     """
     result: Any = value
 
@@ -178,11 +204,13 @@ def serialize_raw_value(value: Any) -> Any:
     elif isinstance(value, (bytes, bytearray)):
         raw = bytes(value)
         mime = _image_mime(raw)
-        result = _data_url(mime, raw) if mime else raw.hex()
+        audio = None if mime else audio_bytes_from_value(raw, path_hint=sibling_audio_path if key == "bytes" else None)
+        result = _data_url(mime, raw) if mime else audio_data_url(*audio) if audio else raw.hex()
     elif isinstance(value, (list, tuple)):
         result = [serialize_raw_value(item) for item in value]
     elif isinstance(value, dict):
-        result = {str(item_key): serialize_raw_value(item_value) for item_key, item_value in value.items()}
+        audio_path = _audio_path(value)
+        result = {str(item_key): serialize_raw_value(item_value, key=str(item_key), sibling_audio_path=audio_path) for item_key, item_value in value.items()}
 
     return result
 

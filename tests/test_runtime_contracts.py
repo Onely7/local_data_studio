@@ -145,8 +145,8 @@ class RuntimeContractTests(TestCase):
         collector.feed(response.text)
 
         self.assertEqual(EXPECTED_STATIC_IDS, tuple(collector.ids))
-        self.assertEqual(["styles.css?v=20261101-large-datasets"], collector.stylesheets)
-        self.assertEqual(["app.js?v=20261101-large-datasets"], collector.scripts)
+        self.assertEqual(["styles.css?v=20261101-audio"], collector.stylesheets)
+        self.assertEqual(["app.js?v=20261101-audio"], collector.scripts)
 
     def test_static_entrypoint_loads_application_as_an_es_module(self) -> None:
         """Keep the stable app URL while implementation modules remain package assets."""
@@ -161,9 +161,10 @@ class RuntimeContractTests(TestCase):
             copy_icon = client.get("/icons/content-copy.svg")
             delete_icon = client.get("/icons/delete.svg")
             send_icon = client.get("/icons/send.svg")
+            audio_icons = [client.get(f"/icons/{name}.svg") for name in ("play", "pause")]
 
-        self.assertIn('<link rel="stylesheet" href="styles.css?v=20261101-large-datasets" />', page)
-        self.assertIn('<script type="module" src="app.js?v=20261101-large-datasets"></script>', page)
+        self.assertIn('<link rel="stylesheet" href="styles.css?v=20261101-audio" />', page)
+        self.assertIn('<script type="module" src="app.js?v=20261101-audio"></script>', page)
         self.assertEqual('import "./app/application.js";\n', entrypoint.text)
         self.assertEqual(200, application.status_code)
         self.assertEqual(200, select_controls.status_code)
@@ -181,7 +182,7 @@ class RuntimeContractTests(TestCase):
         self.assertIn(".main {\n    order: 2;", stylesheet.text)
         self.assertIn(".inspector {\n    order: 3;", stylesheet.text)
         self.assertEqual("image/svg+xml", translation_icon.headers["content-type"])
-        for response in (code_icon, copy_icon, delete_icon, send_icon):
+        for response in (code_icon, copy_icon, delete_icon, send_icon, *audio_icons):
             self.assertEqual(200, response.status_code)
             self.assertEqual("image/svg+xml", response.headers["content-type"])
 
@@ -233,6 +234,37 @@ const values = translation.collectTranslatableStrings({{
 if (JSON.stringify(values) !== JSON.stringify(["Hello world", "cat"])) throw new Error(`unexpected translation values: ${{JSON.stringify(values)}}`);
 if (translation.hasTranslatableText([1, "2", false])) throw new Error("numeric-only list must not be translatable");
 if (!translation.hasTranslatableText({{ status: "error" }})) throw new Error("ordinary short words must remain translatable");
+"""
+            subprocess.run([node, "--experimental-default-type=module", "--input-type=module", "--eval", script], check=True)
+
+    def test_audio_client_detects_markers_paths_and_structs(self) -> None:
+        """Turn preview markers, structs, list items, and URLs into playable audio items."""
+        node = shutil.which("node")
+        if node is None:
+            self.skipTest("Node.js is unavailable")
+        source_app = Path(__file__).parents[1] / "src" / "local_data_studio" / "static" / "app"
+        with tempfile.TemporaryDirectory() as temporary_directory:
+            static_app = Path(temporary_directory) / "app"
+            shutil.copytree(source_app, static_app)
+            script = f"""
+const audio = await import({str((static_app / "audio.js").as_uri())!r});
+const check = (condition, message) => {{ if (!condition) throw new Error(message); }};
+const marker = "data:audio/wav;preview=1;size=48000;duration=2.500;base64,";
+const [embedded] = audio.extractAudioItems(marker);
+check(embedded.kind === "embedded" && embedded.mime === "audio/wav", "marker kind");
+check(embedded.size === 48000 && embedded.duration === 2.5 && embedded.pointer.length === 0, "marker metadata");
+const [struct] = audio.extractAudioItems({{ bytes: marker, path: "clips/a b.flac" }});
+check(struct.name === "a b.flac" && struct.kind === "embedded", "struct name");
+const listed = audio.extractAudioItems(["x.mp3", null, {{ bytes: null, path: "https://example.com/b.ogg?x=1" }}]);
+check(JSON.stringify(listed.map((item) => [item.kind, item.pointer])) === JSON.stringify([["embedded", [0]], ["url", [2]]]), "list pointers");
+const [inline] = audio.extractAudioItems("data:audio/mpeg;base64,SUQzBAAAAAAA");
+check(inline.kind === "url" && inline.src.startsWith("data:audio/mpeg;base64,"), "inline data URL");
+check(audio.extractAudioItems("/data/clips/a.wav")[0].kind === "url", "served path");
+check(audio.extractAudioItems("hello").length === 0 && audio.extractAudioItems({{ bytes: "00", path: "a.png" }}).length === 0, "non-audio");
+check(audio.isAudioPreviewMarker(marker) && !audio.isAudioPreviewMarker("data:audio/wav;base64,UklGRg=="), "marker detection");
+check(audio.formatDuration(65) === "1:05" && audio.formatDuration(3661) === "1:01:01" && audio.formatDuration(NaN) === "--:--", "durations");
+const markup = audio.formatAudioCell([struct, ...listed, embedded, embedded]);
+check(markup.includes('data-audio-kind="embedded"') && markup.includes("a b.flac") && markup.includes("+1"), "cell markup");
 """
             subprocess.run([node, "--experimental-default-type=module", "--input-type=module", "--eval", script], check=True)
 
