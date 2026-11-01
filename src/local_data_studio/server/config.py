@@ -235,6 +235,9 @@ MAX_OFFSET_FALLBACK: int = 10_000
 # Line datasets may skip this many rows past the nearest sparse checkpoint in
 # one request; a complete row index keeps every jump within INDEX_STRIDE rows.
 MAX_OFFSET_SCAN_ROWS: int = 1_000_000
+# A skip that stays within this many bytes of the end is always allowed, so
+# small files never ask for an index.
+MAX_OFFSET_SCAN_BYTES: int = 256 * 1024 * 1024
 LINE_SCAN_BLOCK_BYTES: int = 16 * 1024 * 1024
 PREVIEW_PAGE_MAX_BYTES: int = 32 * 1024 * 1024
 MAX_JSON_PREVIEW_BYTES: int = 16 * 1024 * 1024
