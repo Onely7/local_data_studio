@@ -15,7 +15,7 @@ from pathlib import Path
 import numpy as np
 from fastapi import HTTPException
 
-from ..config import LINE_SCAN_BLOCK_BYTES, MAX_OFFSET_SCAN_ROWS
+from ..config import LINE_SCAN_BLOCK_BYTES, MAX_OFFSET_SCAN_BYTES, MAX_OFFSET_SCAN_ROWS
 from ..line_index import LineOffsetIndex
 from .contracts import ScanControl
 
@@ -245,7 +245,8 @@ def _line_cursor_for_offset(
 
     Raises:
         HTTPException: The target is more than ``MAX_OFFSET_SCAN_ROWS`` rows
-            past the nearest checkpoint.
+            past the nearest checkpoint and more than ``MAX_OFFSET_SCAN_BYTES``
+            remain to be read.
     """
     if offset <= 0:
         return first_data_offset, 1
@@ -256,7 +257,7 @@ def _line_cursor_for_offset(
     if start_offset < first_data_offset:
         start_offset, next_row_number, visible_rows_skipped = first_data_offset, 1, 0
     remaining = offset - visible_rows_skipped
-    if remaining > MAX_OFFSET_SCAN_ROWS:
+    if remaining > MAX_OFFSET_SCAN_ROWS and path.stat().st_size - start_offset > MAX_OFFSET_SCAN_BYTES:
         raise HTTPException(
             status_code=400,
             detail=f"row {offset + 1:,} is too far from the nearest row index checkpoint; run Count Rows once to index this dataset",
@@ -288,7 +289,7 @@ def _raw_line_value(path: Path, row_id: int, *, first_data_offset: int = 0) -> b
     indexed = index.nearest_before(row_id)
     byte_offset = max(first_data_offset, indexed.byte_offset) if indexed else first_data_offset
     row_number = indexed.line_number if indexed else 1
-    if row_id - row_number > MAX_OFFSET_SCAN_ROWS:
+    if row_id - row_number > MAX_OFFSET_SCAN_ROWS and path.stat().st_size - byte_offset > MAX_OFFSET_SCAN_BYTES:
         raise HTTPException(status_code=400, detail="row is too far from the nearest row index checkpoint; run Count Rows once to index this dataset")
     for block in iter_line_blocks(path, start_offset=byte_offset, first_row=row_number):
         index.record_checkpoints(block.checkpoints(index.stride))

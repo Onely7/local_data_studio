@@ -366,7 +366,7 @@ class ReaderPreviewTests(TestCase):
             path = Path(tmpdir) / "data.jsonl"
             path.write_text("".join(f"{index}\n" for index in range(1, 30_001)), encoding="utf-8")
 
-            with patch.object(line_cursor, "MAX_OFFSET_SCAN_ROWS", 5_000):
+            with patch.object(line_cursor, "MAX_OFFSET_SCAN_ROWS", 5_000), patch.object(line_cursor, "MAX_OFFSET_SCAN_BYTES", 1_000):
                 with self.assertRaises(HTTPException) as raised:
                     fetch_preview_page("data.jsonl", path, limit=1, offset=24_000)
                 line_reader.build_line_index_with_progress(path, _NoCancelControl())
@@ -377,6 +377,20 @@ class ReaderPreviewTests(TestCase):
             self.assertEqual([[24_001]], far["rows"])
             self.assertEqual([24_001], far["row_ids"])
             self.assertEqual((["value"], [24_500]), (columns, raw))
+
+    def test_small_line_file_jump_past_the_end_returns_an_empty_page(self) -> None:
+        """Scan a small file to its end instead of asking for a row index."""
+        with TemporaryDirectory() as tmpdir:
+            path = Path(tmpdir) / "data.jsonl"
+            path.write_text('{"id": 1}\n{"id": 2}\n', encoding="utf-8")
+
+            page = fetch_preview_page("data.jsonl", path, limit=5, offset=999_999_998)
+
+            self.assertEqual([], page["rows"])
+            self.assertFalse(page["has_next"])
+            with self.assertRaises(HTTPException) as raised:
+                fetch_raw_row(path, 999_999_999)
+            self.assertEqual(404, raised.exception.status_code)
 
     def test_large_offset_without_page_token_is_rejected_for_duckdb_fallback(self) -> None:
         """Keep the plain-offset guard for formats that only have a DuckDB OFFSET path."""
