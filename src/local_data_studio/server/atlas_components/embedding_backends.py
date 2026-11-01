@@ -17,6 +17,10 @@ from ..embedder_capabilities import BackendName, analyze_model_capabilities, tra
 from .contracts import AtlasModality, AtlasOptions
 from .prompts import PromptedEmbeddingValue
 
+# Sentence Transformers leaves max_seq_length unbounded for checkpoints whose
+# tokenizer reports no limit; 8,192 tokens is EmbeddingGemma 2's context.
+SENTENCE_TRANSFORMER_MAX_SEQ_LENGTH = 8_192
+
 
 @dataclass(frozen=True, slots=True)
 class AtlasEmbeddingBackend:
@@ -51,17 +55,31 @@ def effective_embedder_for_modality(modality: AtlasModality, model_path: Path, o
 
 
 def load_sentence_transformer_model(model_path: Path, options: AtlasOptions) -> Any:
-    """Load a local SentenceTransformer without network fallback."""
-    return SentenceTransformer(
+    """Load a local SentenceTransformer without network fallback.
+
+    Without CUDA, weights load as float32: bfloat16 checkpoints such as
+    EmbeddingGemma 2 are slow on CPUs, and their model cards rule out
+    float16. A missing or unbounded sequence limit is capped so one long value
+    cannot allocate an unbounded attention matrix.
+    """
+    import torch  # noqa: PLC0415
+
+    model = SentenceTransformer(
         str(model_path),
         local_files_only=True,
         trust_remote_code=options.trust_remote_code,
+        model_kwargs=None if torch.cuda.is_available() else {"dtype": torch.float32},
     )
+    if not model.max_seq_length or model.max_seq_length > SENTENCE_TRANSFORMER_MAX_SEQ_LENGTH:
+        model.max_seq_length = SENTENCE_TRANSFORMER_MAX_SEQ_LENGTH
+    return model
 
 
-def _sentence_transformer_input(value: Any, modality: AtlasModality) -> Any:
+def _sentence_transformer_input(value: Any, modality: AtlasModality, *, multimodal: bool) -> Any:
     if modality != "image":
-        return value
+        # Multimodal models treat strings that look like media paths or URLs
+        # as media, so text rows are marked as text explicitly.
+        return {"text": value} if multimodal and isinstance(value, str) else value
     if isinstance(value, dict) and isinstance(value.get("bytes"), bytes | bytearray):
         return {"image": Image.open(BytesIO(bytes(value["bytes"]))).convert("RGB")}
     if isinstance(value, dict) and value.get("image") is not None:
@@ -72,6 +90,8 @@ def _sentence_transformer_input(value: Any, modality: AtlasModality) -> Any:
 def create_sentence_transformer_embedder(modality: AtlasModality, model_path: Path, options: AtlasOptions) -> Any:
     """Create a reusable SentenceTransformer adapter with per-row prompt support."""
     sentence_model = load_sentence_transformer_model(model_path, options)
+    capability = analyze_model_capabilities(model_path, allow_remote_code=options.trust_remote_code).sentence_transformers
+    multimodal = any(modality != "text" for modality in capability.modalities)
 
     async def embed(batch: list[Any], *, model: str | None, embedder_args: dict) -> np.ndarray:  # noqa: ARG001
         """Encode prompt groups and restore their original row ordering."""
@@ -81,7 +101,7 @@ def create_sentence_transformer_embedder(modality: AtlasModality, model_path: Pa
                 value, prompt = item.value, item.prompt
             else:
                 value, prompt = item, options.prompt
-            grouped[prompt].append((index, _sentence_transformer_input(value, modality)))
+            grouped[prompt].append((index, _sentence_transformer_input(value, modality, multimodal=multimodal)))
         ordered: list[np.ndarray | None] = [None] * len(batch)
         for prompt, entries in grouped.items():
             values = [value for _, value in entries]
@@ -204,7 +224,8 @@ def create_transformers_pooling_embedder(
             else:
                 inputs = processor(images=images, return_tensors="pt")
         else:
-            inputs = processor([str(value) for value in values], padding=True, truncation=True, return_tensors="pt")
+            # Multimodal processors take images as their first positional argument.
+            inputs = processor(text=[str(value) for value in values], padding=True, truncation=True, return_tensors="pt")
         inputs = {key: value.to(device) for key, value in inputs.items()}
         with torch.no_grad():
             outputs = transformer_model(**inputs)

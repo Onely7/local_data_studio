@@ -20,10 +20,13 @@ from PIL import Image
 from local_data_studio.server.atlas_components.contracts import AtlasOptions
 from local_data_studio.server.atlas_components.dataset import atlas_dataset_cache_path, prepare_atlas_dataset
 from local_data_studio.server.atlas_components.embedding_backends import (
+    SENTENCE_TRANSFORMER_MAX_SEQ_LENGTH,
     create_sentence_transformer_embedder,
     create_transformers_image_pooler_embedder,
     create_transformers_pooling_embedder,
+    load_sentence_transformer_model,
 )
+from local_data_studio.server.atlas_components.embedding_session import AtlasEmbeddingSession
 from local_data_studio.server.atlas_components.images import prepare_projection_input
 from local_data_studio.server.atlas_components.prompts import (
     PromptedEmbeddingValue,
@@ -209,9 +212,107 @@ class SentenceTransformerAdapterTests(TestCase):
         self.assertNotIn("prompt", calls_by_prompt[None][1])
         self.assertEqual(["first", "second"], calls_by_prompt["query: "][0])
 
+    def test_marks_text_rows_as_text_for_multimodal_models(self) -> None:
+        """Keep URL-like text away from the media encoders of multimodal models."""
+
+        class FakeModel:
+            """Record encoded values."""
+
+            def __init__(self) -> None:
+                self.values: list[object] = []
+
+            def encode(self, values: list[object], **kwargs: object) -> np.ndarray:  # noqa: ARG002
+                """Record values and return one vector per row."""
+                self.values.extend(values)
+                return np.ones((len(values), 2), dtype=np.float32)
+
+        for modalities, expected in ((("text", "image"), [{"text": "https://example.com/cat.jpg"}]), (("text",), ["https://example.com/cat.jpg"])):
+            fake = FakeModel()
+            capabilities = SimpleNamespace(sentence_transformers=SimpleNamespace(modalities=modalities))
+            with (
+                self.subTest(modalities=modalities),
+                patch("local_data_studio.server.atlas_components.embedding_backends.load_sentence_transformer_model", return_value=fake),
+                patch("local_data_studio.server.atlas_components.embedding_backends.analyze_model_capabilities", return_value=capabilities),
+            ):
+                embed = create_sentence_transformer_embedder("text", Path("model"), _options())
+                asyncio.run(embed(["https://example.com/cat.jpg"], model=None, embedder_args={}))
+
+                self.assertEqual(expected, fake.values)
+
+    def test_load_caps_unbounded_sequence_length(self) -> None:
+        """Bound tokenizer-less sequence limits while keeping finite model limits."""
+        for reported, expected in ((10**30, SENTENCE_TRANSFORMER_MAX_SEQ_LENGTH), (None, SENTENCE_TRANSFORMER_MAX_SEQ_LENGTH), (512, 512)):
+            loaded = SimpleNamespace(max_seq_length=reported)
+            with (
+                self.subTest(reported=reported),
+                patch("local_data_studio.server.atlas_components.embedding_backends.SentenceTransformer", return_value=loaded) as constructor,
+            ):
+                model = load_sentence_transformer_model(Path("model"), _options())
+
+                self.assertEqual(expected, model.max_seq_length)
+                self.assertTrue(constructor.call_args.kwargs["local_files_only"])
+
+
+class EmbeddingSessionTests(TestCase):
+    """Verify batching of local encoders."""
+
+    def test_embeds_in_batches_and_surfaces_failures_without_retrying(self) -> None:
+        """Split rows by the configured batch size and fail on the first encoder error."""
+        batches: list[list[str]] = []
+
+        async def encoder(batch: list[str], *, model: str, embedder_args: dict) -> np.ndarray:  # noqa: ARG001
+            batches.append(batch)
+            if batch == ["broken"]:
+                raise ValueError("cannot encode")
+            return np.full((len(batch), 2), len(batches), dtype=np.float32)
+
+        session = AtlasEmbeddingSession("text", Path("model"), _options(), encoder, {})
+        vectors = session.embed([str(index) for index in range(19)])
+
+        self.assertEqual([8, 8, 3], [len(batch) for batch in batches])
+        self.assertEqual((19, 2), vectors.shape)
+        with self.assertRaisesRegex(ValueError, "cannot encode"):
+            session.embed(["broken"])
+        self.assertEqual(4, len(batches))
+
 
 class TransformersAdapterTests(TestCase):
     """Verify statically selected multimodal pooling without repository code."""
+
+    def test_text_rows_are_passed_to_the_processor_as_text(self) -> None:
+        """Name the text argument because multimodal processors take images first."""
+
+        class FakeProcessor:
+            """Record processor keyword arguments."""
+
+            def __init__(self) -> None:
+                self.calls: list[dict[str, object]] = []
+
+            def __call__(self, **kwargs: object) -> dict[str, torch.Tensor]:
+                """Return one tokenized row."""
+                self.calls.append(kwargs)
+                return {"input_ids": torch.tensor([[1, 2]]), "attention_mask": torch.tensor([[1, 1]])}
+
+        class FakeModel:
+            """Return two token embeddings."""
+
+            def __call__(self, **inputs: torch.Tensor) -> SimpleNamespace:  # noqa: ARG002
+                """Return deterministic token states."""
+                return SimpleNamespace(last_hidden_state=torch.tensor([[[1.0, 0.0], [3.0, 0.0]]]))
+
+        with TemporaryDirectory() as tmp:
+            model = Path(tmp) / "text-model"
+            _sentence_model(model)
+            processor = FakeProcessor()
+            with patch(
+                "local_data_studio.server.atlas_components.embedding_backends.load_transformers_components",
+                return_value=(FakeModel(), processor, torch.device("cpu")),
+            ):
+                embed = create_transformers_pooling_embedder("text", model, _options(backend="transformers"), multimodal=True)
+                result = asyncio.run(embed(["a cat"], model=None, embedder_args={}))
+
+        self.assertEqual(["a cat"], processor.calls[0]["text"])
+        np.testing.assert_allclose([[2.0, 0.0]], result)
 
     def test_multimodal_adapter_uses_last_token_and_normalizes(self) -> None:
         """Build a structured image message and reproduce saved post-processing."""

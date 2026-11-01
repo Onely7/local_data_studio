@@ -13,6 +13,7 @@ MODEL_MARKER_FILES = (
     "tokenizer_config.json",
     "preprocessor_config.json",
     "model.safetensors",
+    "model.safetensors.index.json",
     "pytorch_model.bin",
 )
 
