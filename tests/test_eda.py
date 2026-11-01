@@ -1,7 +1,7 @@
 """Tests for eda behavior."""
 
 import os
-from importlib.metadata import requires
+from importlib.metadata import requires, version
 from pathlib import Path
 from unittest.mock import patch
 
@@ -15,13 +15,14 @@ from local_data_studio.server.eda import build_eda_report, eda_cache_key, load_e
 from local_data_studio.server.eda_reports import EdaReportOptions, generate_dataset_eda_report
 
 
-def test_runtime_dependencies_keep_pkg_resources_available_for_eda() -> None:
-    """Verify that runtime dependencies keep pkg resources available for eda."""
-    project_requirements = requires("local-data-studio") or []
-    setuptools_requirement = next(requirement for requirement in project_requirements if requirement.lower().startswith("setuptools"))
+def test_eda_provides_the_pkg_resources_api_ydata_profiling_imports() -> None:
+    """Answer ydata-profiling's pkg_resources calls without depending on old setuptools."""
+    import pkg_resources  # noqa: PLC0415  # ty: ignore[unresolved-import]
 
-    assert ">=80" in setuptools_requirement
-    assert "<81" in setuptools_requirement
+    project_requirements = requires("local-data-studio") or []
+
+    assert not any(requirement.lower().startswith("setuptools") for requirement in project_requirements)
+    assert version("pillow") == pkg_resources.get_distribution("pillow").version
 
 
 def test_sanitize_eda_dataframe_normalizes_nested_and_binary_values() -> None:
