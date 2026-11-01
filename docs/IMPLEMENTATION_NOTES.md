@@ -166,6 +166,12 @@ Full scans, such as row counting, index building, and search, read the file in 1
 NumPy locates newlines and blank lines in each block, so no Python code runs once per line.
 Because NumPy releases the GIL, up to four blocks are analyzed ahead on worker threads while the next block is read.
 Blank lines are skipped and never receive row IDs.
+Pages, jumps, and single-row reads use the same scanner but start with a `LINE_SEEK_BLOCK_BYTES` read that doubles, so a target near a checkpoint costs one small read.
+A row larger than `LINE_MAX_ROW_BYTES` is rejected instead of being buffered.
+
+CSV and TSV files are checked once, from their first 4 MiB, for quoted fields that contain newlines.
+In such files a newline ends a row only outside double quotes; the quoted state is the parity of quote characters, computed with NumPy from the start of each block, which always begins at a row boundary.
+When the standard `csv` module and the quote parity disagree about row boundaries, rows fall back to line breaks and the metadata carries a warning.
 
 Search compares the query with each block after folding ASCII case, then decodes and parses only the candidate lines.
 Queries containing non-ASCII letters that have case compare every decoded line instead.
@@ -173,17 +179,43 @@ Search responses include a `next_page_token` that resumes after the last match.
 
 A jump to an offset scans from the nearest checkpoint and records every checkpoint it passes.
 One jump may skip at most `MAX_OFFSET_SCAN_ROWS` rows unless less than `MAX_OFFSET_SCAN_BYTES` remains to be read.
+A farther jump fails with HTTP 409 and a detail of `{"code": "row_index_required", "row": ...}`; the browser then runs an index job with `until_row` and loads the page again.
 A preview page stops reading after `PREVIEW_PAGE_MAX_BYTES` of source data.
+
+Rows that a preview page decoded are kept in a byte-bounded in-memory cache (`RECENT_ROW_CACHE_MAX_BYTES`), keyed by path, size, and modification time.
+Raw row requests from the Row Inspector, enlarged images, and audio playback read visible rows from it.
+
+### Row Index Builder
+
+`dataset_readers/line_indexing.py` owns one `RowIndexBuilder` per dataset version.
+The SQLite sidecar stores the sequential scan position (`scanned_row`, `scanned_byte`) next to the checkpoints, so a scan resumes where the previous one stopped, even after a restart.
+Callers register goals: the background index asks for the first `BACKGROUND_INDEX_MAX_BYTES`, **Count Rows** for the end of the file, and a far jump for one row.
+The builder's thread scans while any goal is unmet and stops once none is, so these requests share one sequential read.
+Cancelling a job withdraws only its goal.
+
+The browser calls `POST /api/dataset_status/background_index` after opening a dataset, which replaces the background goal of the previously opened dataset.
+While only background goals remain, the builder waits between blocks as long as an interactive request listed in `app.FOREGROUND_PATHS` is running.
+`GET /api/dataset_status` reports the exact row count once the index is complete and an estimate extrapolated from the indexed bytes before that.
+Index commits run with `PRAGMA synchronous = OFF`, because the sidecar is a cache that is rebuilt when it cannot be opened.
+
+### JSON
+
+A `.json` file is classified from its first 1 MiB as JSON Lines, one top-level array, or one other value.
+JSON Lines files are read by the JSONL code.
+Arrays are read element by element from byte cursors: bytes are decoded as Latin-1 so that string positions equal byte offsets while the structure parses correctly, and returned elements are decoded again from their UTF-8 bytes.
+Array elements use the same page tokens, checkpoints, and row index builder as lines.
+Single values are parsed only when they fit `MAX_JSON_PREVIEW_BYTES`.
 
 ### Parquet
 
 Parquet schemas are read from metadata stored in the footer at the end of the file without scanning the entire file contents.
 
 Preview and Raw display address rows by physical row number.
-DuckDB's `file_row_number` filter selects the requested range, skips row groups outside it, and decodes vector-sized slices.
-Memory therefore stays bounded even for row groups of several gigabytes.
-Files with a `file_row_number` column, or with types that DuckDB cannot read, fall back to Arrow record batches sized from the footer's average row width.
-Footer facts, including the row count and the widest average row, are cached by file size and modification time.
+The parsed footer is cached, together with each row group's first row, by file size and modification time, so later pages never parse it again; TB-scale footers can take seconds to parse.
+Rows are read with PyArrow from the row group that holds the first requested row, through buffered column streams, so only the needed data pages are read.
+Rows before it in the row group are decoded and discarded, because Parquet pages cannot be read out of order.
+The reader is then kept, positioned after the page, in a small cache, so the next page continues without decoding the row group again.
+Record batches are sized from the footer's widest average row, so memory stays bounded even for row groups of several gigabytes.
 
 Preview pages convert image bytes into WebP thumbnails no larger than 256 pixels on a shared thread pool, and mark them with `thumbnail=1` in the data URL media type.
 Raw rows return complete images as data URLs, which the enlarged image view loads on demand.

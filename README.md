@@ -25,7 +25,8 @@ Click the Local Data Studio logo in the top bar to open this GitHub repository i
 
 ## Key Features
 
-* Preview large datasets while limiting how much data is loaded
+* Preview terabyte-scale datasets quickly: each page reads only the rows it shows
+* Index rows in the background while you browse, so totals, far jumps, and later pages are ready sooner
 * Run read-only searches and aggregations with DuckDB SQL
 * Apply SQL timeouts, memory limits, and warnings when a query may read a large amount of data
 * Generate EDA reports for an entire dataset or SQL results
@@ -105,9 +106,15 @@ Use the controls at the top of the page to change what is displayed:
 * **Search**: Searches the data.
 * **Rows**: Changes the number of rows shown per page.
 * **Go to row**: Enter a row number and press `Enter` to jump directly to that row.
+  When the row lies past the indexed part of a large JSONL, CSV, TSV, or JSON file, the rows up to it are indexed first.
+  The progress appears above the table, with a **Cancel** button.
 * **Prev** / **Next**: Moves to the previous or next page of the data or of the search results.
 
 The number at the left of each row is its position in the dataset, so it stays the same after jumps, searches, and hidden rows.
+
+The line above the table shows the number of columns and the rows on screen, followed by the total number of rows.
+Parquet totals are known immediately.
+For JSONL, CSV, TSV, and JSON files, the total is an estimate, such as `of about 2.4B`, until the background row index reaches the end of the file.
 Image cells show small thumbnails; select an image to view it at its original resolution.
 
 <img src="images/local_data_studio_03.png" alt="Searching data and moving between pages" width="45%">
@@ -481,6 +488,14 @@ The environment variables below can also be specified in the TOML `[settings]` s
 </details>
 
 <details>
+<summary><strong>Large Dataset Settings</strong></summary>
+
+* `BACKGROUND_INDEX`: When `true` (the default), opening a JSONL, CSV, TSV, or JSON file indexes its rows in the background, so the total row count, far jumps, and later pages are available without waiting for a full scan. The scan pauses while pages and rows are being loaded, and it stops when you open another file; its progress is kept and resumed later. Set it to `false` to index rows only when you select **Count Rows** or jump past the indexed rows. The `--background-index` and `--no-background-index` command-line options override this setting.
+* `BACKGROUND_INDEX_MAX_BYTES`: How many bytes of each file the background index reads. The default is 16 GiB (`17179869184`). Files up to this size are indexed completely, which also gives their exact row count. Set it to `0` to index whole files of any size.
+
+</details>
+
+<details>
 <summary><strong>Data Deletion Settings</strong></summary>
 
 * `ALLOW_DELETE_DATA`: When set to `false`, deletion from the source data file is disabled. Rows may still be hidden temporarily on the screen while the application page remains open.
@@ -593,8 +608,8 @@ Atlas pages are served through Local Data Studio, so you do not need to forward 
 * Searching and generating EDA reports may take time for large datasets.
 * Row counting, full-dataset search, sample statistics, and EDA run as background jobs that support progress reporting and cancellation.
 * Setting `EDA_ROW_LIMIT=-1` loads all selected rows into memory for analysis. Use this only when the complete dataset fits comfortably in memory.
-* JSON array files at terabyte (TB) scale are not recommended. Use JSONL or Parquet to browse very large datasets more efficiently.
-* To jump far into a large JSONL, CSV, or TSV file, run **Count Rows** once. It builds a row index that makes every row reachable directly.
+* JSON array files are previewed page by page, but counting, indexing, and searching them is several times slower than for JSONL. Use JSONL or Parquet for very large datasets.
+* **Count Rows** indexes a JSONL, CSV, TSV, or JSON file to its end. Jumps past the indexed rows index the rows up to the target automatically.
 * t-SNE can become dramatically slower and consume much more memory as the amount of data increases. Set a practical `ATLAS_SAMPLE` limit for large datasets.
 
 > [!WARNING]
@@ -614,16 +629,24 @@ You can skip it if you only need the standard browsing and analysis features.
 
 Previews never read a dataset from its beginning to reach a page.
 
-* JSONL, CSV, and TSV pages continue from the byte position recorded in a `page_token`.
+* JSONL, CSV, TSV, and JSON pages continue from the byte position recorded in a `page_token`.
   A sparse row index, with one checkpoint every 10,000 rows, lets **Go to row** start reading near the requested row.
-  **Count Rows** builds the complete index, and searches and jumps also record the checkpoints they pass.
-  Without nearby checkpoints, one jump may skip at most 1,000,000 rows unless less than 256 MiB remains to be read.
+  The background index, **Count Rows**, and jumps past the index extend one shared scan from where the last scan stopped.
+  Searches and jumps also record the checkpoints they pass.
+  Without nearby checkpoints, one jump may skip at most 1,000,000 rows unless less than 256 MiB remains to be read; farther jumps index the rows up to the target first.
+* `.json` files that hold one JSON value per line are read like JSONL. JSON arrays are read element by element, so the whole document is never loaded.
+* CSV and TSV files whose quoted fields contain line breaks are read record by record, following RFC 4180 quoting.
+  If quotes in a file are unbalanced, rows are split at every line break and a warning is shown.
 * Parquet pages are read by physical row number using the row-group metadata, so any row is available immediately.
+  The file's metadata is read once and kept in memory, and only the data pages a page needs are read.
+  The next page continues from where the previous page stopped, without decoding its row group again.
 * Each page reads at most 32 MiB of source data, so pages of very large rows contain fewer rows.
+* Rows shown on the current page are kept in memory, up to 64 MiB, so the **Row Inspector**, enlarged images, and audio playback open them without reading the file again.
 * Searches resume after the previous page's last match instead of starting over.
 
 Line scans read 16 MiB blocks and locate rows with vectorized byte searches on several threads.
 Counting rows and searching therefore run close to disk speed.
+Jumps and single-row reads start with a 256 KiB read and grow it only when needed.
 
 Row counting, full-dataset search, sample statistics, and EDA run as background jobs that support progress reporting and cancellation.
 
