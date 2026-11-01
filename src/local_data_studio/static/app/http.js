@@ -32,15 +32,25 @@ export async function cancelJob(jobId) {
   return fetchJSON(`/api/jobs/${jobId}/cancel`, { method: "POST" });
 }
 
+function abortError() {
+  const error = new Error("Operation aborted");
+  error.name = "AbortError";
+  return error;
+}
+
+// `isCurrent` lets callers drop a job that a newer action superseded: progress
+// stops reaching the page and the wait rejects with an AbortError.
 export async function waitForJob(jobId, options = {}) {
   const intervalMs = options.intervalMs || 600;
+  const isCurrent = options.isCurrent || (() => true);
   while (true) {
-    if (options.signal?.aborted) {
-      const error = new Error("Operation aborted");
-      error.name = "AbortError";
-      throw error;
+    if (options.signal?.aborted || !isCurrent()) {
+      throw abortError();
     }
     const job = await fetchJSON(`/api/jobs/${jobId}`);
+    if (!isCurrent()) {
+      throw abortError();
+    }
     if (options.onUpdate) {
       options.onUpdate(job);
     }
@@ -63,6 +73,10 @@ export function formatJobProgress(job, fallback) {
     return `${fallback} ${Math.round(job.progress * 100)}%${message}`;
   }
   return job.message || fallback;
+}
+
+export function isAbortError(err) {
+  return err?.name === "AbortError";
 }
 
 export function extractErrorMessage(err) {

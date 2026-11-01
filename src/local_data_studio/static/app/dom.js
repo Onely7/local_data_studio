@@ -18,6 +18,7 @@ export const elements = {
   prevPage: document.getElementById("prev-page"),
   nextPage: document.getElementById("next-page"),
   pageInfo: document.getElementById("page-info"),
+  jumpRow: document.getElementById("jump-row"),
   viewLabel: document.getElementById("view-label"),
   datasetMeta: document.getElementById("dataset-meta"),
   tableHead: document.querySelector("#data-table thead"),

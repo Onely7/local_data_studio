@@ -23,6 +23,7 @@ import {
   extractErrorMessage,
   fetchJSON,
   formatJobProgress,
+  isAbortError,
   startJob,
   waitForJob,
 } from "./http.js";
@@ -32,6 +33,7 @@ import {
   formatCell,
   formatExpandedCell,
   imageCandidate,
+  isThumbnailImage,
   normalizeImageUrl,
 } from "./images.js";
 import {
@@ -250,7 +252,7 @@ function renderTable() {
   elements.tableBody.innerHTML = "";
 
   if (!state.columns.length) {
-    elements.tableHead.innerHTML = "<tr><th>No data</th></tr>";
+    elements.tableHead.innerHTML = `<tr><th>${state.loadingFile ? "Loading..." : "No data"}</th></tr>`;
     return;
   }
 
@@ -437,43 +439,52 @@ function renderTable() {
   });
 }
 
+function currentPageNumber() {
+  return state.view === "query"
+    ? Math.floor(state.offset / state.limit) + 1
+    : state.pageIndex + 1;
+}
+
 function renderPagination() {
-  const page =
-    state.view === "query"
-      ? Math.floor(state.offset / state.limit) + 1
-      : state.pageIndex + 1;
+  const page = currentPageNumber();
   elements.pageInfo.textContent =
-    state.view === "search" ? "Search results" : `Page ${page}`;
+    state.view === "search" ? `Results ${page}` : `Page ${page}`;
   if (elements.prevPage) {
     elements.prevPage.disabled =
-      state.view === "query" ? state.offset <= 0 : state.pageIndex <= 0;
+      state.view === "query"
+        ? state.offset <= 0
+        : state.pageIndex <= 0 && (state.view === "search" || state.baseOffset <= 0);
   }
   if (elements.nextPage) {
     elements.nextPage.disabled =
-      state.view === "query"
-        ? false
-        : state.view === "search" || !state.nextPageToken;
+      state.view === "query" ? false : !state.nextPageToken;
+  }
+  if (elements.jumpRow) {
+    elements.jumpRow.disabled = !state.file || state.view === "search";
   }
 }
 
 function previewRowNumber(rowIndex) {
-  const base =
-    state.view === "query" ? state.offset : state.pageIndex * state.limit;
-  return base + rowIndex + 1;
+  const rowId = state.rowIds[rowIndex];
+  return Number.isFinite(rowId) ? rowId : state.offset + rowIndex + 1;
 }
 
 function renderMeta() {
+  if (state.loadingFile) {
+    elements.viewLabel.textContent = "Loading";
+    elements.datasetMeta.textContent = "";
+    return;
+  }
   const columnCount = state.schema.length;
   const mode =
     state.view === "query" ? "Query" : state.view === "search" ? "Search" : "Preview";
   elements.viewLabel.textContent = state.datasetWarning ? `${mode} | Warning` : mode;
+  const firstRow = state.rows.length ? previewRowNumber(0) : null;
+  const lastRow = state.rows.length ? previewRowNumber(state.rows.length - 1) : null;
+  const rowRange =
+    firstRow === null ? "No rows" : `Rows ${firstRow.toLocaleString()}-${lastRow.toLocaleString()}`;
   elements.datasetMeta.textContent = state.file
-    ? state.datasetWarning ||
-      `${columnCount} Columns | Page ${
-        state.view === "query"
-          ? Math.floor(state.offset / state.limit) + 1
-          : state.pageIndex + 1
-      }`
+    ? state.datasetWarning || `${columnCount} Columns | ${rowRange}`
     : "";
 }
 
@@ -574,6 +585,17 @@ function renderRowInspector(rowIndex) {
   updateRowActions();
 }
 
+function rawRowRequest(rowIndex) {
+  const rowId = state.rowIds[rowIndex];
+  if (Number.isFinite(rowId)) {
+    return { file: state.file, row_id: rowId };
+  }
+  if (state.view === "query" && state.querySql) {
+    return { file: state.file, sql: state.querySql, offset: state.offset + rowIndex };
+  }
+  return null;
+}
+
 async function toggleRowInspectorRaw() {
   if (state.selectedRowIndex === null || state.selectedRowIndex === undefined) {
     return;
@@ -586,14 +608,8 @@ async function toggleRowInspectorRaw() {
 
   const rowIndex = state.selectedRowIndex;
   const fileAtStart = state.file;
-  const rowId = state.rowIds[rowIndex];
-  const request = { file: fileAtStart };
-  if (Number.isFinite(rowId)) {
-    request.row_id = rowId;
-  } else if (state.view === "query" && state.querySql) {
-    request.sql = state.querySql;
-    request.offset = state.offset + rowIndex;
-  } else {
+  const request = rawRowRequest(rowIndex);
+  if (!request) {
     showError("Full Raw data is unavailable for this row.");
     return;
   }
@@ -670,8 +686,9 @@ function closeError() {
   elements.errorOverlay.classList.remove("active");
 }
 
-function resetPreviewPaging() {
-  state.offset = 0;
+function resetPreviewPaging(baseOffset = 0) {
+  state.offset = baseOffset;
+  state.baseOffset = baseOffset;
   state.pageIndex = 0;
   state.pageTokens = [null];
   state.nextPageToken = null;
@@ -986,10 +1003,41 @@ function openImageOverlay(rowIndex, imageUrl, imageColumnIndex) {
   renderOverlayFields();
   updateOverlayImage();
   elements.imageOverlay.classList.add("active");
+  if (state.overlayImages.some((candidate) => isThumbnailImage(candidate.src))) {
+    loadOverlayFullImages(rowIndex);
+  }
+}
+
+async function loadOverlayFullImages(rowIndex) {
+  const request = rawRowRequest(rowIndex);
+  if (!request) return;
+  const requestId = state.overlayRequest + 1;
+  state.overlayRequest = requestId;
+  try {
+    const data = await fetchJSON("/api/raw_row", {
+      method: "POST",
+      body: JSON.stringify(request),
+    });
+    if (state.overlayRequest !== requestId || state.overlayRowIndex !== rowIndex) {
+      return;
+    }
+    const rawValues = new Map(
+      (data.columns || []).map((column, index) => [column, data.row?.[index]]),
+    );
+    const fullImages = collectRowImageCandidates(
+      state.columns.map((column) => rawValues.get(column)),
+    );
+    if (fullImages.length !== state.overlayImages.length) return;
+    state.overlayImages = fullImages;
+    updateOverlayImage();
+  } catch (err) {
+    console.error(err);
+  }
 }
 
 function closeImageOverlay() {
   if (!elements.imageOverlay) return;
+  state.overlayRequest += 1;
   state.overlayRowIndex = null;
   state.overlayColumnIndex = null;
   state.overlayImageUrl = "";
@@ -1039,8 +1087,7 @@ function renderJsonOverlayContent() {
   } catch (err) {
     jsonText = String(value);
   }
-  const rowLabel = state.offset + rowIndex + 1;
-  elements.jsonTitle.textContent = `${columnName} | Row ${rowLabel}`;
+  elements.jsonTitle.textContent = `${columnName} | Row ${previewRowNumber(rowIndex)}`;
   elements.jsonBody.innerHTML = highlightJson(jsonText);
   if (elements.jsonTranslateAction) {
     elements.jsonTranslateAction.innerHTML = expandedTranslationButtonMarkup(
@@ -1113,9 +1160,19 @@ async function loadEmbedderModels() {
 }
 
 async function selectFile(fileName) {
+  ["countJobId", "statsJobId", "searchJobId", "queryJobId", "edaJobId", "atlasJobId"].forEach(cancelTrackedJob);
   state.file = fileName;
+  state.loadingFile = true;
+  state.columns = [];
+  state.rows = [];
+  state.rowIds = [];
   renderFiles();
+  renderTable();
+  renderMeta();
   resetPreviewPaging();
+  if (elements.jumpRow) elements.jumpRow.value = "";
+  elements.countRows.textContent = "Count Rows";
+  setEdaButtonsRunning("");
   state.view = "data";
   state.searchQuery = "";
   state.querySql = "";
@@ -1168,8 +1225,18 @@ async function selectFile(fileName) {
   if (elements.nlStatus) {
     elements.nlStatus.textContent = "";
   }
-  await loadSchema();
-  await loadCurrentPage();
+  try {
+    await loadSchema();
+    await loadCurrentPage();
+  } catch (err) {
+    if (state.file === fileName) showError(extractErrorMessage(err));
+  } finally {
+    if (state.file === fileName) {
+      state.loadingFile = false;
+      renderTable();
+      renderMeta();
+    }
+  }
 }
 
 async function loadSchema() {
@@ -1209,6 +1276,8 @@ async function loadPreview() {
   });
   if (token) {
     params.set("page_token", token);
+  } else if (state.baseOffset > 0) {
+    params.set("offset", String(state.baseOffset));
   }
   const data = await fetchJSON(`/api/preview?${params.toString()}`);
   applyTableData(data);
@@ -1217,28 +1286,40 @@ async function loadPreview() {
 async function loadSearch() {
   if (!state.file) return;
   const fileAtStart = state.file;
-  const job = await startJob("search", {
+  const payload = {
     file: state.file,
     query: state.searchQuery,
     limit: state.limit,
-  });
+  };
+  const token = currentPageToken();
+  if (token) payload.page_token = token;
+  cancelTrackedJob("searchJobId");
+  const job = await startJob("search", payload);
   state.searchJobId = job.id;
+  const isCurrent = () => state.file === fileAtStart && state.searchJobId === job.id;
   elements.viewLabel.textContent = "Searching";
-  const data = await waitForJob(job.id, {
-    onUpdate: (nextJob) => {
-      elements.datasetMeta.textContent = formatJobProgress(
-        nextJob,
-        "Searching",
-      );
-    },
-  });
-  if (state.file !== fileAtStart || state.searchJobId !== job.id) return;
-  applyTableData(data);
+  try {
+    const data = await waitForJob(job.id, {
+      isCurrent,
+      onUpdate: (nextJob) => {
+        elements.datasetMeta.textContent = formatJobProgress(
+          nextJob,
+          "Searching",
+        );
+      },
+    });
+    applyTableData(data);
+  } catch (err) {
+    if (!isAbortError(err)) throw err;
+  } finally {
+    if (state.searchJobId === job.id) state.searchJobId = null;
+  }
 }
 
 async function loadQuery(sql) {
   if (!state.file) return;
   const fileAtStart = state.file;
+  cancelTrackedJob("queryJobId");
   const job = await startJob("query", {
     file: state.file,
     sql,
@@ -1246,9 +1327,11 @@ async function loadQuery(sql) {
     offset: state.offset,
   });
   state.queryJobId = job.id;
+  const isCurrent = () => state.file === fileAtStart && state.queryJobId === job.id;
   elements.viewLabel.textContent = "Running query";
   try {
     const data = await waitForJob(job.id, {
+      isCurrent,
       onUpdate: (nextJob) => {
         elements.datasetMeta.textContent = formatJobProgress(
           nextJob,
@@ -1256,12 +1339,21 @@ async function loadQuery(sql) {
         );
       },
     });
-    if (state.file !== fileAtStart || state.queryJobId !== job.id) return;
     applyTableData(data);
+  } catch (err) {
+    if (!isAbortError(err)) throw err;
   } finally {
     if (state.queryJobId === job.id) {
       state.queryJobId = null;
     }
+  }
+}
+
+function cancelTrackedJob(key) {
+  const jobId = state[key];
+  state[key] = null;
+  if (jobId) {
+    cancelJob(jobId).catch((err) => console.error(err));
   }
 }
 
@@ -1277,13 +1369,33 @@ async function loadCurrentPage() {
   await loadPreview();
 }
 
+function showPageErrors(loading) {
+  return loading.catch((err) => {
+    showError(extractErrorMessage(err));
+    renderMeta();
+  });
+}
+
+function jumpToRow() {
+  const row = Math.floor(Number(elements.jumpRow?.value));
+  if (!state.file || !Number.isFinite(row) || row < 1) return;
+  if (state.view === "query") {
+    state.offset = row - 1;
+  } else if (state.view === "data") {
+    resetPreviewPaging(row - 1);
+  } else {
+    return;
+  }
+  showPageErrors(loadCurrentPage());
+}
+
 async function handleSearch() {
   const query = elements.searchInput.value.trim();
   if (!query) return;
   state.searchQuery = query;
   resetPreviewPaging();
   state.view = "search";
-  await loadSearch();
+  await showPageErrors(loadSearch());
 }
 
 function handleDatasetSearch() {
@@ -1301,10 +1413,11 @@ function clearDatasetSearch() {
 }
 
 async function clearSearch() {
+  cancelTrackedJob("searchJobId");
   state.searchQuery = "";
   resetPreviewPaging();
   state.view = "data";
-  await loadPreview();
+  await showPageErrors(loadPreview());
 }
 
 async function runQuery() {
@@ -1314,15 +1427,17 @@ async function runQuery() {
   state.querySql = sql;
   state.offset = 0;
   state.pageIndex = 0;
-  await loadQuery(sql);
+  await showPageErrors(loadQuery(sql));
 }
 
 function resetView() {
+  cancelTrackedJob("searchJobId");
+  cancelTrackedJob("queryJobId");
   state.view = "data";
   state.querySql = "";
   state.searchQuery = "";
   resetPreviewPaging();
-  loadCurrentPage();
+  showPageErrors(loadCurrentPage());
 }
 
 async function countRows() {
@@ -1337,10 +1452,13 @@ async function countRows() {
   const fileAtStart = state.file;
   elements.rowCount.textContent = "Counting...";
   elements.countRows.textContent = "Cancel Count";
+  let job = null;
+  const isCurrent = () => state.file === fileAtStart && job !== null && state.countJobId === job.id;
   try {
-    const job = await startJob("count", { file: state.file });
+    job = await startJob("count", { file: state.file });
     state.countJobId = job.id;
     const data = await waitForJob(job.id, {
+      isCurrent,
       onUpdate: (nextJob) => {
         elements.rowCount.textContent = formatJobProgress(
           nextJob,
@@ -1348,14 +1466,17 @@ async function countRows() {
         );
       },
     });
-    if (state.file !== fileAtStart || state.countJobId !== job.id) return;
     state.rowCount = data.count;
     elements.rowCount.textContent = `All Data Num: ${data.count.toLocaleString()}`;
   } catch (err) {
-    elements.rowCount.textContent = extractErrorMessage(err);
+    if (!isAbortError(err)) {
+      elements.rowCount.textContent = extractErrorMessage(err);
+    }
   } finally {
-    state.countJobId = null;
-    elements.countRows.textContent = "Count Rows";
+    if (job === null || state.countJobId === job.id) {
+      state.countJobId = null;
+      elements.countRows.textContent = "Count Rows";
+    }
   }
 }
 
@@ -1414,12 +1535,15 @@ async function runEdaJob(kind) {
     elements.edaLink.style.display = "none";
     elements.edaLink.textContent = "";
   }
+  const fileAtStart = state.file;
+  let job = null;
+  const isCurrent = () => state.file === fileAtStart && job !== null && state.edaJobId === job.id;
   try {
-    const fileAtStart = state.file;
-    const job = await startJob(jobKind, payload);
+    job = await startJob(jobKind, payload);
     state.edaJobId = job.id;
     const data = await waitForJob(job.id, {
       intervalMs: 1000,
+      isCurrent,
       onUpdate: (nextJob) => {
         if (elements.edaStatus) {
           elements.edaStatus.textContent = formatJobProgress(
@@ -1429,7 +1553,6 @@ async function runEdaJob(kind) {
         }
       },
     });
-    if (state.file !== fileAtStart || state.edaJobId !== job.id) return;
     if (elements.edaStatus) {
       const sampleNote =
         data.sample === -1
@@ -1447,14 +1570,17 @@ async function runEdaJob(kind) {
       elements.edaLink.style.display = "inline-flex";
     }
   } catch (err) {
+    if (isAbortError(err)) return;
     if (elements.edaStatus) {
       elements.edaStatus.textContent = extractErrorMessage(err);
     }
     console.error(err);
   } finally {
-    state.edaJobId = null;
-    state.edaJobKind = "";
-    setEdaButtonsRunning("");
+    if (job === null || state.edaJobId === job.id) {
+      state.edaJobId = null;
+      state.edaJobKind = "";
+      setEdaButtonsRunning("");
+    }
   }
 }
 
@@ -1507,30 +1633,36 @@ function attachEvents() {
   elements.pageSize.addEventListener("change", (event) => {
     state.limit = Number(event.target.value);
     resetPreviewPaging();
-    loadCurrentPage();
+    showPageErrors(loadCurrentPage());
   });
 
   elements.prevPage.addEventListener("click", () => {
     if (state.view === "query") {
       state.offset = Math.max(0, state.offset - state.limit);
-      loadCurrentPage();
+    } else if (state.pageIndex > 0) {
+      state.pageIndex -= 1;
+    } else if (state.view === "data" && state.baseOffset > 0) {
+      resetPreviewPaging(Math.max(0, state.baseOffset - state.limit));
+    } else {
       return;
     }
-    if (state.view === "search" || state.pageIndex <= 0) return;
-    state.pageIndex -= 1;
-    loadCurrentPage();
+    showPageErrors(loadCurrentPage());
   });
 
   elements.nextPage.addEventListener("click", () => {
     if (state.view === "query") {
       state.offset += state.limit;
-      loadCurrentPage();
+    } else if (state.nextPageToken) {
+      state.pageTokens[state.pageIndex + 1] = state.nextPageToken;
+      state.pageIndex += 1;
+    } else {
       return;
     }
-    if (state.view === "search" || !state.nextPageToken) return;
-    state.pageTokens[state.pageIndex + 1] = state.nextPageToken;
-    state.pageIndex += 1;
-    loadCurrentPage();
+    showPageErrors(loadCurrentPage());
+  });
+
+  elements.jumpRow?.addEventListener("keydown", (event) => {
+    if (event.key === "Enter") jumpToRow();
   });
 
   elements.runQuery.addEventListener("click", runQuery);
@@ -1877,6 +2009,7 @@ function attachEvents() {
   bindTranslationControls(renderTable);
 }
 
+state.limit = Number(elements.pageSize?.value) || state.limit;
 attachEvents();
 enhanceSelectControls();
 updateRowActions();

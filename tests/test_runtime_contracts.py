@@ -51,6 +51,7 @@ EXPECTED_STATIC_IDS = (
     "search-btn",
     "clear-search",
     "page-size",
+    "jump-row",
     "prev-page",
     "page-info",
     "next-page",
@@ -144,8 +145,8 @@ class RuntimeContractTests(TestCase):
         collector.feed(response.text)
 
         self.assertEqual(EXPECTED_STATIC_IDS, tuple(collector.ids))
-        self.assertEqual(["styles.css?v=20260714-code-view-actions"], collector.stylesheets)
-        self.assertEqual(["app.js?v=20260714-controls"], collector.scripts)
+        self.assertEqual(["styles.css?v=20261101-large-datasets"], collector.stylesheets)
+        self.assertEqual(["app.js?v=20261101-large-datasets"], collector.scripts)
 
     def test_static_entrypoint_loads_application_as_an_es_module(self) -> None:
         """Keep the stable app URL while implementation modules remain package assets."""
@@ -161,8 +162,8 @@ class RuntimeContractTests(TestCase):
             delete_icon = client.get("/icons/delete.svg")
             send_icon = client.get("/icons/send.svg")
 
-        self.assertIn('<link rel="stylesheet" href="styles.css?v=20260714-code-view-actions" />', page)
-        self.assertIn('<script type="module" src="app.js?v=20260714-controls"></script>', page)
+        self.assertIn('<link rel="stylesheet" href="styles.css?v=20261101-large-datasets" />', page)
+        self.assertIn('<script type="module" src="app.js?v=20261101-large-datasets"></script>', page)
         self.assertEqual('import "./app/application.js";\n', entrypoint.text)
         self.assertEqual(200, application.status_code)
         self.assertEqual(200, select_controls.status_code)
