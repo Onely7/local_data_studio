@@ -21,11 +21,15 @@ def quote_literal(value: str) -> str:
     return "'" + value.replace("'", "''") + "'"
 
 
-def relation_sql(path: Path) -> tuple[str, list[Any]]:
-    """Return a parameterized DuckDB relation for a dataset file."""
+def relation_sql(path: Path, *, file_row_number: bool = False) -> tuple[str, list[Any]]:
+    """Return a parameterized DuckDB relation for a dataset file.
+
+    ``file_row_number`` adds DuckDB's zero-based physical row column to Parquet
+    relations and is ignored for other formats.
+    """
     ext = path.suffix.lower()
     if ext == ".parquet":
-        return "read_parquet(?)", [str(path)]
+        return ("read_parquet(?, file_row_number = true)" if file_row_number else "read_parquet(?)"), [str(path)]
     if ext in {".csv", ".tsv"}:
         if ext == ".tsv":
             return "read_csv_auto(?, delim='\t')", [str(path)]
@@ -35,12 +39,12 @@ def relation_sql(path: Path) -> tuple[str, list[Any]]:
     raise HTTPException(status_code=400, detail="unsupported file extension")
 
 
-def relation_sql_literal(path: Path) -> str:
+def relation_sql_literal(path: Path, *, file_row_number: bool = False) -> str:
     """Return a literal DuckDB relation string for a dataset file."""
     ext = path.suffix.lower()
     path_literal = quote_literal(str(path))
     if ext == ".parquet":
-        return f"read_parquet({path_literal})"
+        return f"read_parquet({path_literal}, file_row_number = true)" if file_row_number else f"read_parquet({path_literal})"
     if ext in {".csv", ".tsv"}:
         if ext == ".tsv":
             return f"read_csv_auto({path_literal}, delim='\\t')"
@@ -50,10 +54,18 @@ def relation_sql_literal(path: Path) -> str:
     raise HTTPException(status_code=400, detail="unsupported file extension")
 
 
+def _rowid_select(path: Path, relation: str) -> str:
+    # Parquet exposes physical row numbers directly, which keeps scans parallel
+    # and lets DuckDB prune row groups; other readers number rows in scan order.
+    if path.suffix.lower() == ".parquet":
+        return f"SELECT * EXCLUDE (file_row_number), file_row_number + 1 AS __rowid FROM {relation}"
+    return f"SELECT *, row_number() OVER () AS __rowid FROM {relation}"
+
+
 def relation_with_rowid_sql(path: Path, deleted_ids: list[int]) -> tuple[str, list[Any]]:
     """Return a relation with __rowid applied and session deletes excluded."""
-    rel_sql, params = relation_sql(path)
-    base = f"SELECT *, row_number() OVER () AS __rowid FROM {rel_sql}"
+    rel_sql, params = relation_sql(path, file_row_number=True)
+    base = _rowid_select(path, rel_sql)
     if deleted_ids:
         placeholders = ", ".join(["?"] * len(deleted_ids))
         base = f"SELECT * FROM ({base}) WHERE __rowid NOT IN ({placeholders})"
@@ -63,7 +75,7 @@ def relation_with_rowid_sql(path: Path, deleted_ids: list[int]) -> tuple[str, li
 
 def relation_with_rowid_literal(path: Path, deleted_ids: list[int]) -> str:
     """Return a literal relation with __rowid and exclusions applied."""
-    base = f"SELECT *, row_number() OVER () AS __rowid FROM {relation_sql_literal(path)}"
+    base = _rowid_select(path, relation_sql_literal(path, file_row_number=True))
     if deleted_ids:
         id_list = ", ".join(str(int(row_id)) for row_id in deleted_ids if row_id > 0)
         if id_list:

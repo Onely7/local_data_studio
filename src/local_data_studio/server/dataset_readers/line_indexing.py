@@ -10,6 +10,7 @@ from fastapi import HTTPException
 from ..line_index import LineOffsetIndex
 from .common import format_name
 from .contracts import ScanControl
+from .line_cursor import iter_line_blocks
 
 LINE_DATASET_EXTENSIONS = {".jsonl", ".csv", ".tsv"}
 INDEX_CHECKPOINT_BATCH_SIZE = 256
@@ -31,25 +32,18 @@ def build_line_index_with_progress(path: Path, control: ScanControl) -> dict[str
     row_count = 0
     checkpoints: list[tuple[int, int]] = []
     size = max(byte_count, 1)
-    with path.open("rb") as file:
-        if suffix in {".csv", ".tsv"}:
+    first_data_offset = 0
+    if suffix in {".csv", ".tsv"}:
+        with path.open("rb") as file:
             file.readline()
-        while True:
-            control.check_cancelled()
-            byte_offset = file.tell()
-            line = file.readline()
-            if not line:
-                break
-            if not line.strip():
-                continue
-            row_count += 1
-            if row_count % index.stride == 0:
-                checkpoints.append((row_count, byte_offset))
-                if len(checkpoints) >= INDEX_CHECKPOINT_BATCH_SIZE:
-                    index.record_checkpoints(checkpoints)
-                    checkpoints.clear()
-            if row_count % 10_000 == 0:
-                control.update(progress=min(file.tell() / size, 0.999), message=f"Indexed {row_count:,} rows")
+            first_data_offset = file.tell()
+    for block in iter_line_blocks(path, start_offset=first_data_offset, first_row=1, control=control, parallel=True):
+        checkpoints.extend(block.checkpoints(index.stride))
+        if len(checkpoints) >= INDEX_CHECKPOINT_BATCH_SIZE:
+            index.record_checkpoints(checkpoints)
+            checkpoints.clear()
+        row_count += block.row_count
+        control.update(progress=min(block.end_offset / size, 0.999), message=f"Indexed {row_count:,} rows")
     index.record_checkpoints(checkpoints)
     index.mark_complete(row_count=row_count, byte_count=byte_count)
     status = index.status()

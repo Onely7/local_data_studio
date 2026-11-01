@@ -232,6 +232,11 @@ MAX_SEQ_ITEMS: int = 30
 DEFAULT_SAMPLE: int = 500
 MAX_SAMPLE: int = 2000
 MAX_OFFSET_FALLBACK: int = 10_000
+# Line datasets may skip this many rows past the nearest sparse checkpoint in
+# one request; a complete row index keeps every jump within INDEX_STRIDE rows.
+MAX_OFFSET_SCAN_ROWS: int = 1_000_000
+LINE_SCAN_BLOCK_BYTES: int = 16 * 1024 * 1024
+PREVIEW_PAGE_MAX_BYTES: int = 32 * 1024 * 1024
 MAX_JSON_PREVIEW_BYTES: int = 16 * 1024 * 1024
 SYNC_OPERATION_MAX_BYTES: int = 256 * 1024 * 1024
 HARD_DELETE_MAX_BYTES: int = 256 * 1024 * 1024
