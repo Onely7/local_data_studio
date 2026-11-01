@@ -1,9 +1,13 @@
 """Tests for serialization behavior."""
 
+import base64
+from io import BytesIO
 from unittest import TestCase
 
+from PIL import Image
+
 from local_data_studio.server.config import MAX_CELL_CHARS, MAX_SEQ_ITEMS
-from local_data_studio.server.serialization import serialize_raw_value, serialize_value
+from local_data_studio.server.serialization import THUMBNAIL_MAX_SIDE, serialize_raw_value, serialize_rows, serialize_value
 
 
 class SerializationTests(TestCase):
@@ -59,13 +63,41 @@ class SerializationTests(TestCase):
         self.assertLessEqual(len(serialized), MAX_CELL_CHARS + len("... (truncated)"))
         self.assertIn("truncated", serialized)
 
-    def test_serialize_value_keeps_image_bytes_in_bytes_dict(self) -> None:
-        """Verify that serialize value keeps image bytes in bytes dict."""
+    def test_serialize_value_keeps_undecodable_image_bytes_losslessly(self) -> None:
+        """Keep signed but undecodable image bytes complete as a data URL."""
         image_bytes = b"\x89PNG\r\n\x1a\n" + (b"x" * MAX_CELL_CHARS)
 
         serialized = serialize_value({"bytes": image_bytes})
 
-        self.assertEqual(image_bytes.hex(), serialized["bytes"])
+        self.assertEqual("data:image/png;base64," + base64.b64encode(image_bytes).decode(), serialized["bytes"])
+
+    def test_serialize_value_shrinks_large_images_to_marked_thumbnails(self) -> None:
+        """Send preview thumbnails instead of full images, for bytes dicts and raw blobs."""
+        photo = _png_bytes((1_200, 800))
+
+        in_dict = serialize_value({"bytes": photo, "path": "photo.png"})["bytes"]
+        blob = serialize_value(photo)
+
+        for serialized in (in_dict, blob):
+            header, _, payload = serialized.partition(",")
+            with Image.open(BytesIO(base64.b64decode(payload))) as thumbnail:
+                self.assertEqual("data:image/webp;thumbnail=1;base64", header)
+                self.assertEqual(THUMBNAIL_MAX_SIDE, max(thumbnail.size))
+                self.assertLess(len(payload), len(photo))
+
+    def test_serialize_value_keeps_small_images_unchanged(self) -> None:
+        """Pass browser-native images that already fit the thumbnail box through unchanged."""
+        icon = _png_bytes((32, 32))
+
+        serialized = serialize_value({"bytes": base64.b64encode(icon).decode()})
+
+        self.assertEqual("data:image/png;base64," + base64.b64encode(icon).decode(), serialized["bytes"])
+
+    def test_serialize_rows_preserves_row_order(self) -> None:
+        """Serialize rows concurrently without reordering them."""
+        rows = [[index, f"row-{index}"] for index in range(50)]
+
+        self.assertEqual(rows, serialize_rows(rows))
 
     def test_serialize_value_keeps_image_hex_string_in_bytes_dict(self) -> None:
         """Verify that serialize value keeps image hex string in bytes dict."""
@@ -107,3 +139,17 @@ class SerializationTests(TestCase):
         self.assertEqual(value["items"], serialized["items"])
         self.assertEqual(value["payload"], serialized["payload"])
         self.assertEqual(value["bytes"].hex(), serialized["bytes"])
+
+    def test_serialize_raw_value_returns_full_resolution_image_urls(self) -> None:
+        """Return complete image bytes as a data URL for enlarged views."""
+        photo = _png_bytes((1_200, 800))
+
+        serialized = serialize_raw_value({"bytes": photo})
+
+        self.assertEqual("data:image/png;base64," + base64.b64encode(photo).decode(), serialized["bytes"])
+
+
+def _png_bytes(size: tuple[int, int]) -> bytes:
+    output = BytesIO()
+    Image.new("RGB", size, (200, 30, 90)).save(output, format="PNG")
+    return output.getvalue()
