@@ -7,6 +7,7 @@ from .dataset_readers.parquet import PARQUET_EXTENSION
 from .dataset_readers.service import (
     build_line_index_with_progress,
     count_rows_with_progress,
+    dataset_status,
     fetch_preview_page,
     fetch_raw_row,
     load_dataset_metadata,
@@ -22,6 +23,7 @@ __all__ = [
     "ScanControl",
     "build_line_index_with_progress",
     "count_rows_with_progress",
+    "dataset_status",
     "fetch_preview_page",
     "fetch_raw_row",
     "load_dataset_metadata",

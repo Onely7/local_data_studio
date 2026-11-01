@@ -19,6 +19,8 @@ from ..config import LINE_MAX_ROW_BYTES, LINE_SCAN_BLOCK_BYTES, LINE_SEEK_BLOCK_
 from ..line_index import LineOffsetIndex
 from .contracts import ScanControl
 
+ROW_INDEX_REQUIRED = "row_index_required"
+
 # ``bytes.strip`` treats these ASCII bytes as whitespace. A physical line made
 # only of them is skipped by every reader and never receives a row ID.
 _WHITESPACE_BYTES = np.zeros(256, dtype=bool)
@@ -324,6 +326,22 @@ def _indexed_line_start(path: Path, target_row_number: int, hidden_row_ids: list
     return indexed.byte_offset, indexed.line_number, max(0, visible_rows)
 
 
+def row_index_required(row: int) -> HTTPException:
+    """Return the error for a row too far past the row index to reach in one request.
+
+    The detail carries ``code`` and ``row`` so the browser can index up to the
+    row in a background job and retry.
+    """
+    return HTTPException(
+        status_code=409,
+        detail={
+            "code": ROW_INDEX_REQUIRED,
+            "row": row,
+            "message": f"Row {row:,} is past the indexed part of this dataset. Index the rows up to it first.",
+        },
+    )
+
+
 def _line_cursor_for_offset(
     path: Path,
     offset: int,
@@ -340,7 +358,7 @@ def _line_cursor_for_offset(
     Raises:
         HTTPException: The target is more than ``MAX_OFFSET_SCAN_ROWS`` rows
             past the nearest checkpoint and more than ``MAX_OFFSET_SCAN_BYTES``
-            remain to be read.
+            remain to be read (HTTP 409, see :func:`row_index_required`).
     """
     if offset <= 0:
         return first_data_offset, 1
@@ -352,10 +370,7 @@ def _line_cursor_for_offset(
         start_offset, next_row_number, visible_rows_skipped = first_data_offset, 1, 0
     remaining = offset - visible_rows_skipped
     if remaining > MAX_OFFSET_SCAN_ROWS and path.stat().st_size - start_offset > MAX_OFFSET_SCAN_BYTES:
-        raise HTTPException(
-            status_code=400,
-            detail=f"row {offset + 1:,} is too far from the nearest row index checkpoint; run Count Rows once to index this dataset",
-        )
+        raise row_index_required(offset + 1)
 
     index = LineOffsetIndex(path)
     end_offset, end_row = start_offset, next_row_number
@@ -384,7 +399,7 @@ def _raw_line_value(path: Path, row_id: int, *, first_data_offset: int = 0, quot
     byte_offset = max(first_data_offset, indexed.byte_offset) if indexed else first_data_offset
     row_number = indexed.line_number if indexed else 1
     if row_id - row_number > MAX_OFFSET_SCAN_ROWS and path.stat().st_size - byte_offset > MAX_OFFSET_SCAN_BYTES:
-        raise HTTPException(status_code=400, detail="row is too far from the nearest row index checkpoint; run Count Rows once to index this dataset")
+        raise row_index_required(row_id)
     for block in iter_line_blocks(path, start_offset=byte_offset, first_row=row_number, initial_block_bytes=LINE_SEEK_BLOCK_BYTES, quoted=quoted):
         index.record_checkpoints(block.checkpoints(index.stride))
         if row_id < block.first_row + block.row_count:

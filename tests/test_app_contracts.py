@@ -19,6 +19,8 @@ EXPECTED_API_OPERATIONS = {
     ("/api/atlas/instances/{instance_id}", "delete"),
     ("/api/config", "get"),
     ("/api/count", "get"),
+    ("/api/dataset_status", "get"),
+    ("/api/dataset_status/background_index", "post"),
     ("/api/delete_column", "post"),
     ("/api/delete_row", "post"),
     ("/api/eda", "post"),

@@ -11,6 +11,8 @@ from fastapi.responses import FileResponse
 from ..audio_values import audio_mime_from_path, find_audio_source, resolve_audio_path, value_at_pointer
 from ..config import (
     ALLOW_DELETE_DATA,
+    BACKGROUND_INDEX,
+    BACKGROUND_INDEX_MAX_BYTES,
     DATA_ROOT,
     DEFAULT_LIMIT,
     EMBEDDER_MODELS_DIR,
@@ -20,15 +22,16 @@ from ..config import (
     VIS_EXCLUDE_DIRS,
     VIS_EXCLUDE_FILES,
 )
+from ..dataset_readers.line_indexing import start_background_index
 from ..db import open_connection, quote_ident, relation_sql
 from ..deleted_rows import deleted_row_ids_for
 from ..embedder_capabilities import library_versions
 from ..embedder_models import discover_embedder_models
 from ..files import refresh_dataset_file_catalog, resolve_data_file, resolve_raw_media_file, unique_path
-from ..readers import fetch_preview_page, fetch_raw_row, load_dataset_metadata
+from ..readers import dataset_status, fetch_preview_page, fetch_raw_row, load_dataset_metadata
 from ..serialization import serialize_raw_value, serialize_value
 from ..sql import fetch_raw_query_row_guarded
-from .schemas import RawMediaRequest, RawRowRequest
+from .schemas import DatasetFileRequest, RawMediaRequest, RawRowRequest
 from .services import reject_large_sync_operation
 
 router = APIRouter()
@@ -56,6 +59,8 @@ def get_config() -> dict[str, Any]:
     """Return non-secret UI configuration and local file-serving roots."""
     return {
         "allow_delete_data": ALLOW_DELETE_DATA,
+        "background_index": BACKGROUND_INDEX,
+        "background_index_max_bytes": BACKGROUND_INDEX_MAX_BYTES,
         "file_serve_roots": [str(path) for path in FILE_SERVE_ROOTS],
         "vis_exclude_dirs": VIS_EXCLUDE_DIRS,
         "vis_exclude_files": VIS_EXCLUDE_FILES,
@@ -130,6 +135,26 @@ def preview(
     """Return one bounded preview page using a cursor token when supplied."""
     path = resolve_data_file(file)
     return fetch_preview_page(file, path, limit=limit, offset=offset, page_token=page_token, deleted_ids=deleted_row_ids_for(path))
+
+
+@router.get("/api/dataset_status")
+def get_dataset_status(file: str = Query(...)) -> dict[str, Any]:
+    """Return the dataset's known or estimated row count and indexing progress."""
+    path = resolve_data_file(file)
+    return dataset_status(file, path, deleted_ids=deleted_row_ids_for(path))
+
+
+@router.post("/api/dataset_status/background_index")
+def start_dataset_background_index(payload: DatasetFileRequest) -> dict[str, Any]:
+    """Index the opened dataset in the background when the setting allows it.
+
+    The scan replaces the background scan of the previously opened dataset
+    and stops after ``BACKGROUND_INDEX_MAX_BYTES``. The response is the
+    dataset status.
+    """
+    path = resolve_data_file(payload.file)
+    start_background_index(path)
+    return dataset_status(payload.file, path, deleted_ids=deleted_row_ids_for(path))
 
 
 def _raw_row_values(path: Path, payload: RawRowRequest) -> tuple[list[str], list[Any]]:

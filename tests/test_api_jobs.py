@@ -36,9 +36,12 @@ from local_data_studio.app import (
     start_translation_job,
 )
 from local_data_studio.server import sql as sql_module
+from local_data_studio.server.api.datasets import get_dataset_status, start_dataset_background_index
+from local_data_studio.server.api.schemas import DatasetFileRequest
 from local_data_studio.server.atlas import AtlasPreparedDataset
 from local_data_studio.server.atlas_components.process import LaunchedAtlasProcess
 from local_data_studio.server.config import ATLAS_LARGE_DATASET_SAMPLE
+from local_data_studio.server.dataset_readers import line_indexing
 from local_data_studio.server.sql import load_query_dataframe_guarded
 
 
@@ -128,6 +131,27 @@ class ApiJobTests(TestCase):
         self.assertEqual("succeeded", payload["status"])
         self.assertEqual(10, payload["result"]["row_count"])
         self.assertTrue(payload["result"]["index"]["complete"])
+
+    def test_index_job_accepts_a_target_row_and_status_reports_the_count(self) -> None:
+        """Index up to a row, then report the exact count once the scan reached the end."""
+        started = start_index_job(IndexJobRequest(file="example.jsonl", until_row=3))
+        payload = self._wait_for_job(started["id"])
+        status = get_dataset_status(file="example.jsonl")
+
+        self.assertEqual("succeeded", payload["status"])
+        self.assertGreaterEqual(payload["result"]["indexed_rows"], 3)
+        self.assertEqual(10, status["row_count"])
+        self.assertTrue(status["complete"])
+
+    def test_background_index_endpoint_returns_dataset_status(self) -> None:
+        """Start the background scan for the opened dataset and return its status."""
+        self.addCleanup(line_indexing.stop_background_index)
+        with patch.object(line_indexing, "BACKGROUND_INDEX", True):
+            status = start_dataset_background_index(DatasetFileRequest(file="example.jsonl"))
+
+        self.assertEqual("example.jsonl", status["file"])
+        self.assertTrue(status["background"])
+        self.assertIn("estimated_row_count", status)
 
     def test_query_job_returns_limited_rows(self) -> None:
         """Verify that query job returns limited rows."""

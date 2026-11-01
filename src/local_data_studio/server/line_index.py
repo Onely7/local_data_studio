@@ -19,6 +19,21 @@ class IndexedLine:
     byte_offset: int
 
 
+@dataclass(frozen=True, slots=True)
+class IndexProgress:
+    """How far the sequential index scan has read.
+
+    Rows before ``next_row`` were scanned in one pass from the first row, so
+    every checkpoint below it exists. ``next_byte`` is where row ``next_row``
+    begins. ``row_count`` is set once the scan reached the end of the file.
+    """
+
+    next_row: int
+    next_byte: int
+    complete: bool
+    row_count: int | None
+
+
 class LineOffsetIndex:
     """SQLite-backed sparse index for jumping through large datasets."""
 
@@ -96,6 +111,16 @@ class LineOffsetIndex:
                 valid,
             )
 
+    def record_progress(self, checkpoints: list[tuple[int, int]], *, next_row: int, next_byte: int) -> None:
+        """Persist checkpoints and the sequential scan position in one transaction."""
+        valid = [(line_number, byte_offset) for line_number, byte_offset in checkpoints if line_number > 0]
+        with self._connect() as connection:
+            connection.executemany("INSERT OR IGNORE INTO line_offsets(line_number, byte_offset) VALUES (?, ?)", valid)
+            connection.executemany(
+                "INSERT OR REPLACE INTO metadata(key, value) VALUES (?, ?)",
+                [("scanned_row", str(next_row)), ("scanned_byte", str(next_byte))],
+            )
+
     def mark_complete(self, *, row_count: int, byte_count: int) -> None:
         """Store completion metadata for a fully built sparse index."""
         with self._connect() as connection:
@@ -110,6 +135,16 @@ class LineOffsetIndex:
 
     def _metadata(self, connection: sqlite3.Connection) -> dict[str, str]:
         return {str(key): str(value) for key, value in connection.execute("SELECT key, value FROM metadata").fetchall()}
+
+    def progress(self) -> IndexProgress | None:
+        """Return the sequential scan position, or ``None`` before the first scan."""
+        with self._connect() as connection:
+            metadata = self._metadata(connection)
+        row_count = int(metadata["row_count"]) if metadata.get("row_count", "").isdigit() else None
+        complete = metadata.get("complete") == "1" and row_count is not None
+        if not metadata.get("scanned_row", "").isdigit() or not metadata.get("scanned_byte", "").isdigit():
+            return None
+        return IndexProgress(int(metadata["scanned_row"]), int(metadata["scanned_byte"]), complete, row_count if complete else None)
 
     def status(self) -> dict[str, int | bool | None]:
         """Return lightweight metadata about the cached index."""

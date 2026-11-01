@@ -21,7 +21,7 @@ from .jsonl import (
     search_jsonl,
 )
 from .line_cursor import _indexed_line_start, _line_cursor_for_offset, _raw_line_value
-from .line_indexing import INDEX_CHECKPOINT_BATCH_SIZE, LINE_DATASET_EXTENSIONS, build_line_index_with_progress
+from .line_indexing import LINE_DATASET_EXTENSIONS, build_line_index_with_progress
 
 __all__ = [
     "LINE_DATASET_EXTENSIONS",
