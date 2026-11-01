@@ -342,9 +342,6 @@ A relation is a DuckDB object that represents tabular data processing.
 Generated reports are stored under `./cache/eda`.
 When the cache exceeds its size limit, shared capacity-management logic removes the oldest files first.
 
-setuptools 81 removed `pkg_resources`, which ydata-profiling 4.18 still imports.
-Before importing ydata-profiling, `eda.py` installs a minimal module that answers its `get_distribution(name).version` call through `importlib.metadata`.
-
 ## Embedding Atlas
 
 `src/local_data_studio/server/atlas.py` remains as a compatibility entry point for existing code.

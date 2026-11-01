@@ -101,7 +101,7 @@ def _write_profile_report(df: Any, *, title: str, cache_path: Path, options: Eda
         cache_path.parent.mkdir(parents=True, exist_ok=True)
         report.to_file(str(cache_path))
     except ImportError as exc:
-        raise HTTPException(status_code=500, detail="ydata-profiling is not installed") from exc
+        raise HTTPException(status_code=500, detail="fg-data-profiling is not installed") from exc
     except Exception as exc:
         raise HTTPException(status_code=500, detail=f"EDA generation failed: {exc}") from exc
 

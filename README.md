@@ -784,7 +784,7 @@ Resolve all errors before committing.
 ## Acknowledgements
 
 * [Dataset Viewer by Hugging Face](https://github.com/huggingface/dataset-viewer): Used as a reference for the UI and feature design.
-* [YData Profiling](https://github.com/ydataai/ydata-profiling): Used to generate EDA reports.
+* [fg-data-profiling](https://github.com/Data-Centric-AI-Community/fg-data-profiling) (formerly YData Profiling): Used to generate EDA reports.
 * [Embedding Atlas](https://github.com/apple/embedding-atlas): Used for interactive embedding visualization.
 
 ## License

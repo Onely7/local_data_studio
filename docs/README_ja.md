@@ -782,7 +782,7 @@ docstring は、Python の関数やクラスなどの目的や使い方を説明
 ## 謝辞
 
 * [Dataset Viewer（Hugging Face）](https://github.com/huggingface/dataset-viewer)：UI と機能設計の参考にしています。
-* [YData Profiling](https://github.com/ydataai/ydata-profiling)：EDA レポートの生成に使用しています。
+* [fg-data-profiling](https://github.com/Data-Centric-AI-Community/fg-data-profiling)（旧 YData Profiling）：EDA レポートの生成に使用しています。
 * [Embedding Atlas](https://github.com/apple/embedding-atlas)：埋め込みのインタラクティブな可視化に使用しています。
 
 ## ライセンス
