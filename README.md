@@ -102,7 +102,11 @@ Use the controls at the top of the page to change what is displayed:
 
 * **Search**: Searches the data.
 * **Rows**: Changes the number of rows shown per page.
-* **Prev** / **Next**: Moves to the previous or next page.
+* **Go to row**: Enter a row number and press `Enter` to jump directly to that row.
+* **Prev** / **Next**: Moves to the previous or next page of the data or of the search results.
+
+The number at the left of each row is its position in the dataset, so it stays the same after jumps, searches, and hidden rows.
+Image cells show small thumbnails; select an image to view it at its original resolution.
 
 <img src="images/local_data_studio_03.png" alt="Searching data and moving between pages" width="45%">
 
@@ -116,6 +120,10 @@ If the server has a LiteLLM model connection setting, called a model profile, yo
 You can choose from configured OpenAI, Anthropic, Gemini, hosted vLLM, and other LiteLLM-compatible models.
 
 SQL execution is subject to timeouts, memory limits, and checks for queries that may read a large amount of data.
+
+On datasets larger than 256 MiB, queries that aggregate, sort, deduplicate, join, or use window functions scan the whole dataset in the background.
+While such a query runs, its progress is shown and **Run Query** changes to **Cancel Query**.
+Up to 1,000,000 result rows are cached, so later pages, **Show raw row**, and EDA or Atlas on the query results reuse them without scanning again.
 For restrictions on generated SQL, see [LLM Model Profiles for SQL Generation and Translation](#llm-model-profiles-for-sql-generation-and-translation).
 
 <img src="images/local_data_studio_04.png" alt="SQL console" width="45%">
@@ -156,6 +164,7 @@ Place the model under `models/embedder`, or under the directory specified by `--
 Example locations:
 
 ```text
+models/embedder/google/embeddinggemma-2
 models/embedder/google/siglip2-base-patch16-224
 models/embedder/Qwen/Qwen3-Embedding-0.6B
 models/embedder/Qwen/Qwen3-VL-Embedding-2B
@@ -194,6 +203,23 @@ If the field is left empty, the default prompt stored with the model is used.
 * Placeholders such as `{title}` and `{body}` are replaced with values from the corresponding columns in the same dataset row or SQL result row.
 * `{{` and `}}` are treated as literal braces.
 * Missing columns, unsupported conversions or format specifications, and unmatched braces are rejected before the model is loaded.
+
+</details>
+
+<details>
+<summary><strong>Using EmbeddingGemma 2</strong></summary>
+
+[EmbeddingGemma 2](https://huggingface.co/google/embeddinggemma-2) embeds text and images into the same 768-dimensional space.
+The model is not gated, so you can download it without a Hugging Face token:
+
+```bash
+hf download google/embeddinggemma-2 --local-dir models/embedder/google/embeddinggemma-2
+```
+
+Select `google/embeddinggemma-2` as the **Model**.
+Sentence Transformers embeds both text and image columns, and Transformers embeds text columns.
+The model expects a task prefix on text, so for visualization enter `task: clustering | query: ` in **Prompt**.
+Leave **Prompt** empty for image columns, because images are embedded without a prefix.
 
 </details>
 
@@ -388,7 +414,7 @@ The environment variables below can also be specified in the TOML `[settings]` s
 * `EMBEDDER_MODELS_DIR`: The parent directory containing local Hugging Face encoder models. By default, Local Data Studio uses `models/embedder` under the workspace or current working directory.
 * `ATLAS_HOST`, `ATLAS_PORT`: The IPv4 loopback host used by an Embedding Atlas child process, meaning a separate process started by Local Data Studio, and the first port number to check when selecting an internal port. A loopback host refers only to the same computer. `localhost` is normalized to `127.0.0.1`. IPv6 and externally reachable hosts are not allowed. Browsers do not connect to this port directly.
 * `ATLAS_MAX_INSTANCES`: The maximum number of pending and running Atlas child processes combined. The default is `4`, and the value must be at least `1`.
-* `ATLAS_SAMPLE`: The maximum number of rows used for embedding computation and dimensionality reduction and stored in the cached Atlas Parquet file. Sampling is applied after SQL, with a fixed random seed of 42 so that the same rows are selected for the same input. When unset or set to `0`, all selected rows are used. Negative values are rejected.
+* `ATLAS_SAMPLE`: The maximum number of rows used for embedding computation and dimensionality reduction and stored in the cached Atlas Parquet file. Sampling is applied after SQL, with a fixed random seed of 42 so that the same rows are selected for the same input. When unset or set to `0`, all selected rows are used, except that datasets larger than 256 MiB use a sample of 100,000 rows. Negative values are rejected.
 * `ATLAS_BATCH_SIZE`: The number of rows processed at once during embedding computation. When unset or set to `0`, the Embedding Atlas default is used.
 * `ATLAS_CACHE_MAX_BYTES`: The maximum total size of Embedding Atlas-related files stored in `./cache/atlas`. When the limit is exceeded, the oldest cache files are removed first.
 * `ATLAS_TEXT_MAX_CHARS`: The maximum number of characters retained from a text cell for both embedding input and the cached Atlas Parquet file. Set this to `0` to disable truncation.
@@ -513,6 +539,7 @@ Atlas pages are served through Local Data Studio, so you do not need to forward 
 * Row counting, full-dataset search, sample statistics, and EDA run as background jobs that support progress reporting and cancellation.
 * Setting `EDA_ROW_LIMIT=-1` loads all selected rows into memory for analysis. Use this only when the complete dataset fits comfortably in memory.
 * JSON array files at terabyte (TB) scale are not recommended. Use JSONL or Parquet to browse very large datasets more efficiently.
+* To jump far into a large JSONL, CSV, or TSV file, run **Count Rows** once. It builds a row index that makes every row reachable directly.
 * t-SNE can become dramatically slower and consume much more memory as the amount of data increases. Set a practical `ATLAS_SAMPLE` limit for large datasets.
 
 > [!WARNING]
@@ -530,9 +557,18 @@ You can skip it if you only need the standard browsing and analysis features.
 <details>
 <summary><strong>Large-Dataset Preview and Background Processing</strong></summary>
 
-For supported formats, previews of very large datasets use cursor-based `page_token` values instead of large `OFFSET` values.
-`OFFSET` skips a specified number of rows from the beginning, and larger values may require more work to pass over earlier rows.
-A `page_token` records the current position and is used to move efficiently between the previous and next pages.
+Previews never read a dataset from its beginning to reach a page.
+
+* JSONL, CSV, and TSV pages continue from the byte position recorded in a `page_token`.
+  A sparse row index, with one checkpoint every 10,000 rows, lets **Go to row** start reading near the requested row.
+  **Count Rows** builds the complete index, and searches and jumps also record the checkpoints they pass.
+  Without nearby checkpoints, one jump may skip at most 1,000,000 rows unless less than 256 MiB remains to be read.
+* Parquet pages are read by physical row number using the row-group metadata, so any row is available immediately.
+* Each page reads at most 32 MiB of source data, so pages of very large rows contain fewer rows.
+* Searches resume after the previous page's last match instead of starting over.
+
+Line scans read 16 MiB blocks and locate rows with vectorized byte searches on several threads.
+Counting rows and searching therefore run close to disk speed.
 
 Row counting, full-dataset search, sample statistics, and EDA run as background jobs that support progress reporting and cancellation.
 
@@ -622,7 +658,7 @@ Values converted into encoder input format are stored only in an internal embedd
 
 When `ATLAS_SAMPLE=N` is specified, DuckDB selects rows deterministically after SQL filtering and before creating a pandas DataFrame.
 As a result, at most `N` rows are materialized for embedding computation, dimensionality reduction, and the cached Atlas Parquet file.
-When `ATLAS_SAMPLE=0`, all selected rows are processed.
+When `ATLAS_SAMPLE=0`, all selected rows are processed, except that datasets larger than 256 MiB use a sample of 100,000 rows.
 
 Text and prompt templates are expanded only for the current embedding batch.
 Image `bytes` values are written incrementally to a temporary disk-backed work area, and only the data required for the current batch is loaded into memory.
@@ -674,6 +710,8 @@ Image and multimodal models require a native `modules.json` to run through Sente
 
 As a result, image-only DINOv3 checkpoints can use only the Transformers backend and rely on the model-declared `pooler_output`.
 Qwen3-VL-Embedding models with a native Sentence Transformers pipeline can use both backends.
+EmbeddingGemma 2 declares text, image, audio, and video inputs.
+Sentence Transformers embeds its text and image columns, while the tokenizer-based Transformers adapter is offered for text only.
 
 Only backends for which an executable adapter can be confirmed are selectable.
 `remote_code` is available only when `ATLAS_TRUST_REMOTE_CODE=true` explicitly permits execution of code from the model repository.
