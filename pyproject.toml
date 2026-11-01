@@ -31,7 +31,7 @@ dependencies = [
   "pydantic>=2.10,<3",
   "pydantic-settings>=2.6,<3",
   "duckdb>=1.4.0,<2.0.0", # embedding-atlas 0.20 calls .arrow() on execute() results, which 2.0 removed
-  "pandas>=2.2.0,<2.3.0",
+  "pandas>=2.3.3,<3", # ydata-profiling 4.18 requires <3
   "python-dotenv",
   "python-multipart",
   "scipy>=1.12.0,<1.17.0", # ydata-profiling 4.18 requires <1.17
