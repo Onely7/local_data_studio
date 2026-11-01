@@ -152,3 +152,33 @@ class EmbedderCapabilityTests(TestCase):
         self.assertEqual(("text", "image"), capabilities.transformers.modalities)
         self.assertEqual("auto-pooling-multimodal", capabilities.transformers.adapter)
         self.assertTrue(capabilities.transformers.available)
+
+    def test_embeddinggemma2_layout_offers_images_only_through_sentence_transformers(self) -> None:
+        """Expose all declared modalities natively but only text through the tokenizer adapter."""
+        with TemporaryDirectory() as tmp:
+            model = Path(tmp) / "embeddinggemma-2"
+            _write_json(model / "config.json", {"model_type": "embedding_gemma2"})
+            _write_json(model / "tokenizer_config.json", {})
+            _write_json(model / "preprocessor_config.json", {"processor_class": "EmbeddingGemma2Processor"})
+            _write_json(
+                model / "sentence_bert_config.json",
+                {"modality_config": {name: {"method": "forward"} for name in ("text", "image", "audio", "video")}},
+            )
+            _write_json(
+                model / "modules.json",
+                [
+                    {"idx": 0, "name": "0", "path": "", "type": "sentence_transformers.base.modules.transformer.Transformer"},
+                    {"idx": 1, "name": "1", "path": "1_Pooling", "type": "sentence_transformers.sentence_transformer.modules.pooling.Pooling"},
+                    {"idx": 2, "name": "2", "path": "2_Normalize", "type": "sentence_transformers.base.modules.normalize.Normalize"},
+                ],
+            )
+            _write_json(model / "1_Pooling" / "config.json", {"embedding_dimension": 768, "pooling_mode": "mean", "include_prompt": True})
+            (model / "2_Normalize").mkdir()
+
+            capabilities = analyze_model_capabilities(model)
+
+        self.assertEqual(("text", "image", "audio", "video"), capabilities.sentence_transformers.modalities)
+        self.assertTrue(capabilities.sentence_transformers.available)
+        self.assertEqual("auto-pooling", capabilities.transformers.adapter)
+        self.assertEqual(("text",), capabilities.transformers.modalities)
+        self.assertEqual("sentence-transformers", capabilities.default_backend)

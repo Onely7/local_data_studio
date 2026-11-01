@@ -8,10 +8,11 @@ from pathlib import Path
 from typing import Any
 
 import numpy as np
-from embedding_atlas.projection import _run_embedding
 
 from .contracts import AtlasModality, AtlasOptions
 from .embedding_backends import resolve_embedder_callable
+
+DEFAULT_EMBEDDING_BATCH_SIZE = 32
 
 
 def embedding_items(projection_input: Any, input_column: str) -> list[Any]:
@@ -63,17 +64,17 @@ class AtlasEmbeddingSession:
             return np.empty((0, 0), dtype=projection_dtype(self.options))
         if self.modality == "vector":
             return cast_embeddings(np.asarray(items), self.options)
-        embeddings = asyncio.run(
-            _run_embedding(
-                self.embedder,
-                items,
-                model=str(self.model_path),
-                embedder_args=self.embedder_args or {},
-                batch_size=self.options.batch_size,
-                max_concurrency=1,
-            )
-        )
-        return cast_embeddings(embeddings, self.options)
+        return cast_embeddings(asyncio.run(self._embed_batches(items)), self.options)
+
+    async def _embed_batches(self, items: list[Any]) -> np.ndarray:
+        # Local encoders fail deterministically, so batches are not retried with
+        # the backoff that Embedding Atlas applies to remote embedding APIs.
+        batch_size = self.options.batch_size or DEFAULT_EMBEDDING_BATCH_SIZE
+        outputs = [
+            await self.embedder(items[start : start + batch_size], model=str(self.model_path), embedder_args=self.embedder_args or {})
+            for start in range(0, len(items), batch_size)
+        ]
+        return np.concatenate(outputs, axis=0)
 
 
 def create_embedding_session(modality: AtlasModality, model_path: Path, options: AtlasOptions) -> AtlasEmbeddingSession:
