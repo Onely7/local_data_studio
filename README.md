@@ -39,7 +39,7 @@ Click the Local Data Studio logo in the top bar to open this GitHub repository i
 
 ## Supported Environments and Data Formats
 
-* Python 3.11, 3.12, or 3.13
+* Python 3.11, 3.12, 3.13, or 3.14
 * Supported formats: `.jsonl`, `.json`, `.csv`, `.tsv`, and `.parquet`
 
 ## Quick Start
@@ -439,7 +439,7 @@ The environment variables below can also be specified in the TOML `[settings]` s
 For development or source-code changes, you can run Local Data Studio from the repository.
 The following software is required:
 
-* Python 3.11, 3.12, or 3.13
+* Python 3.11, 3.12, 3.13, or 3.14
 * Git, which is used to download the source code from GitHub
 * uv, which creates the Python environment and installs the required libraries
 

@@ -48,7 +48,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        python-version: ["3.11", "3.13"]
+        python-version: ["3.11", "3.12", "3.13"]
     env:
       # uv otherwise follows .python-version instead of the matrix version.
       UV_PYTHON: ${{ matrix.python-version }}
