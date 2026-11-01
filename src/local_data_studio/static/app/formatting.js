@@ -97,6 +97,23 @@ export function isInspectorValueTruncated(value) {
   }
 }
 
+// Rounds large counts for status text, such as 2.4B or 12.3M.
+export function formatApproxCount(count) {
+  const units = [
+    [1e12, "T"],
+    [1e9, "B"],
+    [1e6, "M"],
+    [1e3, "K"],
+  ];
+  for (const [size, suffix] of units) {
+    if (count >= size) {
+      const value = count / size;
+      return `${value >= 100 ? Math.round(value) : value.toFixed(1)}${suffix}`;
+    }
+  }
+  return Math.round(count).toLocaleString();
+}
+
 export function formatFileSize(bytes) {
   const value = Number(bytes);
   if (!Number.isFinite(value) || value < 0) return "";

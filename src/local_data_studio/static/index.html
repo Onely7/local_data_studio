@@ -4,7 +4,7 @@
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <title>Local Data Studio</title>
-    <link rel="stylesheet" href="styles.css?v=20261101-audio" />
+    <link rel="stylesheet" href="styles.css?v=20261102-index" />
   </head>
   <body>
     <div class="app">
@@ -163,7 +163,17 @@
           <div class="table-card">
             <div class="table-header">
               <div id="view-label">Preview</div>
-              <div class="meta" id="dataset-meta"></div>
+              <div class="table-header-meta">
+                <div class="meta" id="dataset-meta" aria-live="polite"></div>
+                <button
+                  class="ghost cancel-index-btn"
+                  id="cancel-index"
+                  type="button"
+                  hidden
+                >
+                  Cancel
+                </button>
+              </div>
             </div>
             <div class="table-wrap">
               <table id="data-table">
@@ -523,6 +533,6 @@ Select a row to inspect</pre
       </div>
     </div>
 
-    <script type="module" src="app.js?v=20261101-audio"></script>
+    <script type="module" src="app.js?v=20261102-index"></script>
   </body>
 </html>

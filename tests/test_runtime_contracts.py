@@ -58,6 +58,7 @@ EXPECTED_STATIC_IDS = (
     "next-page",
     "view-label",
     "dataset-meta",
+    "cancel-index",
     "data-table",
     "nl-model",
     "nl-input",
@@ -146,8 +147,8 @@ class RuntimeContractTests(TestCase):
         collector.feed(response.text)
 
         self.assertEqual(EXPECTED_STATIC_IDS, tuple(collector.ids))
-        self.assertEqual(["styles.css?v=20261101-audio"], collector.stylesheets)
-        self.assertEqual(["app.js?v=20261101-audio"], collector.scripts)
+        self.assertEqual(["styles.css?v=20261102-index"], collector.stylesheets)
+        self.assertEqual(["app.js?v=20261102-index"], collector.scripts)
 
     def test_static_entrypoint_loads_application_as_an_es_module(self) -> None:
         """Keep the stable app URL while implementation modules remain package assets."""
@@ -164,8 +165,8 @@ class RuntimeContractTests(TestCase):
             send_icon = client.get("/icons/send.svg")
             audio_icons = [client.get(f"/icons/{name}.svg") for name in ("play", "pause", "transcribe")]
 
-        self.assertIn('<link rel="stylesheet" href="styles.css?v=20261101-audio" />', page)
-        self.assertIn('<script type="module" src="app.js?v=20261101-audio"></script>', page)
+        self.assertIn('<link rel="stylesheet" href="styles.css?v=20261102-index" />', page)
+        self.assertIn('<script type="module" src="app.js?v=20261102-index"></script>', page)
         self.assertEqual('import "./app/application.js";\n', entrypoint.text)
         self.assertEqual(200, application.status_code)
         self.assertEqual(200, select_controls.status_code)

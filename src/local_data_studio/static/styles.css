@@ -578,6 +578,32 @@ button.ghost {
   color: var(--ink);
 }
 
+.table-header-meta {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 8px;
+  min-width: 0;
+}
+
+.table-header-meta .meta {
+  min-width: 0;
+  overflow-wrap: anywhere;
+  text-align: right;
+}
+
+button.cancel-index-btn {
+  flex: none;
+  padding: 3px 10px;
+  border-radius: 8px;
+  font-size: 12px;
+  line-height: 1.4;
+}
+
+button.cancel-index-btn[hidden] {
+  display: none;
+}
+
 .table-card {
   background: var(--panel-strong);
   border-radius: 18px;
@@ -594,6 +620,7 @@ button.ghost {
   display: flex;
   justify-content: space-between;
   align-items: center;
+  gap: 12px;
   padding: 12px 16px;
   background: linear-gradient(
     135deg,

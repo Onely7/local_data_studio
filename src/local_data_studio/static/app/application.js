@@ -14,6 +14,7 @@ import {
   compactInspectorValue,
   encodeCopyValue,
   escapeHtml,
+  formatApproxCount,
   formatFileSize,
   highlightJson,
   isInspectorValueTruncated,
@@ -21,6 +22,7 @@ import {
 } from "./formatting.js";
 import {
   cancelJob,
+  errorDetail,
   extractErrorMessage,
   fetchJSON,
   formatJobProgress,
@@ -507,13 +509,89 @@ function renderMeta() {
   const total =
     state.view === "query" && state.queryTotalRows !== null
       ? ` of ${state.queryTotalRows.toLocaleString()}`
-      : "";
+      : datasetTotalText();
   const rowRange =
     firstRow === null ? "No rows" : `Rows ${firstRow.toLocaleString()}-${lastRow.toLocaleString()}${total}`;
   const scanNote = state.view === "query" && state.cachedScan ? " | Cached full scan" : "";
   elements.datasetMeta.textContent = state.file
-    ? state.datasetWarning || `${columnCount} Columns | ${rowRange}${scanNote}`
+    ? state.datasetWarning || `${columnCount} Columns | ${rowRange}${scanNote}${indexingText()}`
     : "";
+  elements.datasetMeta.title = state.file ? datasetStatusDetail() : "";
+}
+
+// Preview totals come from the row index: exact once it reaches the end of
+// the file, extrapolated from the indexed part before that.
+function datasetTotalText() {
+  const status = state.datasetStatus;
+  if (state.view !== "data" || !status) return "";
+  if (Number.isFinite(status.row_count)) return ` of ${status.row_count.toLocaleString()}`;
+  if (Number.isFinite(status.estimated_row_count)) {
+    return ` of about ${formatApproxCount(status.estimated_row_count)}`;
+  }
+  return "";
+}
+
+function indexingText() {
+  if (state.indexJobText) return ` | ${state.indexJobText}`;
+  const status = state.datasetStatus;
+  if (!status?.indexing) return "";
+  return status.indexed_rows
+    ? ` | Indexing rows · ${formatApproxCount(status.indexed_rows)} so far`
+    : " | Indexing rows";
+}
+
+function datasetStatusDetail() {
+  const status = state.datasetStatus;
+  if (!status || !status.size) return "";
+  if (status.complete && Number.isFinite(status.row_count)) {
+    return `${status.row_count.toLocaleString()} rows in ${formatFileSize(status.size)}`;
+  }
+  if (!status.indexed_rows) return `${formatFileSize(status.size)}; rows not indexed yet`;
+  const estimate = Number.isFinite(status.estimated_row_count)
+    ? `; about ${status.estimated_row_count.toLocaleString()} rows in total`
+    : "";
+  return `Indexed ${status.indexed_rows.toLocaleString()} rows in the first ${formatFileSize(
+    status.indexed_bytes,
+  )} of ${formatFileSize(status.size)}${estimate}`;
+}
+
+function clearDatasetStatus() {
+  clearTimeout(state.datasetStatusTimer);
+  state.datasetStatusTimer = null;
+  state.datasetStatus = null;
+}
+
+function applyDatasetStatus(status) {
+  state.datasetStatus = status;
+  if (Number.isFinite(status.row_count) && !state.countJobId) {
+    state.rowCount = status.row_count;
+    elements.rowCount.textContent = `All Data Num: ${status.row_count.toLocaleString()}`;
+  }
+  renderMeta();
+  clearTimeout(state.datasetStatusTimer);
+  state.datasetStatusTimer = null;
+  if (status.indexing) {
+    const fileName = state.file;
+    state.datasetStatusTimer = setTimeout(() => refreshDatasetStatus(fileName), 1000);
+  }
+}
+
+// The first call for an opened dataset also starts its background row index
+// when the server enables it; later calls only poll progress.
+async function refreshDatasetStatus(fileName, { startBackground = false } = {}) {
+  if (!fileName || state.file !== fileName) return;
+  try {
+    const status =
+      startBackground && state.backgroundIndex
+        ? await fetchJSON("/api/dataset_status/background_index", {
+            method: "POST",
+            body: JSON.stringify({ file: fileName }),
+          })
+        : await fetchJSON(`/api/dataset_status?file=${encodeURIComponent(fileName)}`);
+    if (state.file === fileName) applyDatasetStatus(status);
+  } catch (err) {
+    console.warn(err);
+  }
 }
 
 function renderDatasetInfo() {
@@ -919,6 +997,7 @@ async function performDelete(persist) {
       state.rowCount = Math.max(0, state.rowCount - 1);
       elements.rowCount.textContent = `All Data Num: ${state.rowCount.toLocaleString()}`;
     }
+    refreshDatasetStatus(state.file);
   } catch (err) {
     console.error(err);
   } finally {
@@ -1170,6 +1249,7 @@ async function loadConfig() {
   try {
     const data = await fetchJSON("/api/config");
     state.allowDeleteData = data.allow_delete_data !== false;
+    state.backgroundIndex = data.background_index !== false;
   } catch (err) {
     state.allowDeleteData = true;
   }
@@ -1190,7 +1270,9 @@ async function loadEmbedderModels() {
 }
 
 async function selectFile(fileName) {
-  ["countJobId", "statsJobId", "searchJobId", "queryJobId", "edaJobId", "atlasJobId"].forEach(cancelTrackedJob);
+  ["countJobId", "statsJobId", "searchJobId", "queryJobId", "edaJobId", "atlasJobId", "indexJobId"].forEach(cancelTrackedJob);
+  clearDatasetStatus();
+  showIndexCancel(false);
   state.file = fileName;
   state.loadingFile = true;
   resetAudio();
@@ -1269,6 +1351,7 @@ async function selectFile(fileName) {
       renderMeta();
     }
   }
+  refreshDatasetStatus(fileName, { startBackground: true });
 }
 
 async function loadSchema() {
@@ -1422,7 +1505,67 @@ function jumpToRow() {
   } else {
     return;
   }
-  showPageErrors(loadCurrentPage());
+  showPageErrors(loadPageIndexingIfNeeded());
+}
+
+// A row past the indexed part of a large dataset is reached by indexing up to
+// it in a cancellable job, then loading the page again.
+async function loadPageIndexingIfNeeded() {
+  try {
+    await loadCurrentPage();
+  } catch (err) {
+    const detail = errorDetail(err);
+    if (detail?.code !== "row_index_required") throw err;
+    if (await indexUntilRow(detail.row)) await loadCurrentPage();
+  }
+}
+
+function showIndexCancel(visible) {
+  if (elements.cancelIndex) elements.cancelIndex.hidden = !visible;
+}
+
+function finishIndexJob() {
+  state.indexJobId = null;
+  state.indexJobText = "";
+  showIndexCancel(false);
+  renderMeta();
+}
+
+async function indexUntilRow(row) {
+  const fileAtStart = state.file;
+  cancelTrackedJob("indexJobId");
+  const label = `Indexing rows up to ${row.toLocaleString()}`;
+  state.indexJobText = label;
+  showIndexCancel(true);
+  renderMeta();
+  let job = null;
+  const isCurrent = () => state.file === fileAtStart && job !== null && state.indexJobId === job.id;
+  try {
+    job = await startJob("index", { file: fileAtStart, until_row: row });
+    state.indexJobId = job.id;
+    await waitForJob(job.id, {
+      isCurrent,
+      onUpdate: (nextJob) => {
+        state.indexJobText = formatJobProgress(nextJob, label);
+        renderMeta();
+      },
+    });
+    return isCurrent();
+  } catch (err) {
+    if (isAbortError(err)) return false;
+    throw err;
+  } finally {
+    if (state.file === fileAtStart && (job === null || state.indexJobId === job.id)) {
+      finishIndexJob();
+      refreshDatasetStatus(fileAtStart);
+    }
+  }
+}
+
+function cancelIndexJob() {
+  cancelTrackedJob("indexJobId");
+  finishIndexJob();
+  refreshDatasetStatus(state.file);
 }
 
 async function handleSearch() {
@@ -1510,6 +1653,7 @@ async function countRows() {
     });
     state.rowCount = data.count;
     elements.rowCount.textContent = `All Data Num: ${data.count.toLocaleString()}`;
+    refreshDatasetStatus(fileAtStart);
   } catch (err) {
     if (!isAbortError(err)) {
       elements.rowCount.textContent = extractErrorMessage(err);
@@ -1706,6 +1850,7 @@ function attachEvents() {
   elements.jumpRow?.addEventListener("keydown", (event) => {
     if (event.key === "Enter") jumpToRow();
   });
+  elements.cancelIndex?.addEventListener("click", cancelIndexJob);
 
   elements.runQuery.addEventListener("click", runQuery);
   elements.resetView.addEventListener("click", resetView);
