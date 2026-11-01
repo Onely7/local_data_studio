@@ -1,15 +1,13 @@
-"""EDA report generation utilities backed by YData Profiling."""
+"""EDA report generation utilities backed by fg-data-profiling."""
 
 import datetime
 import decimal
 import hashlib
-import importlib.metadata
-import importlib.util
 import json
-import sys
-import types
 from pathlib import Path
 from typing import Any
+
+from data_profiling import ProfileReport
 
 from .config import (
     EDA_CACHE_DIR,
@@ -18,24 +16,7 @@ from .config import (
 )
 from .db import open_connection, relation_sql, relation_with_rowid_sql
 
-
-def _install_pkg_resources_shim() -> None:
-    """Provide the ``pkg_resources`` API that ydata-profiling 4.18 still imports.
-
-    setuptools 81 removed ``pkg_resources``, and ydata-profiling only calls
-    ``get_distribution(name).version``, which ``importlib.metadata`` answers.
-    """
-    if importlib.util.find_spec("pkg_resources") is None:
-        shim = types.ModuleType("pkg_resources")
-        shim.get_distribution = lambda name: types.SimpleNamespace(version=importlib.metadata.version(name))  # ty: ignore[unresolved-attribute]
-        sys.modules["pkg_resources"] = shim
-
-
-_install_pkg_resources_shim()
-
-from ydata_profiling import ProfileReport  # noqa: E402
-
-EDA_CACHE_VERSION = "ydata-v2"
+EDA_CACHE_VERSION = "fg-data-profiling-v1"
 
 
 def eda_cache_key(path: Path, sample_rows: int, mode: str) -> str:
@@ -54,7 +35,7 @@ def eda_cache_path(path: Path, sample_rows: int, mode: str) -> Path:
 
 
 def load_eda_dataframe(path: Path, sample_rows: int, deleted_ids: list[int]) -> Any:
-    """Load a configured pandas sample suitable for YData Profiling.
+    """Load a configured pandas sample suitable for fg-data-profiling.
 
     A row limit of ``-1`` intentionally materializes the complete relation.
     When no rows are hidden, the limit is applied directly to the source
@@ -75,7 +56,7 @@ def load_eda_dataframe(path: Path, sample_rows: int, deleted_ids: list[int]) -> 
 def sanitize_eda_dataframe(df: Any) -> Any:
     """Convert unsupported nested and binary values to bounded strings.
 
-    YData Profiling consumes pandas DataFrames.  Scalar columns remain typed so
+    fg-data-profiling consumes pandas DataFrames.  Scalar columns remain typed so
     their statistics stay useful; only cells that cannot be profiled reliably
     (lists, objects, binary data, and decimals) are normalised.
     """

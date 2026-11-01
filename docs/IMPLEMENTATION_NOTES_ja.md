@@ -336,9 +336,6 @@ relation は、DuckDB で表形式のデータ処理を表すオブジェクト�
 生成したレポートは `./cache/eda` に保存します。
 キャッシュ容量が上限を超えた場合は、共通の容量管理処理によって古いファイルから削除します。
 
-setuptools 81 で `pkg_resources` が削除されましたが、ydata-profiling 4.18 はまだこれを読み込みます。
-そのため `eda.py` は、ydata-profiling を読み込む前に、`get_distribution(name).version` の呼び出しだけに `importlib.metadata` で答える最小限のモジュールを登録します。
-
 ## Embedding Atlas
 
 `src/local_data_studio/server/atlas.py` は、既存コードとの互換性を保つための窓口として残します。

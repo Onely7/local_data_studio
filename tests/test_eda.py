@@ -1,7 +1,6 @@
 """Tests for eda behavior."""
 
 import os
-from importlib.metadata import requires, version
 from pathlib import Path
 from unittest.mock import patch
 
@@ -13,16 +12,6 @@ from local_data_studio.server import eda, eda_reports
 from local_data_studio.server.config import Settings
 from local_data_studio.server.eda import build_eda_report, eda_cache_key, load_eda_dataframe, sanitize_eda_dataframe
 from local_data_studio.server.eda_reports import EdaReportOptions, generate_dataset_eda_report
-
-
-def test_eda_provides_the_pkg_resources_api_ydata_profiling_imports() -> None:
-    """Answer ydata-profiling's pkg_resources calls without depending on old setuptools."""
-    import pkg_resources  # noqa: PLC0415  # ty: ignore[unresolved-import]
-
-    project_requirements = requires("local-data-studio") or []
-
-    assert not any(requirement.lower().startswith("setuptools") for requirement in project_requirements)
-    assert version("pillow") == pkg_resources.get_distribution("pillow").version
 
 
 def test_sanitize_eda_dataframe_normalizes_nested_and_binary_values() -> None:
@@ -42,16 +31,16 @@ def test_sanitize_eda_dataframe_normalizes_nested_and_binary_values() -> None:
     assert sanitized["metadata"].tolist() == ['{"label": "cat"}', '{"label": "dog"}']
 
 
-def test_eda_cache_key_changes_with_ydata_backend_version(tmp_path: Path) -> None:
-    """Verify that eda cache key changes with ydata backend version."""
+def test_eda_cache_key_changes_with_sample_size(tmp_path: Path) -> None:
+    """Verify that the EDA cache key changes with the sample size."""
     dataset = tmp_path / "dataset.csv"
     dataset.write_text("value\n1\n", encoding="utf-8")
 
     assert eda_cache_key(dataset, 100, "minimal") != eda_cache_key(dataset, 200, "minimal")
 
 
-def test_build_eda_report_uses_ydata_minimal_option() -> None:
-    """Verify that build eda report uses ydata minimal option."""
+def test_build_eda_report_passes_the_minimal_option() -> None:
+    """Verify that build_eda_report passes the minimal option to ProfileReport."""
     frame = pd.DataFrame({"value": [1, 2]})
 
     with patch("local_data_studio.server.eda.ProfileReport") as profile_report:
@@ -139,7 +128,7 @@ def test_eda_reports_use_dedicated_cache_and_prune_oldest(tmp_path: Path) -> Non
     cache_dir = tmp_path / "cache" / "eda"
 
     class FakeReport:
-        """Write a deterministic report body without invoking YData Profiling."""
+        """Write a deterministic report body without invoking fg-data-profiling."""
 
         def to_file(self, target: str) -> None:
             """Create a small report artifact for pruning assertions."""
