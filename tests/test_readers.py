@@ -161,8 +161,8 @@ class ReaderPreviewTests(TestCase):
             self.assertEqual([MAX_OFFSET_FALLBACK + 14, MAX_OFFSET_FALLBACK + 15, MAX_OFFSET_FALLBACK + 16], after["row_ids"])
             self.assertEqual((["id"], [MAX_OFFSET_FALLBACK]), (columns, values))
 
-    def test_parquet_column_named_file_row_number_uses_arrow_batches(self) -> None:
-        """Fall back to bounded Arrow batches when DuckDB's virtual row column would collide."""
+    def test_parquet_column_named_file_row_number_is_read_like_any_column(self) -> None:
+        """Read a column whose name DuckDB reserves for its virtual row number."""
         with TemporaryDirectory() as tmpdir:
             path = Path(tmpdir) / "data.parquet"
             pq.write_table(pa.Table.from_pylist([{"file_row_number": index * 10} for index in range(5)]), path, row_group_size=2)
@@ -521,3 +521,35 @@ class ReaderPreviewTests(TestCase):
                 search_dataset("data.csv", path, query="Ada", limit=1, control=_NoCancelControl(), page_token=jsonl_token)
 
             self.assertEqual(400, raised.exception.status_code)
+
+    def test_parquet_pages_continue_from_the_previous_reader(self) -> None:
+        """Reuse the positioned reader for the next page instead of decoding the row group again."""
+        with TemporaryDirectory() as tmpdir:
+            path = Path(tmpdir) / "data.parquet"
+            pq.write_table(pa.Table.from_pylist([{"id": index} for index in range(5_000)]), path, row_group_size=5_000)
+
+            first = fetch_preview_page("data.parquet", path, limit=10, offset=1_000)
+            with patch.object(parquet_reader, "_open_cursor", side_effect=AssertionError("reader reopened")):
+                second = fetch_preview_page("data.parquet", path, limit=10, page_token=first["next_page_token"])
+
+        self.assertEqual(list(range(1_001, 1_011)), first["row_ids"])
+        self.assertEqual(list(range(1_011, 1_021)), second["row_ids"])
+
+    def test_raw_rows_of_a_previewed_page_are_served_from_memory(self) -> None:
+        """Answer raw row requests for visible rows without reading the dataset again."""
+        with TemporaryDirectory() as tmpdir:
+            root = Path(tmpdir)
+            (root / "data.jsonl").write_text('{"id": 1, "text": "a"}\n{"id": 2, "text": "b"}\n', encoding="utf-8")
+            (root / "data.csv").write_text("id,text\n1,a\n2,b\n", encoding="utf-8")
+            pq.write_table(pa.Table.from_pylist([{"id": 1, "text": "a"}, {"id": 2, "text": "b"}]), root / "data.parquet")
+
+            for name, expected in (("data.jsonl", [2, "b"]), ("data.csv", ["2", "b"]), ("data.parquet", [2, "b"])):
+                with self.subTest(name=name):
+                    fetch_preview_page(name, root / name, limit=10)
+                    with (
+                        patch.object(Path, "open", side_effect=AssertionError("dataset read again")),
+                        patch.object(parquet_reader, "_read_rows", side_effect=AssertionError("dataset read again")),
+                    ):
+                        columns, values = fetch_raw_row(root / name, 2)
+
+                    self.assertEqual((["id", "text"], expected), (columns, values))

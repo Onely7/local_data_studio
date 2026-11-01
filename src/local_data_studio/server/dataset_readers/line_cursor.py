@@ -15,7 +15,7 @@ from pathlib import Path
 import numpy as np
 from fastapi import HTTPException
 
-from ..config import LINE_SCAN_BLOCK_BYTES, MAX_OFFSET_SCAN_BYTES, MAX_OFFSET_SCAN_ROWS
+from ..config import LINE_MAX_ROW_BYTES, LINE_SCAN_BLOCK_BYTES, LINE_SEEK_BLOCK_BYTES, MAX_OFFSET_SCAN_BYTES, MAX_OFFSET_SCAN_ROWS
 from ..line_index import LineOffsetIndex
 from .contracts import ScanControl
 
@@ -49,6 +49,10 @@ class LineBlock:
     ends: np.ndarray
     size: int
     candidates: np.ndarray | None = None
+
+    def record_end(self, index: int) -> int:
+        """Return the absolute file offset just after one row's terminator."""
+        return self.offset + int(self.ends[index])
 
     @property
     def row_count(self) -> int:
@@ -116,21 +120,35 @@ def _line_positions(data: bytearray, size: int, needle: bytes | None) -> _LinePo
     return starts, ends, candidates
 
 
-def _iter_raw_chunks(file: BufferedReader, block_bytes: int, control: ScanControl | None) -> Iterator[tuple[bytearray, int]]:
-    """Yield buffers ending with complete lines and the byte count of those lines.
+def _iter_raw_chunks(
+    file: BufferedReader,
+    block_bytes: int,
+    control: ScanControl | None,
+    *,
+    initial_block_bytes: int | None = None,
+) -> Iterator[tuple[bytearray, int]]:
+    """Yield buffers ending with complete rows and the byte count of those rows.
 
-    Bytes after the last newline carry over into the next buffer. A line with
-    no newline in sight doubles the next read, so very long lines are copied a
-    logarithmic number of times rather than once per block.
+    Reads start at ``initial_block_bytes`` and double up to ``block_bytes``.
+    Bytes after the last row terminator carry over into the next buffer. A row
+    with no terminator in sight doubles the next read, so very long rows are
+    copied a logarithmic number of times rather than once per block.
+
+    Raises:
+        HTTPException: One row exceeds ``LINE_MAX_ROW_BYTES``.
     """
     carry = b""
+    read_size = min(block_bytes, initial_block_bytes or block_bytes)
     while True:
         if control is not None:
             control.check_cancelled()
-        buffer = bytearray(len(carry) + max(block_bytes, len(carry)))
+        if len(carry) > LINE_MAX_ROW_BYTES:
+            raise HTTPException(status_code=413, detail=f"a row is larger than {LINE_MAX_ROW_BYTES // 2**20:,} MiB and cannot be read")
+        buffer = bytearray(len(carry) + max(read_size, len(carry)))
         buffer[: len(carry)] = carry
         read = file.readinto(memoryview(buffer)[len(carry) :])
         filled = len(carry) + read
+        read_size = min(block_bytes, read_size * 2)
         if read == 0:
             if filled:
                 yield buffer, filled
@@ -149,15 +167,19 @@ def iter_line_blocks(
     start_offset: int,
     first_row: int,
     control: ScanControl | None = None,
-    block_bytes: int = LINE_SCAN_BLOCK_BYTES,
+    block_bytes: int | None = None,
+    initial_block_bytes: int | None = None,
     needle: bytes | None = None,
     parallel: bool = False,
 ) -> Iterator[LineBlock]:
-    """Yield blocks of complete lines from ``start_offset`` to the end of the file.
+    """Yield blocks of complete rows from ``start_offset`` to the end of the file.
 
     Newline positions are located with vectorized byte scans instead of one
-    Python call per line, and a block never splits a row. ``needle`` also
-    records candidate rows for :func:`iter_candidate_rows`. ``parallel``
+    Python call per line, and a block never splits a row.
+    ``initial_block_bytes`` starts with a smaller read that doubles up to
+    ``block_bytes`` (``LINE_SCAN_BLOCK_BYTES`` by default), which suits seeks
+    that usually stop early. ``needle`` also records candidate rows for
+    :func:`iter_candidate_rows`. ``parallel``
     analyzes up to ``LINE_SCAN_WORKERS`` blocks ahead on worker threads, which
     suits full scans; leave it off for short seeks that should not read ahead.
     Cancellation is checked before every read.
@@ -172,7 +194,7 @@ def iter_line_blocks(
         # in the first block returns without waiting for later blocks.
         depth = 1
         pending: deque[tuple[bytearray, int, Future[_LinePositions]]] = deque()
-        chunks = _iter_raw_chunks(file, block_bytes, control)
+        chunks = _iter_raw_chunks(file, block_bytes or LINE_SCAN_BLOCK_BYTES, control, initial_block_bytes=initial_block_bytes)
         while True:
             chunk = next(chunks, None)
             if chunk is not None:
@@ -195,6 +217,48 @@ def iter_line_blocks(
             row += block.row_count
             if pool is not None:
                 depth = min(depth + 1, LINE_SCAN_WORKERS + 1)
+
+
+@dataclass(frozen=True, slots=True)
+class LinePage:
+    """Raw rows of one preview page and the cursor just after them.
+
+    ``rows`` holds ``(row ID, raw row bytes)`` pairs for visible rows.
+    ``at_end`` is true when the page reached the end of the file.
+    """
+
+    rows: list[tuple[int, bytes]]
+    next_offset: int
+    next_row: int
+    at_end: bool
+
+
+def read_line_page(
+    path: Path,
+    *,
+    byte_offset: int,
+    row_number: int,
+    limit: int,
+    max_bytes: int,
+    deleted_ids: set[int],
+) -> LinePage:
+    """Read up to ``limit`` visible rows starting at a known row cursor.
+
+    Reading stops once the page holds one row and spans ``max_bytes`` of the
+    file. Reads start small and double, so a page of short rows costs one
+    small read while a page of large rows reads only what it shows.
+    """
+    rows: list[tuple[int, bytes]] = []
+    next_offset, next_row = byte_offset, row_number
+    for block in iter_line_blocks(path, start_offset=byte_offset, first_row=row_number, initial_block_bytes=LINE_SEEK_BLOCK_BYTES):
+        for index in range(block.row_count):
+            start = block.offset + int(block.starts[index])
+            if len(rows) >= limit or (rows and start - byte_offset >= max_bytes):
+                return LinePage(rows, start, block.first_row + index, False)
+            if block.first_row + index not in deleted_ids:
+                rows.append((block.first_row + index, bytes(block.line(index))))
+        next_offset, next_row = block.end_offset, block.first_row + block.row_count
+    return LinePage(rows, next_offset, next_row, True)
 
 
 def line_search_needle(query: str) -> bytes | None:
@@ -265,7 +329,7 @@ def _line_cursor_for_offset(
 
     index = LineOffsetIndex(path)
     end_offset, end_row = start_offset, next_row_number
-    for block in iter_line_blocks(path, start_offset=start_offset, first_row=next_row_number):
+    for block in iter_line_blocks(path, start_offset=start_offset, first_row=next_row_number, initial_block_bytes=LINE_SEEK_BLOCK_BYTES):
         index.record_checkpoints(block.checkpoints(index.stride))
         block_end_row = block.first_row + block.row_count
         hidden_in_block = bisect_left(hidden_row_ids, block_end_row) - bisect_left(hidden_row_ids, block.first_row)
@@ -291,7 +355,7 @@ def _raw_line_value(path: Path, row_id: int, *, first_data_offset: int = 0) -> b
     row_number = indexed.line_number if indexed else 1
     if row_id - row_number > MAX_OFFSET_SCAN_ROWS and path.stat().st_size - byte_offset > MAX_OFFSET_SCAN_BYTES:
         raise HTTPException(status_code=400, detail="row is too far from the nearest row index checkpoint; run Count Rows once to index this dataset")
-    for block in iter_line_blocks(path, start_offset=byte_offset, first_row=row_number):
+    for block in iter_line_blocks(path, start_offset=byte_offset, first_row=row_number, initial_block_bytes=LINE_SEEK_BLOCK_BYTES):
         index.record_checkpoints(block.checkpoints(index.stride))
         if row_id < block.first_row + block.row_count:
             return bytes(block.line(row_id - block.first_row))

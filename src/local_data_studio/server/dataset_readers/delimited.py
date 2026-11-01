@@ -13,6 +13,8 @@ from ..db import build_table_response
 from ..line_index import LineOffsetIndex
 from ..serialization import serialize_value
 from .common import (
+    RECENT_ROWS,
+    dataset_cache_key,
     decode_page_token_for,
     encode_page_token,
     load_or_create_metadata,
@@ -21,7 +23,7 @@ from .common import (
     token_int,
 )
 from .contracts import DatasetMetadata, ScanControl, SearchPage
-from .line_cursor import _line_cursor_for_offset, _raw_line_value, iter_candidate_rows, iter_line_blocks, line_search_needle
+from .line_cursor import _line_cursor_for_offset, _raw_line_value, iter_candidate_rows, iter_line_blocks, line_search_needle, read_line_page
 
 CSV_FIELD_SIZE_LOCK = Lock()
 
@@ -62,12 +64,19 @@ def load_delimited_metadata(path: Path, delimiter: str, *, use_cache: bool = Tru
     return load_or_create_metadata(path, lambda source: _create_delimited_metadata(source, delimiter), use_cache=use_cache)
 
 
+def _record_values(line: bytes, delimiter: str, width: int) -> list[Any]:
+    values: list[Any] = parse_delimited_record(line.decode("utf-8-sig", "replace").rstrip("\r\n"), delimiter)
+    return values + [None] * max(0, width - len(values))
+
+
 def raw_delimited_row(path: Path, row_id: int, delimiter: str) -> tuple[list[str], list[Any]]:
     """Return one one-based CSV/TSV row using the nearest sparse checkpoint."""
+    cached = RECENT_ROWS.get(dataset_cache_key(path), row_id)
+    if cached is not None:
+        return cached
     columns, first_data_offset = read_delimited_header(path, delimiter)
     line = _raw_line_value(path, row_id, first_data_offset=first_data_offset)
-    values = parse_delimited_record(line.decode("utf-8-sig", "replace").rstrip("\r\n"), delimiter)
-    return columns, values + [None] * max(0, len(columns) - len(values))
+    return columns, _record_values(line, delimiter, len(columns))
 
 
 def preview_delimited(
@@ -80,50 +89,35 @@ def preview_delimited(
     page_token: str | None,
     deleted_ids: set[int],
 ) -> dict[str, Any]:
-    """Return a bounded CSV/TSV page and byte-offset cursor for the next page."""
+    """Return a bounded CSV/TSV page and byte-offset cursor for the next page.
+
+    Parsed rows are kept in the recent-row cache for raw row requests.
+    """
     source_columns, first_data_offset = read_delimited_header(path, delimiter)
     columns = source_columns[:MAX_COLUMNS]
     columns_truncated = len(source_columns) > MAX_COLUMNS
     kind = "tsv" if delimiter == "\t" else "csv"
     token = decode_page_token_for(page_token, kind)
     if page_token:
-        byte_offset = token_int(token, "byte_offset", first_data_offset)
+        byte_offset = max(first_data_offset, token_int(token, "byte_offset", first_data_offset))
         row_number = token_int(token, "row_number", 1, minimum=1)
     else:
-        byte_offset, row_number = _line_cursor_for_offset(
-            path,
-            offset,
-            first_data_offset=first_data_offset,
-            deleted_ids=deleted_ids,
-        )
+        byte_offset, row_number = _line_cursor_for_offset(path, offset, first_data_offset=first_data_offset, deleted_ids=deleted_ids)
+    page = read_line_page(path, byte_offset=byte_offset, row_number=row_number, limit=limit, max_bytes=PREVIEW_PAGE_MAX_BYTES, deleted_ids=deleted_ids)
+    cache_key = dataset_cache_key(path)
     rows: list[list[Any]] = []
     row_ids: list[int] = []
-    next_byte_offset = byte_offset
-    next_row_number = row_number
-    with path.open("rb") as file:
-        file.seek(byte_offset)
-        while len(rows) < limit and (not rows or next_byte_offset - byte_offset < PREVIEW_PAGE_MAX_BYTES):
-            line = file.readline()
-            if not line:
-                next_byte_offset = file.tell()
-                break
-            next_byte_offset = file.tell()
-            if not line.strip():
-                continue
-            current_row_id = next_row_number
-            next_row_number += 1
-            if current_row_id in deleted_ids:
-                continue
-            values = parse_delimited_record(line.decode("utf-8-sig", "replace").rstrip("\r\n"), delimiter)
-            padded = values + [None] * max(0, len(columns) - len(values))
-            rows.append([serialize_value(value) for value in padded[: len(columns)]])
-            row_ids.append(current_row_id)
+    for row_id, line in page.rows:
+        values = _record_values(line, delimiter, len(source_columns))
+        rows.append([serialize_value(value) for value in values[: len(columns)]])
+        row_ids.append(row_id)
+        RECENT_ROWS.put(cache_key, row_id, source_columns, values, len(line))
 
-    has_next = next_byte_offset < path.stat().st_size
-    next_token = encode_page_token({"kind": kind, "byte_offset": next_byte_offset, "row_number": next_row_number}) if has_next else None
+    has_next = not page.at_end
+    next_token = encode_page_token({"kind": kind, "byte_offset": page.next_offset, "row_number": page.next_row}) if has_next else None
     response = build_table_response(file_name, columns, rows, limit, max(0, row_number - 1), row_ids)
     response.update({"next_page_token": next_token, "has_next": has_next})
-    warning = merge_warnings(COLUMN_LIMIT_WARNING if columns_truncated else None, response.get("warning"))
+    warning = merge_warnings(load_delimited_metadata(path, delimiter).warning, COLUMN_LIMIT_WARNING if columns_truncated else None, response.get("warning"))
     if warning:
         response["warning"] = warning
     if columns_truncated:
@@ -142,12 +136,12 @@ def search_delimited(
 ) -> SearchPage:
     """Scan CSV/TSV from ``cursor`` for at most ``limit`` matching visible rows.
 
-    Raw blocks are filtered with a byte pattern first, so only candidate lines
+    Raw blocks are filtered with a byte pattern first, so only candidate rows
     are decoded and parsed. The returned cursor resumes after the last match.
     """
     source_columns, first_data_offset = read_delimited_header(path, delimiter)
     columns = source_columns[:MAX_COLUMNS]
-    warning = COLUMN_LIMIT_WARNING if len(source_columns) > MAX_COLUMNS else None
+    warning = merge_warnings(load_delimited_metadata(path, delimiter).warning, COLUMN_LIMIT_WARNING if len(source_columns) > MAX_COLUMNS else None)
     rows: list[list[Any]] = []
     row_ids: list[int] = []
     lowered = query.lower()
@@ -170,7 +164,7 @@ def search_delimited(
             rows.append([serialize_value(value) for value in padded[: len(columns)]])
             row_ids.append(row_number)
             if len(rows) >= limit:
-                next_cursor = {"byte_offset": block.offset + int(block.ends[position]), "row_number": row_number + 1}
+                next_cursor = {"byte_offset": block.record_end(position), "row_number": row_number + 1}
                 return SearchPage(columns, rows, row_ids, warning, next_cursor)
         control.update(progress=min(block.end_offset / size, 0.999), message=f"Found {len(rows):,} rows")
     return SearchPage(columns, rows, row_ids, warning)

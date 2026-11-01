@@ -239,7 +239,16 @@ MAX_OFFSET_SCAN_ROWS: int = 1_000_000
 # small files never ask for an index.
 MAX_OFFSET_SCAN_BYTES: int = 256 * 1024 * 1024
 LINE_SCAN_BLOCK_BYTES: int = 16 * 1024 * 1024
+# Seeks and single-row reads start with this block size and double it, so a
+# target near a checkpoint costs one small read instead of a full scan block.
+LINE_SEEK_BLOCK_BYTES: int = 256 * 1024
+# One physical row may not exceed this size; larger rows would need buffers of
+# several times this size to be held in memory.
+LINE_MAX_ROW_BYTES: int = 512 * 1024 * 1024
 PREVIEW_PAGE_MAX_BYTES: int = 32 * 1024 * 1024
+# Raw rows decoded for preview pages stay in memory up to this size, so Row
+# Inspector, image, and audio requests for visible rows skip the file.
+RECENT_ROW_CACHE_MAX_BYTES: int = 64 * 1024 * 1024
 MAX_JSON_PREVIEW_BYTES: int = 16 * 1024 * 1024
 SYNC_OPERATION_MAX_BYTES: int = 256 * 1024 * 1024
 HARD_DELETE_MAX_BYTES: int = 256 * 1024 * 1024

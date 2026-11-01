@@ -5,6 +5,8 @@ from __future__ import annotations
 import base64
 import binascii
 import json
+import threading
+from collections import OrderedDict
 from collections.abc import Callable
 from pathlib import Path
 from typing import Any
@@ -12,13 +14,68 @@ from typing import Any
 from fastapi import HTTPException
 
 from ..cache import metadata_cache_path
-from ..config import COLUMN_LIMIT_WARNING, MAX_COLUMNS, MAX_OFFSET_FALLBACK
+from ..config import COLUMN_LIMIT_WARNING, MAX_COLUMNS, MAX_OFFSET_FALLBACK, RECENT_ROW_CACHE_MAX_BYTES
 from ..serialization import serialize_value
 from .contracts import DatasetMetadata
 
 TB_SAFE_EXTENSIONS = {".jsonl", ".csv", ".tsv", ".parquet"}
 JSON_NOT_TB_SAFE_WARNING = "JSON array/object files are not TB-friendly. Convert large datasets to JSONL or Parquet for bounded preview."
 MetadataLoader = Callable[[Path], DatasetMetadata]
+
+
+def dataset_cache_key(path: Path) -> str:
+    """Return an in-memory cache key that changes whenever the file is rewritten."""
+    resolved = path.resolve()
+    stat = resolved.stat()
+    return f"{resolved}|{stat.st_size}|{stat.st_mtime_ns}"
+
+
+class RecentRowCache:
+    """Byte-bounded LRU of complete raw rows that preview pages already decoded.
+
+    Row Inspector, enlarged images, and audio playback request rows that are
+    on screen, so serving them from memory avoids reading the file again.
+    """
+
+    def __init__(self, max_bytes: int) -> None:
+        """Create an empty cache that keeps about ``max_bytes`` of source rows."""
+        self._max_bytes = max_bytes
+        self._bytes = 0
+        self._lock = threading.Lock()
+        self._rows: OrderedDict[tuple[str, int], tuple[list[str], list[Any], int]] = OrderedDict()
+
+    def put(self, dataset_key: str, row_id: int, columns: list[str], values: list[Any], size: int) -> None:
+        """Remember one row whose source text or encoded width is ``size`` bytes."""
+        size = max(1, size)
+        if size > self._max_bytes:
+            return
+        with self._lock:
+            previous = self._rows.pop((dataset_key, row_id), None)
+            if previous is not None:
+                self._bytes -= previous[2]
+            self._rows[(dataset_key, row_id)] = (columns, values, size)
+            self._bytes += size
+            while self._bytes > self._max_bytes:
+                _, (_, _, evicted) = self._rows.popitem(last=False)
+                self._bytes -= evicted
+
+    def get(self, dataset_key: str, row_id: int) -> tuple[list[str], list[Any]] | None:
+        """Return a remembered row's columns and values, or ``None``."""
+        with self._lock:
+            entry = self._rows.get((dataset_key, row_id))
+            if entry is None:
+                return None
+            self._rows.move_to_end((dataset_key, row_id))
+            return list(entry[0]), list(entry[1])
+
+    def clear(self) -> None:
+        """Forget every row."""
+        with self._lock:
+            self._rows.clear()
+            self._bytes = 0
+
+
+RECENT_ROWS = RecentRowCache(RECENT_ROW_CACHE_MAX_BYTES)
 
 
 def merge_warnings(*warnings: str | None) -> str | None:
