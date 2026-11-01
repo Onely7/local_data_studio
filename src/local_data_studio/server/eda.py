@@ -3,11 +3,13 @@
 import datetime
 import decimal
 import hashlib
+import importlib.metadata
+import importlib.util
 import json
+import sys
+import types
 from pathlib import Path
 from typing import Any
-
-from ydata_profiling import ProfileReport
 
 from .config import (
     EDA_CACHE_DIR,
@@ -15,6 +17,23 @@ from .config import (
     EDA_NESTED_POLICY,
 )
 from .db import open_connection, relation_sql, relation_with_rowid_sql
+
+
+def _install_pkg_resources_shim() -> None:
+    """Provide the ``pkg_resources`` API that ydata-profiling 4.18 still imports.
+
+    setuptools 81 removed ``pkg_resources``, and ydata-profiling only calls
+    ``get_distribution(name).version``, which ``importlib.metadata`` answers.
+    """
+    if importlib.util.find_spec("pkg_resources") is None:
+        shim = types.ModuleType("pkg_resources")
+        shim.get_distribution = lambda name: types.SimpleNamespace(version=importlib.metadata.version(name))  # ty: ignore[unresolved-attribute]
+        sys.modules["pkg_resources"] = shim
+
+
+_install_pkg_resources_shim()
+
+from ydata_profiling import ProfileReport  # noqa: E402
 
 EDA_CACHE_VERSION = "ydata-v2"
 

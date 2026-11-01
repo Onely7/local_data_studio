@@ -1,7 +1,7 @@
 """FastAPI application assembly for Local Data Studio."""
 
 import asyncio
-from collections.abc import AsyncIterator
+from collections.abc import AsyncGenerator
 from contextlib import asynccontextmanager
 
 from fastapi import FastAPI
@@ -75,7 +75,7 @@ def create_app(*, job_store: JobStore | None = None, atlas_runtime: AtlasRuntime
     owned_atlas_runtime = atlas_runtime or AtlasRuntime(max_instances=ATLAS_MAX_INSTANCES)
 
     @asynccontextmanager
-    async def lifespan(_: FastAPI) -> AsyncIterator[None]:
+    async def lifespan(_: FastAPI) -> AsyncGenerator[None]:
         await owned_atlas_runtime.start_proxy_client()
         try:
             yield
