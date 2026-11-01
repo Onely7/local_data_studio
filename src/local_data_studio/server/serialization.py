@@ -215,6 +215,25 @@ def serialize_raw_value(value: Any, *, key: str | None = None, sibling_audio_pat
     return result
 
 
+# Strings this long may hold encoded images that become thumbnails.
+HEAVY_STRING_CHARS = 64 * 1024
+
+
+def _has_heavy_values(value: Any, depth: int = 2) -> bool:
+    """Return whether serializing ``value`` may decode images or audio."""
+    if isinstance(value, (bytes, bytearray, memoryview)):
+        return True
+    if isinstance(value, str):
+        return len(value) > HEAVY_STRING_CHARS
+    if depth <= 0:
+        return False
+    if isinstance(value, dict):
+        return any(_has_heavy_values(item, depth - 1) for item in islice(value.values(), MAX_SEQ_ITEMS))
+    if isinstance(value, (list, tuple)):
+        return any(_has_heavy_values(item, depth - 1) for item in value[:MAX_SEQ_ITEMS])
+    return False
+
+
 def _serialize_row(row: Sequence[Any]) -> list[Any]:
     return [serialize_value(cell) for cell in row]
 
@@ -229,9 +248,10 @@ def _serialization_pool() -> ThreadPoolExecutor:
 def serialize_rows(rows: Sequence[Sequence[Any]]) -> list[list[Any]]:
     """Serialize row sequences into JSON-friendly lists, preserving row order.
 
-    Rows are converted on a shared worker pool so image thumbnails for one
-    page are generated in parallel.
+    Rows holding bytes or very long strings are converted on a shared worker
+    pool, so image thumbnails for one page are generated in parallel. Other
+    pages are converted inline, which avoids the pool's per-row handoff.
     """
-    if len(rows) < 2:
+    if len(rows) < 2 or not any(_has_heavy_values(cell) for row in rows for cell in row):
         return [_serialize_row(row) for row in rows]
     return list(_serialization_pool().map(_serialize_row, rows))
