@@ -17,8 +17,10 @@ METADATA_CACHE_DIR = CACHE_DIR / "metadata"
 INDEX_CACHE_DIR = CACHE_DIR / "index"
 SEARCH_CACHE_DIR = CACHE_DIR / "search"
 STATS_CACHE_DIR = CACHE_DIR / "stats"
+QUERY_CACHE_DIR = CACHE_DIR / "query"
+DUCKDB_SPILL_DIR = CACHE_DIR / "duckdb-spill"
 
-for cache_dir in (COUNT_CACHE_DIR, METADATA_CACHE_DIR, INDEX_CACHE_DIR, SEARCH_CACHE_DIR, STATS_CACHE_DIR):
+for cache_dir in (COUNT_CACHE_DIR, METADATA_CACHE_DIR, INDEX_CACHE_DIR, SEARCH_CACHE_DIR, STATS_CACHE_DIR, QUERY_CACHE_DIR, DUCKDB_SPILL_DIR):
     cache_dir.mkdir(parents=True, exist_ok=True)
 
 
@@ -136,6 +138,12 @@ def search_cache_path(path: Path, *, query: str, limit: int, deleted_ids: list[i
     """Return the cached search result path for a dataset, search parameters, and resume token."""
     key = _operation_cache_key(path, {"query": query, "limit": limit, "deleted_ids": sorted(deleted_ids), "page_token": page_token})
     return SEARCH_CACHE_DIR / f"{key}.json"
+
+
+def query_result_cache_path(path: Path, *, sql: str, deleted_ids: list[int]) -> Path:
+    """Return the materialized result file for a dataset, SQL text, and soft-delete state."""
+    key = _operation_cache_key(path, {"sql": sql, "deleted_ids": sorted(deleted_ids)})
+    return QUERY_CACHE_DIR / f"{key}.parquet"
 
 
 def stats_cache_path(path: Path) -> Path:

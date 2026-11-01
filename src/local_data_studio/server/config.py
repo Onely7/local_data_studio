@@ -243,7 +243,14 @@ HARD_DELETE_MAX_BYTES: int = 256 * 1024 * 1024
 PARQUET_PREVIEW_BATCH_SIZE: int = 2048
 DUCKDB_QUERY_MEMORY_LIMIT: str = "1GB"
 DUCKDB_QUERY_TIMEOUT_SECONDS: float = 30.0
+# Background SQL jobs report progress and can be cancelled, so they may scan a
+# whole TB-scale dataset; the timeout only stops runaway queries.
+SQL_JOB_TIMEOUT_SECONDS: float = 6 * 60 * 60
 DUCKDB_QUERY_POLL_SECONDS: float = 0.1
+# Full-scan query results on large datasets are materialized once and paged
+# from the cache; larger results are truncated to keep the cache bounded.
+QUERY_RESULT_MAX_ROWS: int = 1_000_000
+QUERY_CACHE_MAX_BYTES: int = 4 * 1024 * 1024 * 1024
 COLUMN_LIMIT_WARNING: str = f"Only the first {MAX_COLUMNS} columns are returned to keep API responses bounded."
 
 DEFAULT_EDA_SAMPLE: int = SETTINGS.default_eda_sample
