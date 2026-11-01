@@ -12,6 +12,9 @@ from pathlib import Path
 
 from .config import CACHE_DIR
 
+# Part of every dataset fingerprint. Raise it when readers number rows
+# differently, so indexes, counts, and search results built before are ignored.
+READER_CACHE_VERSION = 2
 COUNT_CACHE_DIR = CACHE_DIR / "count"
 METADATA_CACHE_DIR = CACHE_DIR / "metadata"
 INDEX_CACHE_DIR = CACHE_DIR / "index"
@@ -107,7 +110,7 @@ class DatasetFingerprint:
         """
         resolved = path.resolve()
         stat = resolved.stat()
-        payload = f"{resolved}|{stat.st_size}|{stat.st_mtime_ns}"
+        payload = f"{READER_CACHE_VERSION}|{resolved}|{stat.st_size}|{stat.st_mtime_ns}"
         key = hashlib.sha256(payload.encode("utf-8")).hexdigest()
         return cls(key=key, path=resolved, size=stat.st_size, modified_ns=stat.st_mtime_ns)
 

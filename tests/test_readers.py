@@ -17,7 +17,8 @@ from local_data_studio.server.dataset_readers import jsonl as jsonl_reader
 from local_data_studio.server.dataset_readers import line as line_reader
 from local_data_studio.server.dataset_readers import line_cursor, line_indexing
 from local_data_studio.server.dataset_readers import parquet as parquet_reader
-from local_data_studio.server.dataset_readers.common import encode_page_token
+from local_data_studio.server.dataset_readers.common import RECENT_ROWS, encode_page_token
+from local_data_studio.server.delete_ops import delete_row_from_file
 from local_data_studio.server.readers import count_rows_with_progress, fetch_preview_page, fetch_raw_row, load_dataset_metadata, search_dataset
 
 
@@ -553,3 +554,49 @@ class ReaderPreviewTests(TestCase):
                         columns, values = fetch_raw_row(root / name, 2)
 
                     self.assertEqual((["id", "text"], expected), (columns, values))
+
+    def test_csv_quoted_newlines_stay_inside_one_row(self) -> None:
+        """Keep quoted multi-line fields in one row for preview, count, raw rows, and search."""
+        with TemporaryDirectory() as tmpdir:
+            path = Path(tmpdir) / "notes.csv"
+            path.write_text('id,note\n1,"first\nline"\n2,plain\n3,"has ""quotes""\nand ""more"""\n4,"ends with\n"\n', encoding="utf-8")
+
+            page = fetch_preview_page("notes.csv", path, limit=10)
+            count = count_rows_with_progress(path, _NoCancelControl())
+            RECENT_ROWS.clear()
+            columns, raw = fetch_raw_row(path, 3)
+            search = search_dataset("notes.csv", path, query="more", limit=5, control=_NoCancelControl())
+
+        self.assertEqual([1, 2, 3, 4], page["row_ids"])
+        self.assertEqual([["1", "first\nline"], ["2", "plain"], ["3", 'has "quotes"\nand "more"'], ["4", "ends with\n"]], page["rows"])
+        self.assertNotIn("warning", page)
+        self.assertEqual(4, count)
+        self.assertEqual((["id", "note"], ["3", 'has "quotes"\nand "more"']), (columns, raw))
+        self.assertEqual([3], search["row_ids"])
+
+    def test_csv_with_unbalanced_quotes_splits_rows_at_line_breaks(self) -> None:
+        """Fall back to one row per line, with a warning, when quotes cannot mark row ends."""
+        with TemporaryDirectory() as tmpdir:
+            path = Path(tmpdir) / "messy.csv"
+            path.write_text('id,note\n1,"spans\nlines"\n2,5" display\n3,ok\n', encoding="utf-8")
+
+            page = fetch_preview_page("messy.csv", path, limit=10)
+
+        self.assertEqual([1, 2, 3, 4], page["row_ids"])
+        self.assertIn("quote", page["warning"])
+
+    def test_deleting_keeps_quoted_newlines_and_refuses_line_split_csv(self) -> None:
+        """Delete CSV records by the preview's numbering, and refuse files whose rows are split at line breaks."""
+        with TemporaryDirectory() as tmpdir:
+            quoted = Path(tmpdir) / "notes.csv"
+            quoted.write_text('id,note\n1,"first\nline"\n2,plain\n3,"third\nline"\n', encoding="utf-8")
+            messy = Path(tmpdir) / "messy.csv"
+            messy.write_text('id,note\n1,"spans\nlines"\n2,5" display\n', encoding="utf-8")
+
+            delete_row_from_file(quoted, 2)
+            page = fetch_preview_page("notes.csv", quoted, limit=10)
+            with self.assertRaises(HTTPException) as raised:
+                delete_row_from_file(messy, 1)
+
+        self.assertEqual([["1", "first\nline"], ["3", "third\nline"]], page["rows"])
+        self.assertEqual(400, raised.exception.status_code)
