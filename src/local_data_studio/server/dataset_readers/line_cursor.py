@@ -101,10 +101,28 @@ def _candidate_positions(view: np.ndarray, starts: np.ndarray, ends: np.ndarray,
     return np.unique(rows[(starts[rows] <= hits) & (hits + len(pattern) <= ends[rows])])
 
 
-def _line_positions(data: bytearray, size: int, needle: bytes | None) -> _LinePositions:
+def _outside_quotes(view: np.ndarray, positions: np.ndarray) -> np.ndarray:
+    """Return which byte positions lie outside double-quoted fields.
+
+    ``view`` must start at a record boundary. RFC 4180 writers double quotes
+    inside quoted fields, so every quote character toggles the quoted state.
+    """
+    inside = np.logical_xor.accumulate(view == 34)
+    return ~inside[positions]
+
+
+def record_terminators(view: np.ndarray, quoted: bool) -> np.ndarray:
+    """Return positions of newlines that end a row, skipping those inside quoted fields."""
+    newlines = np.flatnonzero(view == 10)
+    if quoted and len(newlines):
+        newlines = newlines[_outside_quotes(view, newlines)]
+    return newlines
+
+
+def _line_positions(data: bytearray, size: int, needle: bytes | None, quoted: bool = False) -> _LinePositions:
     view = np.frombuffer(data, dtype=np.uint8, count=size)
-    ends = np.flatnonzero(view == 10) + 1
-    if size and view[size - 1] != 10:
+    ends = record_terminators(view, quoted) + 1
+    if size and (not len(ends) or ends[-1] != size):
         ends = np.append(ends, size)
     starts = np.zeros(len(ends), dtype=np.int64)
     starts[1:] = ends[:-1]
@@ -120,12 +138,20 @@ def _line_positions(data: bytearray, size: int, needle: bytes | None) -> _LinePo
     return starts, ends, candidates
 
 
+def _record_cut(buffer: bytearray, filled: int, quoted: bool) -> int:
+    if not quoted:
+        return buffer.rfind(b"\n", 0, filled) + 1
+    ends = record_terminators(np.frombuffer(buffer, dtype=np.uint8, count=filled), quoted)
+    return int(ends[-1]) + 1 if len(ends) else 0
+
+
 def _iter_raw_chunks(
     file: BufferedReader,
     block_bytes: int,
     control: ScanControl | None,
     *,
     initial_block_bytes: int | None = None,
+    quoted: bool = False,
 ) -> Iterator[tuple[bytearray, int]]:
     """Yield buffers ending with complete rows and the byte count of those rows.
 
@@ -153,7 +179,7 @@ def _iter_raw_chunks(
             if filled:
                 yield buffer, filled
             return
-        cut = buffer.rfind(b"\n", 0, filled) + 1
+        cut = _record_cut(buffer, filled, quoted)
         if cut == 0:
             carry = bytes(buffer[:filled])
             continue
@@ -171,11 +197,13 @@ def iter_line_blocks(
     initial_block_bytes: int | None = None,
     needle: bytes | None = None,
     parallel: bool = False,
+    quoted: bool = False,
 ) -> Iterator[LineBlock]:
     """Yield blocks of complete rows from ``start_offset`` to the end of the file.
 
     Newline positions are located with vectorized byte scans instead of one
-    Python call per line, and a block never splits a row.
+    Python call per line, and a block never splits a row. ``quoted`` treats
+    newlines inside double-quoted CSV fields as part of the row.
     ``initial_block_bytes`` starts with a smaller read that doubles up to
     ``block_bytes`` (``LINE_SCAN_BLOCK_BYTES`` by default), which suits seeks
     that usually stop early. ``needle`` also records candidate rows for
@@ -194,16 +222,16 @@ def iter_line_blocks(
         # in the first block returns without waiting for later blocks.
         depth = 1
         pending: deque[tuple[bytearray, int, Future[_LinePositions]]] = deque()
-        chunks = _iter_raw_chunks(file, block_bytes or LINE_SCAN_BLOCK_BYTES, control, initial_block_bytes=initial_block_bytes)
+        chunks = _iter_raw_chunks(file, block_bytes or LINE_SCAN_BLOCK_BYTES, control, initial_block_bytes=initial_block_bytes, quoted=quoted)
         while True:
             chunk = next(chunks, None)
             if chunk is not None:
                 data, size = chunk
                 if pool is not None:
-                    positions = pool.submit(_line_positions, data, size, needle)
+                    positions = pool.submit(_line_positions, data, size, needle, quoted)
                 else:
                     positions = Future()
-                    positions.set_result(_line_positions(data, size, needle))
+                    positions.set_result(_line_positions(data, size, needle, quoted))
                 pending.append((data, size, positions))
                 if len(pending) < depth:
                     continue
@@ -241,6 +269,7 @@ def read_line_page(
     limit: int,
     max_bytes: int,
     deleted_ids: set[int],
+    quoted: bool = False,
 ) -> LinePage:
     """Read up to ``limit`` visible rows starting at a known row cursor.
 
@@ -250,7 +279,7 @@ def read_line_page(
     """
     rows: list[tuple[int, bytes]] = []
     next_offset, next_row = byte_offset, row_number
-    for block in iter_line_blocks(path, start_offset=byte_offset, first_row=row_number, initial_block_bytes=LINE_SEEK_BLOCK_BYTES):
+    for block in iter_line_blocks(path, start_offset=byte_offset, first_row=row_number, initial_block_bytes=LINE_SEEK_BLOCK_BYTES, quoted=quoted):
         for index in range(block.row_count):
             start = block.offset + int(block.starts[index])
             if len(rows) >= limit or (rows and start - byte_offset >= max_bytes):
@@ -301,6 +330,7 @@ def _line_cursor_for_offset(
     *,
     first_data_offset: int = 0,
     deleted_ids: set[int] | None = None,
+    quoted: bool = False,
 ) -> tuple[int, int]:
     """Return the byte offset and one-based row ID of the first visible row after ``offset`` rows.
 
@@ -329,7 +359,7 @@ def _line_cursor_for_offset(
 
     index = LineOffsetIndex(path)
     end_offset, end_row = start_offset, next_row_number
-    for block in iter_line_blocks(path, start_offset=start_offset, first_row=next_row_number, initial_block_bytes=LINE_SEEK_BLOCK_BYTES):
+    for block in iter_line_blocks(path, start_offset=start_offset, first_row=next_row_number, initial_block_bytes=LINE_SEEK_BLOCK_BYTES, quoted=quoted):
         index.record_checkpoints(block.checkpoints(index.stride))
         block_end_row = block.first_row + block.row_count
         hidden_in_block = bisect_left(hidden_row_ids, block_end_row) - bisect_left(hidden_row_ids, block.first_row)
@@ -348,14 +378,14 @@ def _line_cursor_for_offset(
     return end_offset, end_row
 
 
-def _raw_line_value(path: Path, row_id: int, *, first_data_offset: int = 0) -> bytes:
+def _raw_line_value(path: Path, row_id: int, *, first_data_offset: int = 0, quoted: bool = False) -> bytes:
     index = LineOffsetIndex(path)
     indexed = index.nearest_before(row_id)
     byte_offset = max(first_data_offset, indexed.byte_offset) if indexed else first_data_offset
     row_number = indexed.line_number if indexed else 1
     if row_id - row_number > MAX_OFFSET_SCAN_ROWS and path.stat().st_size - byte_offset > MAX_OFFSET_SCAN_BYTES:
         raise HTTPException(status_code=400, detail="row is too far from the nearest row index checkpoint; run Count Rows once to index this dataset")
-    for block in iter_line_blocks(path, start_offset=byte_offset, first_row=row_number, initial_block_bytes=LINE_SEEK_BLOCK_BYTES):
+    for block in iter_line_blocks(path, start_offset=byte_offset, first_row=row_number, initial_block_bytes=LINE_SEEK_BLOCK_BYTES, quoted=quoted):
         index.record_checkpoints(block.checkpoints(index.stride))
         if row_id < block.first_row + block.row_count:
             return bytes(block.line(row_id - block.first_row))

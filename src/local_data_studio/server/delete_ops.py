@@ -7,6 +7,7 @@ from pathlib import Path
 
 from fastapi import HTTPException
 
+from .dataset_readers.delimited import delimited_row_mode
 from .dataset_readers.parquet import close_parquet_readers
 from .db import (
     describe_relation,
@@ -18,6 +19,16 @@ from .db import (
 )
 
 
+def _reject_line_split_csv(path: Path) -> None:
+    """Refuse rewrites when the preview's row numbers differ from DuckDB's records."""
+    ext = path.suffix.lower()
+    if ext in {".csv", ".tsv"} and delimited_row_mode(path, "\t" if ext == ".tsv" else ",") == "inconsistent":
+        raise HTTPException(
+            status_code=400,
+            detail="this file's quotes are unbalanced, so its rows are split at line breaks and cannot be matched for deletion",
+        )
+
+
 def _replace_dataset(temp_path: Path, path: Path) -> None:
     # Cached Parquet readers keep the old file open, which blocks replacing it on Windows.
     if path.suffix.lower() == ".parquet":
@@ -27,6 +38,7 @@ def _replace_dataset(temp_path: Path, path: Path) -> None:
 
 def delete_row_via_duckdb(path: Path, row_id: int) -> None:
     """Delete a row from CSV/TSV/Parquet via DuckDB copy-out."""
+    _reject_line_split_csv(path)
     rel_literal = relation_sql_literal(path)
     exists_sql = f"SELECT COUNT(*) FROM (SELECT row_number() OVER () AS __rowid FROM {rel_literal}) WHERE __rowid = {row_id}"
     query = f"SELECT * EXCLUDE(__rowid) FROM (SELECT *, row_number() OVER () AS __rowid FROM {rel_literal}) WHERE __rowid <> {row_id}"

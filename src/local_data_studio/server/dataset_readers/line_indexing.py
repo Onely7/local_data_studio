@@ -10,6 +10,7 @@ from fastapi import HTTPException
 from ..line_index import LineOffsetIndex
 from .common import format_name
 from .contracts import ScanControl
+from .delimited import delimited_rows_are_quoted, read_delimited_header
 from .line_cursor import iter_line_blocks
 
 LINE_DATASET_EXTENSIONS = {".jsonl", ".csv", ".tsv"}
@@ -33,11 +34,12 @@ def build_line_index_with_progress(path: Path, control: ScanControl) -> dict[str
     checkpoints: list[tuple[int, int]] = []
     size = max(byte_count, 1)
     first_data_offset = 0
+    quoted = False
     if suffix in {".csv", ".tsv"}:
-        with path.open("rb") as file:
-            file.readline()
-            first_data_offset = file.tell()
-    for block in iter_line_blocks(path, start_offset=first_data_offset, first_row=1, control=control, parallel=True):
+        delimiter = "\t" if suffix == ".tsv" else ","
+        quoted = delimited_rows_are_quoted(path, delimiter)
+        _, first_data_offset = read_delimited_header(path, delimiter)
+    for block in iter_line_blocks(path, start_offset=first_data_offset, first_row=1, control=control, parallel=True, quoted=quoted):
         checkpoints.extend(block.checkpoints(index.stride))
         if len(checkpoints) >= INDEX_CHECKPOINT_BATCH_SIZE:
             index.record_checkpoints(checkpoints)
