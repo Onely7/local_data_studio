@@ -1,4 +1,4 @@
-"""Incremental byte-offset indexes for newline-delimited local datasets."""
+"""Incremental byte-offset indexes for row-oriented local datasets."""
 
 from __future__ import annotations
 
@@ -20,7 +20,7 @@ class IndexedLine:
 
 
 class LineOffsetIndex:
-    """SQLite-backed sparse index for jumping through large text datasets."""
+    """SQLite-backed sparse index for jumping through large datasets."""
 
     def __init__(self, dataset_path: Path, *, stride: int = INDEX_STRIDE) -> None:
         """Open a fingerprinted SQLite sidecar and initialize its schema.
@@ -34,9 +34,21 @@ class LineOffsetIndex:
         self._initialize()
 
     def _connect(self) -> sqlite3.Connection:
-        return sqlite3.connect(self.path)
+        connection = sqlite3.connect(self.path, timeout=30)
+        # The index is a rebuildable cache, so commits skip fsync; on slow disks
+        # each synced commit would add tens of milliseconds to a jump.
+        connection.execute("PRAGMA synchronous = OFF")
+        return connection
 
     def _initialize(self) -> None:
+        try:
+            self._create_tables()
+        except sqlite3.DatabaseError:
+            # A sidecar damaged by a crash is discarded and rebuilt from the dataset.
+            self.path.unlink(missing_ok=True)
+            self._create_tables()
+
+    def _create_tables(self) -> None:
         with self._connect() as connection:
             connection.execute(
                 """
@@ -76,9 +88,11 @@ class LineOffsetIndex:
         valid = [(line_number, byte_offset) for line_number, byte_offset in checkpoints if line_number > 0]
         if not valid:
             return
+        # Checkpoints for one dataset version never move, so known ones are
+        # skipped and a revisited region commits nothing.
         with self._connect() as connection:
             connection.executemany(
-                "INSERT OR REPLACE INTO line_offsets(line_number, byte_offset) VALUES (?, ?)",
+                "INSERT OR IGNORE INTO line_offsets(line_number, byte_offset) VALUES (?, ?)",
                 valid,
             )
 
@@ -94,18 +108,21 @@ class LineOffsetIndex:
                 ],
             )
 
+    def _metadata(self, connection: sqlite3.Connection) -> dict[str, str]:
+        return {str(key): str(value) for key, value in connection.execute("SELECT key, value FROM metadata").fetchall()}
+
     def status(self) -> dict[str, int | bool | None]:
         """Return lightweight metadata about the cached index."""
         with self._connect() as connection:
-            rows = connection.execute("SELECT key, value FROM metadata").fetchall()
-            checkpoint = connection.execute("SELECT MAX(line_number), MAX(byte_offset) FROM line_offsets").fetchone()
-        metadata = {str(key): str(value) for key, value in rows}
+            metadata = self._metadata(connection)
+            # Offsets grow with row numbers, so the last checkpoint holds both maxima.
+            checkpoint = connection.execute("SELECT line_number, byte_offset FROM line_offsets ORDER BY line_number DESC LIMIT 1").fetchone()
         return {
             "complete": metadata.get("complete") == "1",
             "row_count": int(metadata["row_count"]) if metadata.get("row_count", "").isdigit() else None,
             "byte_count": int(metadata["byte_count"]) if metadata.get("byte_count", "").isdigit() else None,
-            "max_indexed_line": int(checkpoint[0]) if checkpoint and checkpoint[0] is not None else None,
-            "max_indexed_byte": int(checkpoint[1]) if checkpoint and checkpoint[1] is not None else None,
+            "max_indexed_line": int(checkpoint[0]) if checkpoint else None,
+            "max_indexed_byte": int(checkpoint[1]) if checkpoint else None,
         }
 
     def nearest_before(self, line_number: int) -> IndexedLine | None:

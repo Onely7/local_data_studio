@@ -13,7 +13,9 @@ from ..db import build_table_response
 from ..line_index import LineOffsetIndex
 from ..serialization import serialize_rows
 from .common import (
+    RECENT_ROWS,
     align_existing_rows,
+    dataset_cache_key,
     decode_page_token_for,
     encode_page_token,
     extend_columns_from_value,
@@ -26,7 +28,7 @@ from .common import (
     token_int,
 )
 from .contracts import DatasetMetadata, ScanControl, SearchPage
-from .line_cursor import _line_cursor_for_offset, _raw_line_value, iter_candidate_rows, iter_line_blocks, line_search_needle
+from .line_cursor import _line_cursor_for_offset, _raw_line_value, iter_candidate_rows, iter_line_blocks, line_search_needle, read_line_page
 
 JSONL_SCHEMA_SAMPLE_ROWS = 100
 JSONL_SCHEMA_MAX_SCANNED_LINES = 10_000
@@ -72,13 +74,19 @@ def load_jsonl_metadata(path: Path, *, use_cache: bool = True) -> DatasetMetadat
     return load_or_create_metadata(path, _create_jsonl_metadata, use_cache=use_cache)
 
 
+def _decode_jsonl_row(line: bytes, row_id: int) -> Any:
+    try:
+        return json.loads(line)
+    except json.JSONDecodeError as exc:
+        raise HTTPException(status_code=400, detail=f"row {row_id:,} is not valid JSON: {exc.msg}") from exc
+
+
 def raw_jsonl_row(path: Path, row_id: int) -> tuple[list[str], list[Any]]:
     """Return one one-based JSONL row using the nearest sparse checkpoint."""
-    try:
-        value = json.loads(_raw_line_value(path, row_id))
-    except json.JSONDecodeError as exc:
-        raise HTTPException(status_code=400, detail="invalid jsonl format") from exc
-    return raw_row_values(value)
+    cached = RECENT_ROWS.get(dataset_cache_key(path), row_id)
+    if cached is not None:
+        return cached
+    return raw_row_values(_decode_jsonl_row(_raw_line_value(path, row_id), row_id))
 
 
 def preview_jsonl(
@@ -89,7 +97,10 @@ def preview_jsonl(
     page_token: str | None,
     deleted_ids: set[int],
 ) -> dict[str, Any]:
-    """Return a bounded JSONL page and byte-offset cursor for the next page."""
+    """Return a bounded JSONL page and byte-offset cursor for the next page.
+
+    Decoded rows are kept in the recent-row cache for raw row requests.
+    """
     token = decode_page_token_for(page_token, "jsonl")
     if page_token:
         byte_offset = token_int(token, "byte_offset", 0)
@@ -98,35 +109,23 @@ def preview_jsonl(
         byte_offset, row_number = _line_cursor_for_offset(path, offset, deleted_ids=deleted_ids)
     metadata = load_jsonl_metadata(path)
     columns = [column["name"] for column in metadata.columns]
+    page = read_line_page(path, byte_offset=byte_offset, row_number=row_number, limit=limit, max_bytes=PREVIEW_PAGE_MAX_BYTES, deleted_ids=deleted_ids)
+    cache_key = dataset_cache_key(path)
     values: list[Any] = []
     row_ids: list[int] = []
-    next_byte_offset = byte_offset
-    next_row_number = row_number
     columns_truncated = False
-
-    with path.open("rb") as file:
-        file.seek(byte_offset)
-        while len(values) < limit and (not values or next_byte_offset - byte_offset < PREVIEW_PAGE_MAX_BYTES):
-            line = file.readline()
-            if not line:
-                next_byte_offset = file.tell()
-                break
-            next_byte_offset = file.tell()
-            if not line.strip():
-                continue
-            current_row_id = next_row_number
-            next_row_number += 1
-            if current_row_id in deleted_ids:
-                continue
-            value = json.loads(line)
-            columns, row_columns_truncated = extend_columns_from_value(columns, value)
-            columns_truncated = columns_truncated or row_columns_truncated
-            values.append(value)
-            row_ids.append(current_row_id)
+    for row_id, line in page.rows:
+        value = _decode_jsonl_row(line, row_id)
+        columns, row_columns_truncated = extend_columns_from_value(columns, value)
+        columns_truncated = columns_truncated or row_columns_truncated
+        values.append(value)
+        row_ids.append(row_id)
+        row_columns, row_values = raw_row_values(value)
+        RECENT_ROWS.put(cache_key, row_id, row_columns, row_values, len(line))
 
     raw_rows = [[value.get(column) for column in columns] if isinstance(value, dict) else [value] for value in values]
-    has_next = next_byte_offset < path.stat().st_size
-    next_token = encode_page_token({"kind": "jsonl", "byte_offset": next_byte_offset, "row_number": next_row_number}) if has_next else None
+    has_next = not page.at_end
+    next_token = encode_page_token({"kind": "jsonl", "byte_offset": page.next_offset, "row_number": page.next_row}) if has_next else None
     response = build_table_response(file_name, columns, serialize_rows(raw_rows), limit, max(0, row_number - 1), row_ids)
     response.update({"next_page_token": next_token, "has_next": has_next})
     warning = merge_warnings(metadata.warning, COLUMN_LIMIT_WARNING if columns_truncated else None, response.get("warning"))

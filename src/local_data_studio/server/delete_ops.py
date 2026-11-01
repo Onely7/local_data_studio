@@ -7,6 +7,7 @@ from pathlib import Path
 
 from fastapi import HTTPException
 
+from .dataset_readers.parquet import close_parquet_readers
 from .db import (
     describe_relation,
     open_connection,
@@ -15,6 +16,13 @@ from .db import (
     relation_sql,
     relation_sql_literal,
 )
+
+
+def _replace_dataset(temp_path: Path, path: Path) -> None:
+    # Cached Parquet readers keep the old file open, which blocks replacing it on Windows.
+    if path.suffix.lower() == ".parquet":
+        close_parquet_readers()
+    os.replace(temp_path, path)
 
 
 def delete_row_via_duckdb(path: Path, row_id: int) -> None:
@@ -43,7 +51,7 @@ def delete_row_via_duckdb(path: Path, row_id: int) -> None:
             if not exists:
                 raise HTTPException(status_code=404, detail="row not found")
             con.execute(f"COPY ({query}) TO {quote_literal(str(temp_path))} ({format_opts})")
-        os.replace(temp_path, path)
+        _replace_dataset(temp_path, path)
     finally:
         if temp_path.exists():
             try:
@@ -160,7 +168,7 @@ def delete_column_via_duckdb(path: Path, column: str) -> None:
     try:
         with open_connection() as con:
             con.execute(f"COPY ({query}) TO {quote_literal(str(temp_path))} ({format_opts})")
-        os.replace(temp_path, path)
+        _replace_dataset(temp_path, path)
     finally:
         if temp_path.exists():
             try:
