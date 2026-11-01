@@ -9,12 +9,12 @@ from typing import Any
 from fastapi import HTTPException
 
 from .. import embedder_models
-from ..config import ATLAS_TRUST_REMOTE_CODE, EMBEDDER_MODELS_DIR
+from ..config import ATLAS_LARGE_DATASET_SAMPLE, ATLAS_TRUST_REMOTE_CODE, EMBEDDER_MODELS_DIR
 from ..db import open_connection, quote_ident
 from ..deleted_rows import deleted_row_ids_for
 from ..embedder_capabilities import BackendName, ModelCapabilities, analyze_model_capabilities
 from ..jobs import JobContext
-from ..sql import configure_duckdb_limits, create_data_view, materialize_query_result, normalize_select_sql, requires_full_scan
+from ..sql import configure_duckdb_limits, create_data_view, is_large_dataset, materialize_query_result, normalize_select_sql, requires_full_scan
 from .contracts import AtlasModality, AtlasOptions, AtlasProjectionMethod
 from .dataset import model_label, prepare_atlas_dataset
 from .images import IMAGE_COLUMN_HINTS, is_image_like_value
@@ -150,6 +150,7 @@ def _run_reserved_atlas_visualization(
         backend=selected_backend,
         prompt=normalized_prompt,
         capability_fingerprint=capabilities.fingerprint,
+        sample=base_options.sample or (ATLAS_LARGE_DATASET_SAMPLE if is_large_dataset(path) else None),
     )
     prepared = prepare_atlas_dataset(
         path=path,
