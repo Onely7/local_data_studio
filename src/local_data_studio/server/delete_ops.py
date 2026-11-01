@@ -8,6 +8,7 @@ from pathlib import Path
 from fastapi import HTTPException
 
 from .dataset_readers.delimited import delimited_row_mode
+from .dataset_readers.json_reader import json_layout
 from .dataset_readers.parquet import close_parquet_readers
 from .db import (
     describe_relation,
@@ -141,7 +142,7 @@ def delete_row_from_file(path: Path, row_id: int) -> None:
     if ext in {".csv", ".tsv", ".parquet"}:
         delete_row_via_duckdb(path, row_id)
         return
-    if ext == ".jsonl":
+    if ext == ".jsonl" or (ext == ".json" and json_layout(path) == "lines"):
         delete_row_jsonl(path, row_id)
         return
     if ext == ".json":
@@ -272,7 +273,7 @@ def delete_column_from_file(path: Path, column: str) -> None:
     if ext in {".csv", ".tsv", ".parquet"}:
         delete_column_via_duckdb(path, column)
         return
-    if ext == ".jsonl":
+    if ext == ".jsonl" or (ext == ".json" and json_layout(path) == "lines"):
         delete_column_jsonl(path, column)
         return
     if ext == ".json":

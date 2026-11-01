@@ -24,6 +24,7 @@ from ..line_index import IndexProgress, LineOffsetIndex
 from .common import dataset_cache_key, format_name
 from .contracts import ScanControl
 from .delimited import delimited_rows_are_quoted, read_delimited_header
+from .json_reader import array_start_offset, iter_array_blocks, json_layout
 from .line_cursor import iter_line_blocks
 
 LINE_DATASET_EXTENSIONS = {".jsonl", ".csv", ".tsv"}
@@ -66,7 +67,10 @@ class RowScan:
 
 
 def row_scan(path: Path) -> RowScan | None:
-    """Return the row scanner for JSONL, CSV, and TSV files, or ``None`` for other formats."""
+    """Return the row scanner for JSONL, CSV, TSV, and JSON Lines or array files.
+
+    Other files, including single-value JSON documents, return ``None``.
+    """
     suffix = path.suffix.lower()
     if suffix in {".csv", ".tsv"}:
         delimiter = "\t" if suffix == ".tsv" else ","
@@ -75,14 +79,18 @@ def row_scan(path: Path) -> RowScan | None:
         return RowScan(
             first_offset, lambda start, row, control: iter_line_blocks(path, start_offset=start, first_row=row, control=control, parallel=True, quoted=quoted)
         )
-    if suffix == ".jsonl":
+    layout = "lines" if suffix == ".jsonl" else json_layout(path) if suffix == ".json" else None
+    if layout == "lines":
         return RowScan(0, lambda start, row, control: iter_line_blocks(path, start_offset=start, first_row=row, control=control, parallel=True))
+    if layout == "array":
+        return RowScan(array_start_offset(path), lambda start, row, control: iter_array_blocks(path, start_offset=start, first_row=row, control=control))
     return None
 
 
 def is_row_indexed(path: Path) -> bool:
     """Return whether rows of this dataset are addressed through a sparse index."""
-    return path.suffix.lower() in LINE_DATASET_EXTENSIONS
+    suffix = path.suffix.lower()
+    return suffix in LINE_DATASET_EXTENSIONS or (suffix == ".json" and json_layout(path) != "value")
 
 
 @dataclass(frozen=True, slots=True)
@@ -260,7 +268,7 @@ class RowIndexBuilder:
     def _scan(self) -> None:
         scan = row_scan(self.path)
         if scan is None:
-            raise HTTPException(status_code=400, detail="row index is only supported for jsonl, csv, and tsv")
+            raise HTTPException(status_code=400, detail="row index is only supported for jsonl, csv, tsv, and JSON Lines or array files")
         index = LineOffsetIndex(self.path)
         with self._condition:
             progress = self._progress_locked()
@@ -361,7 +369,7 @@ def build_line_index_with_progress(path: Path, control: ScanControl, *, until_ro
         HTTPException: The format has no row index.
     """
     if not is_row_indexed(path):
-        raise HTTPException(status_code=400, detail="row index is only supported for jsonl, csv, and tsv")
+        raise HTTPException(status_code=400, detail="row index is only supported for jsonl, csv, tsv, and JSON Lines or array files")
     builder = index_builder(path)
     ticket = builder.request(IndexGoal(until_row=until_row))
     try:

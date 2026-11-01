@@ -18,8 +18,8 @@ from ..config import COLUMN_LIMIT_WARNING, MAX_COLUMNS, MAX_OFFSET_FALLBACK, REC
 from ..serialization import serialize_value
 from .contracts import DatasetMetadata
 
-TB_SAFE_EXTENSIONS = {".jsonl", ".csv", ".tsv", ".parquet"}
-JSON_NOT_TB_SAFE_WARNING = "JSON array/object files are not TB-friendly. Convert large datasets to JSONL or Parquet for bounded preview."
+TB_SAFE_EXTENSIONS = {".jsonl", ".csv", ".tsv", ".parquet", ".json"}
+JSON_NOT_TB_SAFE_WARNING = "This JSON file holds one large value. Convert large datasets to JSONL or Parquet for bounded preview."
 MetadataLoader = Callable[[Path], DatasetMetadata]
 
 

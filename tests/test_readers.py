@@ -14,9 +14,9 @@ import pyarrow.parquet as pq
 from fastapi import HTTPException
 
 from local_data_studio.server.config import MAX_COLUMNS, MAX_JSON_PREVIEW_BYTES, MAX_OFFSET_FALLBACK
+from local_data_studio.server.dataset_readers import json_reader, line_cursor, line_indexing
 from local_data_studio.server.dataset_readers import jsonl as jsonl_reader
 from local_data_studio.server.dataset_readers import line as line_reader
-from local_data_studio.server.dataset_readers import line_cursor, line_indexing
 from local_data_studio.server.dataset_readers import parquet as parquet_reader
 from local_data_studio.server.dataset_readers.common import RECENT_ROWS, encode_page_token
 from local_data_studio.server.delete_ops import delete_row_from_file
@@ -400,30 +400,31 @@ class ReaderPreviewTests(TestCase):
             self.assertEqual([1, 2, 3], page["row_ids"])
             self.assertTrue(page["has_next"])
 
-    def test_json_metadata_is_bounded_and_warns(self) -> None:
-        """Verify that json metadata is bounded and warns."""
+    def test_json_array_metadata_samples_elements(self) -> None:
+        """Infer columns from leading array elements instead of the whole document."""
         with TemporaryDirectory() as tmpdir:
             path = Path(tmpdir) / "data.json"
-            path.write_text('[{"id": 1, "name": "Ada"}]', encoding="utf-8")
+            path.write_text('[{"id": 1, "name": "Ada"}, {"id": 2, "score": 1.5}]', encoding="utf-8")
 
             metadata = load_dataset_metadata(path, use_cache=False)
 
             self.assertEqual("json", metadata.file_format)
-            self.assertEqual([{"name": "value", "type": "JSON"}], metadata.columns)
-            self.assertIsNotNone(metadata.warning)
+            self.assertEqual([{"name": "id", "type": "BIGINT"}, {"name": "name", "type": "VARCHAR"}, {"name": "score", "type": "DOUBLE"}], metadata.columns)
+            self.assertIsNone(metadata.warning)
 
-    def test_large_json_preview_returns_warning_without_parsing_file(self) -> None:
-        """Verify that large json preview returns warning without parsing file."""
+    def test_large_json_value_preview_returns_warning_without_parsing_file(self) -> None:
+        """Skip parsing a multi-line single JSON value larger than the preview budget."""
         with TemporaryDirectory() as tmpdir:
             path = Path(tmpdir) / "large.json"
-            path.write_text("[", encoding="utf-8")
-            with path.open("ab") as file:
-                file.truncate(MAX_JSON_PREVIEW_BYTES + 1)
+            path.write_text('{\n  "values": [\n' + "".join(f"    {index},\n" for index in range(200)) + "    0\n  ]\n}\n", encoding="utf-8")
 
-            page = fetch_preview_page("large.json", path, limit=1)
+            with patch.object(json_reader, "MAX_JSON_PREVIEW_BYTES", 100), patch.object(json_reader, "JSON_LAYOUT_SAMPLE_BYTES", 64):
+                metadata = load_dataset_metadata(path, use_cache=False)
+                page = fetch_preview_page("large.json", path, limit=1)
 
             self.assertEqual([], page["rows"])
             self.assertIn("warning", page)
+            self.assertIsNotNone(metadata.warning)
 
     def test_small_json_preview_is_limited(self) -> None:
         """Verify that small json preview is limited."""
@@ -511,6 +512,78 @@ class ReaderPreviewTests(TestCase):
 
             self.assertEqual(400, raised.exception.status_code)
 
+    def test_csv_quoted_newlines_stay_inside_one_row(self) -> None:
+        """Keep quoted multi-line fields in one row for preview, count, raw rows, and search."""
+        with TemporaryDirectory() as tmpdir:
+            path = Path(tmpdir) / "notes.csv"
+            path.write_text('id,note\n1,"first\nline"\n2,plain\n3,"has ""quotes""\nand ""more"""\n4,"ends with\n"\n', encoding="utf-8")
+
+            page = fetch_preview_page("notes.csv", path, limit=10)
+            count = count_rows_with_progress(path, _NoCancelControl())
+            RECENT_ROWS.clear()
+            columns, raw = fetch_raw_row(path, 3)
+            search = search_dataset("notes.csv", path, query="more", limit=5, control=_NoCancelControl())
+
+        self.assertEqual([1, 2, 3, 4], page["row_ids"])
+        self.assertEqual([["1", "first\nline"], ["2", "plain"], ["3", 'has "quotes"\nand "more"'], ["4", "ends with\n"]], page["rows"])
+        self.assertNotIn("warning", page)
+        self.assertEqual(4, count)
+        self.assertEqual((["id", "note"], ["3", 'has "quotes"\nand "more"']), (columns, raw))
+        self.assertEqual([3], search["row_ids"])
+
+    def test_csv_with_unbalanced_quotes_splits_rows_at_line_breaks(self) -> None:
+        """Fall back to one row per line, with a warning, when quotes cannot mark row ends."""
+        with TemporaryDirectory() as tmpdir:
+            path = Path(tmpdir) / "messy.csv"
+            path.write_text('id,note\n1,"spans\nlines"\n2,5" display\n3,ok\n', encoding="utf-8")
+
+            page = fetch_preview_page("messy.csv", path, limit=10)
+
+        self.assertEqual([1, 2, 3, 4], page["row_ids"])
+        self.assertIn("quote", page["warning"])
+
+    def test_json_lines_with_a_json_suffix_are_read_like_jsonl(self) -> None:
+        """Page, count, search, and fetch rows of newline-delimited JSON named ``.json``."""
+        with TemporaryDirectory() as tmpdir:
+            path = Path(tmpdir) / "rows.json"
+            path.write_text("".join(json.dumps({"id": index, "name": f"n{index}"}) + "\n" for index in range(1, 51)), encoding="utf-8")
+
+            first = fetch_preview_page("rows.json", path, limit=20)
+            second = fetch_preview_page("rows.json", path, limit=20, page_token=first["next_page_token"])
+            count = count_rows_with_progress(path, _NoCancelControl())
+            search = search_dataset("rows.json", path, query="n42", limit=5, control=_NoCancelControl())
+            RECENT_ROWS.clear()
+            _, raw = fetch_raw_row(path, 33)
+
+        self.assertEqual(list(range(1, 21)), first["row_ids"])
+        self.assertEqual(list(range(21, 41)), second["row_ids"])
+        self.assertEqual(50, count)
+        self.assertEqual([42], search["row_ids"])
+        self.assertEqual([33, "n33"], raw)
+
+    def test_json_array_pages_stream_from_byte_cursors(self) -> None:
+        """Read array pages, deep offsets, raw rows, and counts without loading the document."""
+        with TemporaryDirectory() as tmpdir:
+            path = Path(tmpdir) / "array.json"
+            elements = ",\n".join(json.dumps({"id": index, "text": "é" * (index % 3)}, ensure_ascii=False) for index in range(1, 30_001))
+            path.write_text(f"[\n{elements}\n]\n", encoding="utf-8")
+
+            first = fetch_preview_page("array.json", path, limit=3)
+            second = fetch_preview_page("array.json", path, limit=3, page_token=first["next_page_token"])
+            deep = fetch_preview_page("array.json", path, limit=2, offset=25_000)
+            count = count_rows_with_progress(path, _NoCancelControl())
+            RECENT_ROWS.clear()
+            _, raw = fetch_raw_row(path, 29_999)
+            last = fetch_preview_page("array.json", path, limit=5, offset=29_998)
+
+        self.assertEqual([[1, "é"], [2, "éé"], [3, ""]], first["rows"])
+        self.assertEqual([4, 5, 6], second["row_ids"])
+        self.assertEqual([25_001, 25_002], deep["row_ids"])
+        self.assertEqual(30_000, count)
+        self.assertEqual([29_999, "éé"], raw)
+        self.assertEqual([29_999, 30_000], last["row_ids"])
+        self.assertFalse(last["has_next"])
+
     def test_parquet_pages_continue_from_the_previous_reader(self) -> None:
         """Reuse the positioned reader for the next page instead of decoding the row group again."""
         with TemporaryDirectory() as tmpdir:
@@ -543,35 +616,16 @@ class ReaderPreviewTests(TestCase):
 
                     self.assertEqual((["id", "text"], expected), (columns, values))
 
-    def test_csv_quoted_newlines_stay_inside_one_row(self) -> None:
-        """Keep quoted multi-line fields in one row for preview, count, raw rows, and search."""
+    def test_deleting_from_json_lines_files_uses_jsonl_rows(self) -> None:
+        """Delete a row of a ``.json`` file that holds JSON Lines by its row number."""
         with TemporaryDirectory() as tmpdir:
-            path = Path(tmpdir) / "notes.csv"
-            path.write_text('id,note\n1,"first\nline"\n2,plain\n3,"has ""quotes""\nand ""more"""\n4,"ends with\n"\n', encoding="utf-8")
+            path = Path(tmpdir) / "rows.json"
+            path.write_text('{"id": 1}\n{"id": 2}\n{"id": 3}\n', encoding="utf-8")
 
-            page = fetch_preview_page("notes.csv", path, limit=10)
-            count = count_rows_with_progress(path, _NoCancelControl())
-            RECENT_ROWS.clear()
-            columns, raw = fetch_raw_row(path, 3)
-            search = search_dataset("notes.csv", path, query="more", limit=5, control=_NoCancelControl())
+            delete_row_from_file(path, 2)
+            page = fetch_preview_page("rows.json", path, limit=10)
 
-        self.assertEqual([1, 2, 3, 4], page["row_ids"])
-        self.assertEqual([["1", "first\nline"], ["2", "plain"], ["3", 'has "quotes"\nand "more"'], ["4", "ends with\n"]], page["rows"])
-        self.assertNotIn("warning", page)
-        self.assertEqual(4, count)
-        self.assertEqual((["id", "note"], ["3", 'has "quotes"\nand "more"']), (columns, raw))
-        self.assertEqual([3], search["row_ids"])
-
-    def test_csv_with_unbalanced_quotes_splits_rows_at_line_breaks(self) -> None:
-        """Fall back to one row per line, with a warning, when quotes cannot mark row ends."""
-        with TemporaryDirectory() as tmpdir:
-            path = Path(tmpdir) / "messy.csv"
-            path.write_text('id,note\n1,"spans\nlines"\n2,5" display\n3,ok\n', encoding="utf-8")
-
-            page = fetch_preview_page("messy.csv", path, limit=10)
-
-        self.assertEqual([1, 2, 3, 4], page["row_ids"])
-        self.assertIn("quote", page["warning"])
+        self.assertEqual([[1], [3]], page["rows"])
 
     def test_deleting_keeps_quoted_newlines_and_refuses_line_split_csv(self) -> None:
         """Delete CSV records by the preview's numbering, and refuse files whose rows are split at line breaks."""
