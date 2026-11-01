@@ -13,6 +13,7 @@ from ..files import resolve_data_file
 from ..jobs import JOB_STORE, JobContext, JobStore
 from ..readers import build_line_index_with_progress, count_rows_with_progress, search_dataset
 from ..sql import execute_query_guarded
+from ..transcription_service import TRANSCRIPTION_SERVICE, AudioCellReference, transcribe_cells
 from ..translation_service import TRANSLATION_SERVICE
 from .schemas import (
     AtlasQueryRequest,
@@ -24,6 +25,7 @@ from .schemas import (
     QueryRequest,
     SearchJobRequest,
     StatsJobRequest,
+    TranscriptionRequest,
     TranslationRequest,
 )
 from .services import atlas_service, compute_cached_column_stats, eda_reports_service, load_cached_result, write_cached_result
@@ -134,6 +136,36 @@ def start_stats_job(payload: StatsJobRequest, request: Request = REQUEST_DEFAULT
         return result
 
     return _job_store(request).submit("stats", _work).to_response()
+
+
+@router.post("/api/jobs/transcription")
+def start_transcription_job(payload: TranscriptionRequest, request: Request = REQUEST_DEFAULT) -> dict[str, Any]:
+    """Submit speech recognition for audio cells selected by row and pointer.
+
+    Raises:
+        HTTPException: The model is not configured or the batch is too large.
+    """
+    settings = TRANSCRIPTION_SERVICE.settings
+    try:
+        profile = settings.profile(payload.model)
+    except KeyError as exc:
+        raise HTTPException(
+            status_code=400, detail="no transcription model is configured" if not settings.models else f"unknown transcription model: {payload.model}"
+        ) from exc
+    available, reason = profile.availability()
+    if not available:
+        raise HTTPException(status_code=400, detail=reason)
+    if len(payload.items) > settings.max_batch_items:
+        raise HTTPException(status_code=400, detail=f"at most {settings.max_batch_items} audio values can be transcribed at once")
+    items = [
+        (item.id, AudioCellReference(file=item.file, column=item.column, pointer=tuple(item.pointer), row_id=item.row_id, sql=item.sql, offset=item.offset))
+        for item in payload.items
+    ]
+
+    def _work(context: JobContext) -> dict[str, Any]:
+        return transcribe_cells(items, model=profile.id, context=context)
+
+    return _job_store(request).submit("transcription", _work).to_response()
 
 
 @router.post("/api/jobs/translation")

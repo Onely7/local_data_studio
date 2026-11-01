@@ -39,6 +39,7 @@ dependencies = [
   "pyarrow>=24.0.0",
   "embedding-atlas>=0.20.0,<0.21.0", # 0.21+ requires pandas>=3, which fg-data-profiling 4.20 excludes
   "pillow>=13.0.0",
+  "av>=18.1.0", # decodes audio for transcription and Atlas; 19+ needs Python 3.12
   "qwen-vl-utils>=0.0.14",
   "sentence-transformers>=6.2.0", # EmbeddingGemma 2 requires >=6.1
   "transformers>=5.19.0", # first release with EmbeddingGemma 2
