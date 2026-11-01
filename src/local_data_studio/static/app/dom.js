@@ -22,6 +22,7 @@ export const elements = {
   jumpRow: document.getElementById("jump-row"),
   viewLabel: document.getElementById("view-label"),
   datasetMeta: document.getElementById("dataset-meta"),
+  cancelIndex: document.getElementById("cancel-index"),
   tableHead: document.querySelector("#data-table thead"),
   tableBody: document.querySelector("#data-table tbody"),
   sqlInput: document.getElementById("sql-input"),

@@ -79,11 +79,24 @@ export function isAbortError(err) {
   return err?.name === "AbortError";
 }
 
+// Structured API errors carry an object detail, such as
+// {code: "row_index_required", row, message}; plain errors return null.
+export function errorDetail(err) {
+  try {
+    const parsed = JSON.parse(err?.message || "");
+    return parsed && typeof parsed.detail === "object" ? parsed.detail : null;
+  } catch (parseErr) {
+    return null;
+  }
+}
+
 export function extractErrorMessage(err) {
   let message = err && err.message ? err.message : "Request failed";
   try {
     const parsed = JSON.parse(message);
-    if (parsed && parsed.detail) {
+    if (parsed && typeof parsed.detail === "object" && parsed.detail) {
+      message = parsed.detail.message || JSON.stringify(parsed.detail);
+    } else if (parsed && parsed.detail) {
       message = parsed.detail;
     }
   } catch (parseErr) {
