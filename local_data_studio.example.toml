@@ -24,6 +24,11 @@ reload = false
 [settings]
 allow_delete_data = false
 
+# Index rows of the opened JSONL, CSV, TSV, or JSON file in the background,
+# up to this many bytes (0 indexes whole files).
+background_index = true
+background_index_max_bytes = 17179869184
+
 eda_row_limit = 100000
 eda_cell_max_chars = 4096
 eda_nested_policy = "stringify"
