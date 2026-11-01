@@ -201,26 +201,43 @@ export function formatExpandedAudio(items) {
   return `<div class="audio-player-list">${players}${extra > 0 ? `<div class="audio-count">+${extra} more</div>` : ""}</div>`;
 }
 
-// Returns the row request, column name, pointer, and a stable key for one
-// rendered chip or player, or null when the element is outside a data cell.
+function textHash(text) {
+  let hash = 5381;
+  for (let index = 0; index < text.length; index += 1) {
+    hash = (hash * 33 + text.charCodeAt(index)) >>> 0;
+  }
+  return hash.toString(36);
+}
+
+// Returns the row request, column name, and a stable key for one audio item.
+// SQL result rows include a hash of the query, so the same offset in another
+// query never reuses a clip or transcript.
+export function audioCellTarget(rowIndex, columnIndex, pointer = []) {
+  const cell = resolveCell(rowIndex, columnIndex);
+  if (!cell) return null;
+  const request = cell.request || null;
+  const rowKey = Number.isFinite(request?.row_id)
+    ? String(request.row_id)
+    : request
+      ? `q${request.offset}:${textHash(request.sql || "")}`
+      : `i${rowIndex}`;
+  const key = `${cell.file}|${rowKey}|${cell.column}|${JSON.stringify(pointer)}`;
+  return { ...cell, request, rowIndex, columnIndex, pointer, key };
+}
+
 export function audioContext(element) {
   const row = element.closest("tr[data-index]");
   const field = element.closest("[data-col-index]");
   const rowIndex = Number(row?.dataset.index);
   const columnIndex = Number(field?.dataset.colIndex);
   if (!Number.isFinite(rowIndex) || !Number.isFinite(columnIndex)) return null;
-  const cell = resolveCell(rowIndex, columnIndex);
-  if (!cell) return null;
   let pointer = [];
   try {
     pointer = JSON.parse(element.dataset.audioPointer || "[]");
   } catch (err) {
     pointer = [];
   }
-  const request = cell.request || null;
-  const rowKey = request?.row_id ?? (request ? `q${request.offset}` : `i${rowIndex}`);
-  const key = `${cell.file}|${rowKey}|${cell.column}|${JSON.stringify(pointer)}`;
-  return { ...cell, request, rowIndex, columnIndex, pointer, key };
+  return audioCellTarget(rowIndex, columnIndex, pointer);
 }
 
 function urlInUse(url) {
@@ -357,7 +374,7 @@ export async function toggleAudioChip(button) {
     await playSafely(audio);
   } catch (err) {
     if (inline.key === key) inline.error = extractErrorMessage(err);
-    console.error(err);
+    console.warn(err);
   } finally {
     if (inline.key === key) {
       inline.loading = false;
@@ -389,7 +406,7 @@ async function loadPlayerSource(container, player, context) {
     if (players.get(key) === player) player.src = url;
   } catch (err) {
     playerErrors.set(key, extractErrorMessage(err));
-    console.error(err);
+    console.warn(err);
   } finally {
     playersLoading.delete(key);
     playerContainers(key).forEach((current) => showPlayerState(current, key));
