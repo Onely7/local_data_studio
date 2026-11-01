@@ -33,11 +33,13 @@ EXPECTED_API_OPERATIONS = {
     ("/api/jobs/query", "post"),
     ("/api/jobs/search", "post"),
     ("/api/jobs/stats", "post"),
+    ("/api/jobs/transcription", "post"),
     ("/api/jobs/translation", "post"),
     ("/api/jobs/{job_id}", "get"),
     ("/api/jobs/{job_id}/cancel", "post"),
     ("/api/llm_models", "get"),
     ("/api/nl_query", "post"),
+    ("/api/transcription_models", "get"),
     ("/api/translation_languages", "get"),
     ("/api/preview", "get"),
     ("/api/query", "post"),
@@ -60,6 +62,7 @@ STATIC_APPLICATION_MODULES = (
     "/app/images.js",
     "/app/llm.js",
     "/app/state.js",
+    "/app/transcription.js",
     "/app/translation.js",
 )
 

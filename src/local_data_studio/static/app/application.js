@@ -55,6 +55,17 @@ import {
   translationResultMarkup,
 } from "./translation.js";
 import { enhanceSelectControls } from "./selects.js";
+import {
+  bindTranscriptionControls,
+  cancelTranscriptions,
+  createColumnTranscriptionButton,
+  expandedTranscriptionButtonMarkup,
+  loadTranscriptionConfig,
+  renderTranscriptionControls,
+  renderTranscripts,
+  transcribeColumn,
+  transcribeField,
+} from "./transcription.js";
 
 function showCopiedState(button) {
   if (!button) return;
@@ -251,6 +262,7 @@ function applyRowIndexStyle(cell) {
 function renderTable() {
   renderTableContent();
   refreshAudio(elements.tableBody);
+  renderTranscripts(elements.tableBody);
 }
 
 function renderTableContent() {
@@ -359,6 +371,8 @@ function renderTableContent() {
 
     const columnTranslationButton = createColumnTranslationButton(col);
     if (columnTranslationButton) th.appendChild(columnTranslationButton);
+    const columnTranscriptionButton = createColumnTranscriptionButton(col);
+    if (columnTranscriptionButton) th.appendChild(columnTranscriptionButton);
 
     const deleteBtn = document.createElement("button");
     deleteBtn.type = "button";
@@ -424,12 +438,13 @@ function renderTableContent() {
             idx,
             value,
           );
+          const transcribeButton = expandedTranscriptionButtonMarkup(rowIndex, idx, value);
           const copyButton = `<button class="expanded-copy-btn icon-action-btn" data-copy="${encodeCopyValue(value)}" type="button" title="Copy value" aria-label="Copy value"><img src="icons/content-copy.svg" alt="" aria-hidden="true" /></button>`;
           return `
             <div class="expanded-field" data-col-index="${idx}">
               <div class="expanded-field-header">
                 <div class="expanded-label">${escapeHtml(col)}</div>
-                <div class="expanded-field-actions">${copyButton}${translateButton}${jsonButton}</div>
+                <div class="expanded-field-actions">${copyButton}${translateButton}${transcribeButton}${jsonButton}</div>
               </div>
               <div class="expanded-value"><div class="expanded-source-value">${formatExpandedCell(value)}</div>${translationResultMarkup(rowIndex, idx, true)}</div>
             </div>
@@ -1179,6 +1194,7 @@ async function selectFile(fileName) {
   state.file = fileName;
   state.loadingFile = true;
   resetAudio();
+  cancelTranscriptions();
   state.columns = [];
   state.rows = [];
   state.rowIds = [];
@@ -1833,6 +1849,12 @@ function attachEvents() {
 
   if (elements.tableHead) {
     elements.tableHead.addEventListener("click", (event) => {
+      const transcribeBtn = event.target.closest(".col-transcribe-btn");
+      if (transcribeBtn) {
+        event.stopPropagation();
+        transcribeColumn(transcribeBtn.dataset.col, renderTable);
+        return;
+      }
       const translateBtn = event.target.closest(".col-translate-btn");
       if (translateBtn) {
         event.stopPropagation();
@@ -1915,6 +1937,16 @@ function attachEvents() {
       const colIndex = Number(translateBtn.dataset.col);
       if (Number.isFinite(rowIndex) && Number.isFinite(colIndex)) {
         translateCell(rowIndex, colIndex, renderTable);
+      }
+      return;
+    }
+    const transcribeBtn = event.target.closest(".field-transcribe-btn");
+    if (transcribeBtn) {
+      event.stopPropagation();
+      const rowIndex = Number(transcribeBtn.dataset.row);
+      const colIndex = Number(transcribeBtn.dataset.col);
+      if (Number.isFinite(rowIndex) && Number.isFinite(colIndex)) {
+        transcribeField(rowIndex, colIndex, renderTable);
       }
       return;
     }
@@ -2039,6 +2071,7 @@ function attachEvents() {
     });
   }
   bindTranslationControls(renderTable);
+  bindTranscriptionControls(renderTable);
 }
 
 state.limit = Number(elements.pageSize?.value) || state.limit;
@@ -2052,20 +2085,22 @@ enhanceSelectControls();
 updateRowActions();
 loadConfig()
   .then(() =>
-    Promise.all([loadEmbedderModels(), loadLlmModels(), loadTranslationConfig()]),
+    Promise.all([loadEmbedderModels(), loadLlmModels(), loadTranslationConfig(), loadTranscriptionConfig()]),
   )
   .then(() => {
     renderTranslationControls();
+    renderTranscriptionControls();
     return loadFiles();
   })
   .catch((err) => {
     console.error(err);
-    Promise.all([loadEmbedderModels(), loadLlmModels(), loadTranslationConfig()])
+    Promise.all([loadEmbedderModels(), loadLlmModels(), loadTranslationConfig(), loadTranscriptionConfig()])
       .catch((error) => {
         console.error(error);
       })
       .finally(() => {
         renderTranslationControls();
+        renderTranscriptionControls();
         loadFiles().catch((error) => {
           console.error(error);
         });

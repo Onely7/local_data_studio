@@ -47,6 +47,7 @@ EXPECTED_STATIC_IDS = (
     "file-empty",
     "translation-model",
     "translation-language",
+    "transcription-model",
     "search-input",
     "search-btn",
     "clear-search",
@@ -161,7 +162,7 @@ class RuntimeContractTests(TestCase):
             copy_icon = client.get("/icons/content-copy.svg")
             delete_icon = client.get("/icons/delete.svg")
             send_icon = client.get("/icons/send.svg")
-            audio_icons = [client.get(f"/icons/{name}.svg") for name in ("play", "pause")]
+            audio_icons = [client.get(f"/icons/{name}.svg") for name in ("play", "pause", "transcribe")]
 
         self.assertIn('<link rel="stylesheet" href="styles.css?v=20261101-audio" />', page)
         self.assertIn('<script type="module" src="app.js?v=20261101-audio"></script>', page)

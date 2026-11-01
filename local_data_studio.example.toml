@@ -86,6 +86,31 @@ provider_options = { max_completion_tokens = 400 }
 # base_url = "http://127.0.0.1:8000/v1"
 # provider_options = { temperature = 0, extra_body = { top_k = 20 } }
 
+# Speech-to-text for audio cells. A model loads on first use and is released
+# after idle_unload_seconds. model is a directory relative to workspace_dir, an
+# absolute path, or a Hugging Face model ID. Download Qwen3-ASR with:
+#   uv run hf download Qwen/Qwen3-ASR-1.7B-hf --local-dir models/asr/Qwen/Qwen3-ASR-1.7B-hf
+[transcription]
+default_model = "qwen3-asr-1.7b"
+# Longer clips are rejected; long audio is transcribed in chunk_seconds pieces.
+max_audio_seconds = 1200
+chunk_seconds = 180
+max_batch_items = 100
+idle_unload_seconds = 600
+
+[[transcription.models]]
+id = "qwen3-asr-1.7b"
+label = "Qwen3-ASR 1.7B"
+model = "models/asr/Qwen/Qwen3-ASR-1.7B-hf"
+# device = "auto"   # "auto", "cpu", "cuda", or "cuda:N"
+# language = "ja"   # Omit to detect the language automatically.
+
+# Example: any model the transformers speech-recognition pipeline loads.
+# [[transcription.models]]
+# id = "whisper-turbo"
+# label = "Whisper large-v3 turbo"
+# model = "openai/whisper-large-v3-turbo"
+
 # Manual translation uses only the values loaded in the current Preview page.
 [translation]
 # Target language initially selected in the browser. Use a supported two-letter code.

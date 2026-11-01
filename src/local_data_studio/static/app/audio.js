@@ -9,7 +9,7 @@ import { escapeHtml, formatFileSize } from "./formatting.js";
 import { extractErrorMessage } from "./http.js";
 
 const AUDIO_SUFFIX_RE = /\.(wav|wave|mp3|flac|ogg|oga|opus|m4a|aac|aif|aiff|weba)(?:[?#].*)?$/i;
-const MAX_AUDIO_ITEMS = 4;
+export const MAX_AUDIO_ITEMS = 4;
 const MAX_AUDIO_DEPTH = 4;
 const AUDIO_URL_CACHE_LIMIT = 24;
 const SUFFIX_TYPES = {

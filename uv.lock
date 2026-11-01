@@ -2104,6 +2104,8 @@ name = "local-data-studio"
 version = "1.1.1"
 source = { editable = "." }
 dependencies = [
+    { name = "av", version = "18.1.0", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version < '3.12'" },
+    { name = "av", version = "19.0.2", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version >= '3.12'" },
     { name = "duckdb" },
     { name = "embedding-atlas" },
     { name = "fastapi" },
@@ -2139,6 +2141,7 @@ dev = [
 
 [package.metadata]
 requires-dist = [
+    { name = "av", specifier = ">=18.1.0" },
     { name = "duckdb", specifier = ">=1.4.0,<2.0.0" },
     { name = "embedding-atlas", specifier = ">=0.20.0,<0.21.0" },
     { name = "fastapi", specifier = ">=0.139,<1" },

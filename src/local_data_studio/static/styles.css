@@ -355,10 +355,9 @@ body {
   grid-column: 1 / -1;
   grid-row: 1;
   display: grid;
-  grid-template-columns: max-content minmax(130px, 170px) max-content minmax(
-      130px,
-      160px
-    );
+  grid-template-columns:
+    max-content minmax(130px, 170px) max-content minmax(130px, 160px)
+    max-content minmax(130px, 170px);
   align-items: center;
   column-gap: 8px;
   color: var(--muted);
@@ -395,6 +394,17 @@ body {
 
 .translation-controls > .select-control[data-select-id="translation-language"] {
   grid-column: 4;
+  grid-row: 1;
+}
+
+.translation-controls > label[for="transcription-model"],
+.translation-controls > label[for="transcription-model-control"] {
+  grid-column: 5;
+  grid-row: 1;
+}
+
+.translation-controls > .select-control[data-select-id="transcription-model"] {
+  grid-column: 6;
   grid-row: 1;
 }
 
@@ -700,12 +710,14 @@ th {
 }
 
 .col-delete-btn img,
-.col-translate-btn img {
+.col-translate-btn img,
+.col-transcribe-btn img {
   width: 16px;
   height: 16px;
 }
 
-.col-translate-btn {
+.col-translate-btn,
+.col-transcribe-btn {
   position: absolute;
   top: 5px;
   right: 8px;
@@ -723,14 +735,40 @@ th {
   transition: opacity 0.2s ease;
 }
 
-.col-translate-btn:disabled {
+.col-translate-btn:disabled,
+.col-transcribe-btn:disabled {
   opacity: 0.2;
   cursor: not-allowed;
 }
 
-th:hover .col-translate-btn:not(:disabled) {
+.col-translate-btn + .col-transcribe-btn {
+  right: 66px;
+}
+
+th:hover .col-translate-btn:not(:disabled),
+th:hover .col-transcribe-btn:not(:disabled) {
   opacity: 1;
   pointer-events: auto;
+}
+
+.col-transcribe-btn[aria-busy="true"] {
+  opacity: 1;
+  pointer-events: auto;
+  border-color: rgba(42, 157, 143, 0.6);
+  animation: transcription-pulse 1.4s ease-in-out infinite;
+}
+
+@keyframes transcription-pulse {
+  50% {
+    background: rgba(42, 157, 143, 0.22);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .col-transcribe-btn[aria-busy="true"] {
+    animation: none;
+    background: rgba(42, 157, 143, 0.16);
+  }
 }
 
 th:hover .col-delete-btn {
@@ -739,6 +777,7 @@ th:hover .col-delete-btn {
 }
 
 th:focus-within .col-translate-btn:not(:disabled),
+th:focus-within .col-transcribe-btn:not(:disabled),
 th:focus-within .col-delete-btn {
   opacity: 1;
   pointer-events: auto;
@@ -1051,6 +1090,100 @@ tr:hover {
   color: var(--accent);
 }
 
+.transcript-list {
+  display: grid;
+  gap: 4px;
+  max-width: 320px;
+  margin-top: 6px;
+}
+
+.transcript-item {
+  display: flex;
+  align-items: flex-start;
+  gap: 5px;
+  min-width: 0;
+  font-size: 12px;
+  line-height: 1.35;
+  color: var(--ink);
+}
+
+.transcript-item .transcript-text {
+  min-width: 0;
+  display: -webkit-box;
+  -webkit-line-clamp: 3;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+  word-break: break-word;
+}
+
+.transcript-index {
+  flex: none;
+  min-width: 16px;
+  height: 16px;
+  padding: 0 4px;
+  border-radius: 999px;
+  background: rgba(42, 157, 143, 0.14);
+  color: var(--accent-2);
+  font-size: 10px;
+  font-weight: 600;
+  line-height: 16px;
+  text-align: center;
+}
+
+.transcript-item.is-pending,
+.transcript-block.is-pending .transcript-text {
+  color: var(--muted);
+  font-style: italic;
+}
+
+.transcript-item.is-error,
+.transcript-block.is-error .transcript-text {
+  color: var(--accent);
+}
+
+.transcript-block {
+  margin-top: 6px;
+  padding-top: 6px;
+  border-top: 1px solid rgba(42, 157, 143, 0.22);
+  min-width: 0;
+}
+
+.transcript-header {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+  margin-bottom: 3px;
+}
+
+.transcript-label {
+  color: var(--accent-2);
+  font-size: 10px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+
+.transcript-language {
+  padding: 1px 6px;
+  border-radius: 999px;
+  background: rgba(30, 42, 59, 0.06);
+  color: var(--muted);
+  font-size: 10px;
+}
+
+.transcript-header .expanded-copy-btn {
+  margin-left: auto;
+}
+
+.transcript-block .transcript-text {
+  font-size: 12px;
+  line-height: 1.45;
+  color: var(--ink);
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
 .expanded-image-grid .image-count {
   width: 100%;
   height: 100px;
@@ -1155,7 +1288,8 @@ tr.expanded {
   border-color: rgba(42, 157, 143, 0.5);
 }
 
-.field-translate-btn {
+.field-translate-btn,
+.field-transcribe-btn {
   min-height: 28px;
   padding: 4px 8px;
   display: inline-flex;
@@ -1172,12 +1306,14 @@ tr.expanded {
   box-shadow: 0 2px 6px rgba(30, 42, 59, 0.1);
 }
 
-.field-translate-btn img {
+.field-translate-btn img,
+.field-transcribe-btn img {
   width: 15px;
   height: 15px;
 }
 
-.field-translate-btn:disabled {
+.field-translate-btn:disabled,
+.field-transcribe-btn:disabled {
   opacity: 0.38;
   cursor: not-allowed;
 }
@@ -2223,7 +2359,7 @@ tr.expanded {
     grid-row: 1;
     width: 100%;
     min-width: 0;
-    grid-template-columns: repeat(2, minmax(0, 1fr));
+    grid-template-columns: repeat(3, minmax(0, 1fr));
     grid-template-rows: auto auto;
     column-gap: 10px;
     row-gap: 4px;
@@ -2256,6 +2392,18 @@ tr.expanded {
   .translation-controls
     > .select-control[data-select-id="translation-language"] {
     grid-column: 2;
+    grid-row: 2;
+  }
+
+  .translation-controls > label[for="transcription-model"],
+  .translation-controls > label[for="transcription-model-control"] {
+    grid-column: 3;
+    grid-row: 1;
+  }
+
+  .translation-controls
+    > .select-control[data-select-id="transcription-model"] {
+    grid-column: 3;
     grid-row: 2;
   }
 
@@ -2315,6 +2463,19 @@ tr.expanded {
     > .select-control[data-select-id="translation-language"] {
     grid-column: 1;
     grid-row: 4;
+  }
+
+  .translation-controls > label[for="transcription-model"],
+  .translation-controls > label[for="transcription-model-control"] {
+    grid-column: 1;
+    grid-row: 5;
+    margin-top: 4px;
+  }
+
+  .translation-controls
+    > .select-control[data-select-id="transcription-model"] {
+    grid-column: 1;
+    grid-row: 6;
   }
 
   .search-controls {
@@ -2481,7 +2642,7 @@ tr.expanded {
     width: 100%;
     min-width: 0;
     grid-template-columns: minmax(0, 1fr);
-    grid-template-rows: auto auto auto auto;
+    grid-template-rows: repeat(6, auto);
     row-gap: 4px;
   }
 
@@ -2507,6 +2668,19 @@ tr.expanded {
     > .select-control[data-select-id="translation-language"] {
     grid-column: 1;
     grid-row: 4;
+  }
+
+  .translation-controls > label[for="transcription-model"],
+  .translation-controls > label[for="transcription-model-control"] {
+    grid-column: 1;
+    grid-row: 5;
+    margin-top: 4px;
+  }
+
+  .translation-controls
+    > .select-control[data-select-id="transcription-model"] {
+    grid-column: 1;
+    grid-row: 6;
   }
 
   .translation-controls .select-control,

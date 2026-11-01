@@ -134,6 +134,33 @@ class NLQueryRequest(BaseModel):
     model: str | None = Field(default=None, max_length=64)
 
 
+class TranscriptionItem(BaseModel):
+    """One audio value selected by dataset row or SQL result row."""
+
+    id: str = Field(min_length=1, max_length=128)
+    file: str = Field(min_length=1)
+    row_id: int | None = Field(default=None, ge=1)
+    sql: str | None = None
+    offset: int | None = Field(default=None, ge=0)
+    column: str = Field(min_length=1, max_length=1024)
+    pointer: list[str | int] = Field(default_factory=list, max_length=32)
+
+
+class TranscriptionRequest(BaseModel):
+    """Input for a cancellable transcription of audio cells."""
+
+    model: str | None = Field(default=None, max_length=64)
+    items: list[TranscriptionItem] = Field(min_length=1)
+
+    @model_validator(mode="after")
+    def validate_unique_item_ids(self) -> Self:
+        """Require stable one-to-one IDs for transcription result mapping."""
+        ids = [item.id for item in self.items]
+        if len(ids) != len(set(ids)):
+            raise ValueError("transcription item ids must be unique")
+        return self
+
+
 class TranslationItem(BaseModel):
     """One browser-loaded JSON value identified for translation."""
 
