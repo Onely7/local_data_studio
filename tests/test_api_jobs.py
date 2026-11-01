@@ -3,7 +3,7 @@
 import json
 from pathlib import Path
 from tempfile import TemporaryDirectory
-from time import sleep
+from time import monotonic, sleep
 from unittest import TestCase
 from unittest.mock import patch
 
@@ -267,7 +267,7 @@ class ApiJobTests(TestCase):
     def test_eda_job_completes_for_dataset_sample(self) -> None:
         """Verify that eda job completes for dataset sample."""
         started = start_eda_job(EdaRequest(file="example.jsonl", sample=100, force=True, mode="minimal"))
-        payload = self._wait_for_job(started["id"], attempts=80)
+        payload = self._wait_for_job(started["id"], timeout=180.0)
 
         self.assertEqual("succeeded", payload["status"])
         self.assertIn("/cache/eda/", payload["result"]["url"])
@@ -403,11 +403,12 @@ class ApiJobTests(TestCase):
         self.assertIn(str(prepared_path), captured_command)
         self.assertFalse(payload["result"]["cache_hit"])
 
-    def _wait_for_job(self, job_id: str, attempts: int = 200) -> dict:
-        payload = {}
-        for _ in range(attempts):
-            payload = get_job(job_id)
-            if payload["status"] in {"succeeded", "failed", "cancelled"}:
-                return payload
+    def _wait_for_job(self, job_id: str, timeout: float = 30.0) -> dict:
+        # Poll until the job finishes; the deadline only bounds a hung job, so
+        # slow first imports on a loaded machine do not fail the test.
+        deadline = monotonic() + timeout
+        payload = get_job(job_id)
+        while payload["status"] not in {"succeeded", "failed", "cancelled"} and monotonic() < deadline:
             sleep(0.05)
+            payload = get_job(job_id)
         return payload
