@@ -309,66 +309,6 @@ function renderTableContent() {
     name.textContent = col;
     wrapper.appendChild(name);
 
-    const stats = state.columnStats[col];
-    if (stats) {
-      if (stats.label) {
-        const meta = document.createElement("div");
-        meta.className = "col-meta";
-        meta.textContent = stats.label;
-        wrapper.appendChild(meta);
-      }
-
-      if (Array.isArray(stats.bins) && stats.bins.length) {
-        const sparkline = document.createElement("div");
-        sparkline.className = "sparkline";
-        if (stats.kind) {
-          sparkline.dataset.kind = stats.kind;
-        }
-        sparkline.style.gridTemplateColumns = `repeat(${stats.bins.length}, minmax(8px, 1fr))`;
-        const max = Math.max(...stats.bins, 1);
-        stats.bins.forEach((count) => {
-          const bar = document.createElement("span");
-          const height = Math.max(15, Math.round((count / max) * 100));
-          bar.style.height = `${height}%`;
-          sparkline.appendChild(bar);
-        });
-        wrapper.appendChild(sparkline);
-
-        if (
-          Array.isArray(stats.labels) &&
-          stats.labels.length === stats.bins.length
-        ) {
-          const labels = document.createElement("div");
-          labels.className = "sparkline-labels";
-          labels.style.gridTemplateColumns = `repeat(${stats.labels.length}, minmax(8px, 1fr))`;
-          stats.labels.forEach((label) => {
-            const span = document.createElement("span");
-            span.textContent = label;
-            span.title = label;
-            labels.appendChild(span);
-          });
-          wrapper.appendChild(labels);
-        }
-      }
-
-      if (stats.axis) {
-        const axis = document.createElement("div");
-        axis.className = "sparkline-axis";
-        const left = document.createElement("span");
-        left.textContent = stats.axis.left;
-        const right = document.createElement("span");
-        right.textContent = stats.axis.right;
-        axis.appendChild(left);
-        axis.appendChild(right);
-        wrapper.appendChild(axis);
-      } else if (stats.note) {
-        const axis = document.createElement("div");
-        axis.className = "sparkline-axis center";
-        axis.textContent = stats.note;
-        wrapper.appendChild(axis);
-      }
-    }
-
     th.appendChild(wrapper);
 
     const columnTranslationButton = createColumnTranslationButton(col);
@@ -1270,7 +1210,7 @@ async function loadEmbedderModels() {
 }
 
 async function selectFile(fileName) {
-  ["countJobId", "statsJobId", "searchJobId", "queryJobId", "edaJobId", "atlasJobId", "indexJobId"].forEach(cancelTrackedJob);
+  ["countJobId", "searchJobId", "queryJobId", "edaJobId", "atlasJobId", "indexJobId"].forEach(cancelTrackedJob);
   clearDatasetStatus();
   showIndexCancel(false);
   state.file = fileName;
@@ -1293,7 +1233,6 @@ async function selectFile(fileName) {
   state.rowCount = null;
   state.datasetWarning = "";
   state.expandedRowIndex = null;
-  state.columnStats = {};
   state.selectedRowIndex = null;
   state.selectedRowId = null;
   resetRowInspectorRaw();
@@ -1302,7 +1241,6 @@ async function selectFile(fileName) {
   state.hiddenTableColumns = new Set();
   state.hiddenColumns = new Set();
   state.countJobId = null;
-  state.statsJobId = null;
   state.searchJobId = null;
   state.queryJobId = null;
   state.edaJobId = null;
@@ -1365,21 +1303,6 @@ async function loadSchema() {
   renderDatasetInfo();
   renderColumnFocus(null);
   renderMeta();
-}
-
-async function loadColumnStats() {
-  if (!state.file) return;
-  const fileAtStart = state.file;
-  const job = await startJob("stats", { file: state.file });
-  state.statsJobId = job.id;
-  const data = await waitForJob(job.id);
-  if (state.file !== fileAtStart || state.statsJobId !== job.id) return;
-  const stats = data.columns || [];
-  state.columnStats = stats.reduce((acc, item) => {
-    acc[item.name] = item;
-    return acc;
-  }, {});
-  renderTable();
 }
 
 async function loadPreview() {
