@@ -74,6 +74,29 @@ def audio_source_bytes(
     return path.read_bytes()
 
 
+def probe_audio_duration(data: bytes) -> float | None:
+    """Check that bytes hold a decodable audio stream and return its duration.
+
+    Only container headers are read, so this is cheap enough to run on every
+    row before embedding.
+
+    Raises:
+        AudioDecodeError: The bytes are not a container with an audio stream.
+    """
+    import av  # noqa: PLC0415
+
+    try:
+        with av.open(io.BytesIO(data), mode="r") as container:
+            if not container.streams.audio:
+                raise AudioDecodeError("the file has no audio stream")
+            stream = container.streams.audio[0]
+            if stream.duration is not None and stream.time_base is not None:
+                return float(stream.duration * stream.time_base)
+            return container.duration / av.time_base if container.duration is not None else None
+    except av.error.FFmpegError as exc:
+        raise AudioDecodeError(f"failed to decode audio: {exc}") from exc
+
+
 def decode_audio_waveform(
     data: bytes,
     *,

@@ -25,7 +25,7 @@ CONFIG_FILES = (
 WEIGHT_FILES = ("model.safetensors", "model.safetensors.index.json", "pytorch_model.bin")
 MAX_CONFIG_BYTES = 2 * 1024 * 1024
 DEFAULT_PROMPT_PREVIEW_CHARS = 240
-CAPABILITY_SCHEMA_VERSION = 3
+CAPABILITY_SCHEMA_VERSION = 4
 
 
 @dataclass(frozen=True, slots=True)
@@ -325,11 +325,11 @@ def _transformers_analysis(
                 "AutoModel can load the backbone, but the saved embedding pipeline cannot be reproduced safely.",
             )
         adapter = "auto-pooling-multimodal" if multimodal and "image" in modalities else "auto-pooling"
-        if adapter == "auto-pooling":
-            # This adapter tokenizes text only, so a multimodal checkpoint such
-            # as EmbeddingGemma 2 offers its image path through Sentence
-            # Transformers instead.
-            modalities = tuple(modality for modality in modalities if modality == "text")
+        # The auto-pooling adapter tokenizes text only and the multimodal one
+        # adds images, so a checkpoint such as EmbeddingGemma 2 offers its
+        # image and audio paths through Sentence Transformers instead.
+        supported = ("text", "image") if adapter == "auto-pooling-multimodal" else ("text",)
+        modalities = tuple(modality for modality in modalities if modality in supported)
     return BackendCapability("direct", True, modalities, "AutoModel, input processing, and embedding post-processing are supported.", adapter)
 
 

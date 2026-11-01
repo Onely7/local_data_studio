@@ -8,7 +8,9 @@ from collections.abc import Sequence
 from pathlib import Path
 from typing import Any
 
-from ..config import ATLAS_TEXT_MAX_CHARS
+from ..audio_decode import AudioDecodeError, audio_source_bytes, probe_audio_duration
+from ..audio_values import audio_mime_from_bytes, audio_mime_from_path
+from ..config import ATLAS_TEXT_MAX_CHARS, FILE_SERVE_ROOTS
 from .contracts import ATLAS_EMBED_INPUT_COLUMN, AtlasModality
 from .image_values import image_value_to_bytes
 from .prompts import CompiledPromptTemplate, PromptedEmbeddingValue
@@ -41,11 +43,12 @@ class _TextProjectionSequence(Sequence[Any]):
         return PromptedEmbeddingValue(text_for_embedding(row[self._column]), self._prefix or "")
 
 
-class _ImageSpoolSequence(Sequence[Any]):
-    """Index image payloads stored in one temporary file.
+class _SpoolSequence(Sequence[Any]):
+    """Index image or audio payloads stored in one temporary file.
 
-    The sequence owns its temporary directory and stream. Call ``close`` after
-    projection; repeated calls are safe.
+    Items are ``{payload_key: bytes}`` dictionaries. The sequence owns its
+    temporary directory and stream. Call ``close`` after projection; repeated
+    calls are safe.
     """
 
     def __init__(
@@ -54,12 +57,16 @@ class _ImageSpoolSequence(Sequence[Any]):
         offsets: list[tuple[int, int]],
         output_frame: Any,
         prompt_template: CompiledPromptTemplate | None,
+        *,
+        payload_key: str = "bytes",
+        file_name: str = "images.bin",
     ) -> None:
         self._temporary_dir: tempfile.TemporaryDirectory[str] | None = temporary_dir
         self._offsets = offsets
         self._output_frame = output_frame
         self._prompt_template = prompt_template
-        self._stream = (Path(temporary_dir.name) / "images.bin").open("rb")
+        self._payload_key = payload_key
+        self._stream = (Path(temporary_dir.name) / file_name).open("rb")
         self._lock = threading.Lock()
 
     def __len__(self) -> int:
@@ -71,8 +78,8 @@ class _ImageSpoolSequence(Sequence[Any]):
         offset, length = self._offsets[index]
         with self._lock:
             self._stream.seek(offset)
-            image_bytes = self._stream.read(length)
-        value: Any = {"bytes": image_bytes}
+            payload = self._stream.read(length)
+        value: Any = {self._payload_key: payload}
         if self._prompt_template is not None:
             value = PromptedEmbeddingValue(value, self._prompt_template.render(self._output_frame.iloc[index].to_dict()))
         return value
@@ -212,7 +219,76 @@ def prepare_image_projection_input(
         if not kept_indices:
             raise ValueError(f"no readable images in column {column}; first error: {first_error or 'no image values found'}")
         output_frame = data_frame.iloc[kept_indices].copy().reset_index(drop=True)
-        sequence = _ImageSpoolSequence(temporary_dir, offsets, output_frame, prompt_template)
+        sequence = _SpoolSequence(temporary_dir, offsets, output_frame, prompt_template)
+        return ProjectionInputFrame(sequence), output_frame
+    except Exception:
+        temporary_dir.cleanup()
+        raise
+
+
+AUDIO_FORMAT_NAMES = {"mpeg": "MP3", "mp4": "M4A"}
+
+
+def _audio_name(value: Any) -> str:
+    if isinstance(value, list):
+        return next((name for item in value if (name := _audio_name(item))), "")
+    reference = value.get("path") if isinstance(value, dict) else value
+    if not isinstance(reference, str) or not reference.strip() or reference.startswith("data:"):
+        return ""
+    return Path(reference.split("?", 1)[0]).name
+
+
+def audio_display_label(value: Any, data: bytes, duration: float | None) -> str:
+    """Return a short label naming an audio value's file and duration."""
+    name = _audio_name(value)
+    media_type = audio_mime_from_bytes(data) or (audio_mime_from_path(name) if name else None) or "audio/unknown"
+    subtype = media_type.split("/", 1)[1]
+    label = name or f"{AUDIO_FORMAT_NAMES.get(subtype, subtype.upper())} audio"
+    return f"{label} · {duration:.1f} s" if duration is not None else label
+
+
+def prepare_audio_projection_input(data_frame: Any, *, column: str, dataset_path: Path) -> tuple[ProjectionInputFrame, Any]:
+    """Spool readable audio bytes and return aligned lazy encoder inputs.
+
+    Rows whose audio cannot be read or probed are excluded from both returned
+    objects. In the display frame the audio column holds a file and duration
+    label, because Atlas cannot play every format and audio bytes would bloat
+    its dataset. The returned projection input owns a temporary file and must
+    be closed.
+
+    Raises:
+        ValueError: The column is unavailable or contains no readable audio.
+    """
+    try:
+        values = data_frame[column]
+    except Exception as exc:
+        raise ValueError(f"failed to read audio column {column}: {exc}") from exc
+    temporary_dir = tempfile.TemporaryDirectory(prefix="local-data-studio-atlas-audio-")
+    spool_path = Path(temporary_dir.name) / "audio.bin"
+    kept_indices: list[int] = []
+    offsets: list[tuple[int, int]] = []
+    labels: list[str] = []
+    first_error: str | None = None
+    try:
+        with spool_path.open("wb") as spool:
+            for index, value in enumerate(values):
+                try:
+                    data = audio_source_bytes(value, dataset_path=dataset_path, allowed_roots=FILE_SERVE_ROOTS)
+                    duration = probe_audio_duration(data)
+                except AudioDecodeError as exc:
+                    if first_error is None:
+                        first_error = f"row {index + 1}: {exc}"
+                    continue
+                offset = spool.tell()
+                spool.write(data)
+                offsets.append((offset, len(data)))
+                kept_indices.append(index)
+                labels.append(audio_display_label(value, data, duration))
+        if not kept_indices:
+            raise ValueError(f"no readable audio in column {column}; first error: {first_error or 'no audio values found'}")
+        output_frame = data_frame.iloc[kept_indices].copy().reset_index(drop=True)
+        output_frame[column] = labels
+        sequence = _SpoolSequence(temporary_dir, offsets, output_frame, None, payload_key="audio_bytes", file_name="audio.bin")
         return ProjectionInputFrame(sequence), output_frame
     except Exception:
         temporary_dir.cleanup()
@@ -231,6 +307,9 @@ def prepare_projection_input(
     if modality == "text":
         values = _TextProjectionSequence(data_frame, column, prompt_template)
         return ProjectionInputFrame(values), ATLAS_EMBED_INPUT_COLUMN, data_frame
+    if modality == "audio":
+        frame, output = prepare_audio_projection_input(data_frame, column=column, dataset_path=dataset_path)
+        return frame, ATLAS_EMBED_INPUT_COLUMN, output
     if modality != "image":
         return data_frame, column, data_frame
     frame, output = prepare_image_projection_input(

@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 from collections import defaultdict
 from dataclasses import dataclass
 from io import BytesIO
@@ -13,6 +14,7 @@ from embedding_atlas.embedding import create_embedder
 from PIL import Image
 from sentence_transformers import SentenceTransformer
 
+from ..audio_decode import SPEECH_SAMPLING_RATE, decode_audio_waveform
 from ..embedder_capabilities import BackendName, analyze_model_capabilities, transformers_pooling_spec
 from .contracts import AtlasModality, AtlasOptions
 from .prompts import PromptedEmbeddingValue
@@ -20,6 +22,11 @@ from .prompts import PromptedEmbeddingValue
 # Sentence Transformers leaves max_seq_length unbounded for checkpoints whose
 # tokenizer reports no limit; 8,192 tokens is EmbeddingGemma 2's context.
 SENTENCE_TRANSFORMER_MAX_SEQ_LENGTH = 8_192
+# EmbeddingGemma 2 turns one second of audio into 25 tokens, so 300 seconds
+# fit its 8,192-token context; longer clips are embedded from their start.
+ATLAS_AUDIO_MAX_SECONDS = 300
+# Audio sequences are long, so Sentence Transformers encodes a few at a time.
+AUDIO_ENCODE_BATCH_SIZE = 4
 
 
 @dataclass(frozen=True, slots=True)
@@ -75,7 +82,28 @@ def load_sentence_transformer_model(model_path: Path, options: AtlasOptions) -> 
     return model
 
 
-def _sentence_transformer_input(value: Any, modality: AtlasModality, *, multimodal: bool) -> Any:
+def audio_sampling_rate(model_path: Path) -> int:
+    """Return the sampling rate a model's audio feature extractor expects."""
+    for name in ("preprocessor_config.json", "processor_config.json"):
+        try:
+            config = json.loads((model_path / name).read_text(encoding="utf-8"))
+        except (OSError, ValueError):
+            continue
+        sections = [config, config.get("feature_extractor")] if isinstance(config, dict) else []
+        for section in sections:
+            rate = section.get("sampling_rate") if isinstance(section, dict) else None
+            if isinstance(rate, int) and rate > 0:
+                return rate
+    return SPEECH_SAMPLING_RATE
+
+
+def _sentence_transformer_input(value: Any, modality: AtlasModality, *, multimodal: bool, sampling_rate: int = SPEECH_SAMPLING_RATE) -> Any:
+    if modality == "audio":
+        # Resample here: Sentence Transformers does not check the rate, and one
+        # batch may hold only one rate.
+        data = value.get("audio_bytes") if isinstance(value, dict) else value
+        waveform = decode_audio_waveform(bytes(data), sampling_rate=sampling_rate, max_seconds=ATLAS_AUDIO_MAX_SECONDS, truncate=True)
+        return {"array": waveform, "sampling_rate": sampling_rate}
     if modality != "image":
         # Multimodal models treat strings that look like media paths or URLs
         # as media, so text rows are marked as text explicitly.
@@ -92,6 +120,7 @@ def create_sentence_transformer_embedder(modality: AtlasModality, model_path: Pa
     sentence_model = load_sentence_transformer_model(model_path, options)
     capability = analyze_model_capabilities(model_path, allow_remote_code=options.trust_remote_code).sentence_transformers
     multimodal = any(modality != "text" for modality in capability.modalities)
+    sampling_rate = audio_sampling_rate(model_path) if modality == "audio" else SPEECH_SAMPLING_RATE
 
     async def embed(batch: list[Any], *, model: str | None, embedder_args: dict) -> np.ndarray:  # noqa: ARG001
         """Encode prompt groups and restore their original row ordering."""
@@ -101,7 +130,9 @@ def create_sentence_transformer_embedder(modality: AtlasModality, model_path: Pa
                 value, prompt = item.value, item.prompt
             else:
                 value, prompt = item, options.prompt
-            grouped[prompt].append((index, _sentence_transformer_input(value, modality, multimodal=multimodal)))
+            if modality == "audio":
+                prompt = None
+            grouped[prompt].append((index, _sentence_transformer_input(value, modality, multimodal=multimodal, sampling_rate=sampling_rate)))
         ordered: list[np.ndarray | None] = [None] * len(batch)
         for prompt, entries in grouped.items():
             values = [value for _, value in entries]
@@ -111,6 +142,10 @@ def create_sentence_transformer_embedder(modality: AtlasModality, model_path: Pa
             }
             if prompt is not None:
                 kwargs["prompt"] = prompt
+            if modality == "audio":
+                # Without max_length the feature extractor cuts audio at 30 seconds.
+                kwargs["batch_size"] = min(len(values), AUDIO_ENCODE_BATCH_SIZE)
+                kwargs["processing_kwargs"] = {"audio": {"max_length": max((len(value["array"]) for value in values), default=1)}}
             encoded = np.asarray(sentence_model.encode(values, **kwargs), dtype=np.float32)
             for (index, _), vector in zip(entries, encoded):
                 ordered[index] = vector

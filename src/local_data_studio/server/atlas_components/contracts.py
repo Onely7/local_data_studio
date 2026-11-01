@@ -17,7 +17,7 @@ from ..config import (
     ATLAS_UMAP_PROJECTION_MODE,
 )
 
-AtlasModality = Literal["text", "image", "vector"]
+AtlasModality = Literal["text", "image", "audio", "vector"]
 AtlasProjectionMethod = Literal["umap", "tsne", "pca"]
 AtlasEmbeddingDtype = Literal["float16", "float32"]
 AtlasUmapProjectionMode = Literal["full", "anchor_transform"]

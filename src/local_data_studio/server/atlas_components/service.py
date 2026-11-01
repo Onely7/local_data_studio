@@ -9,6 +9,7 @@ from typing import Any
 from fastapi import HTTPException
 
 from .. import embedder_models
+from ..audio_values import is_audio_like_value
 from ..config import ATLAS_LARGE_DATASET_SAMPLE, ATLAS_TRUST_REMOTE_CODE, EMBEDDER_MODELS_DIR
 from ..db import open_connection, quote_ident
 from ..deleted_rows import deleted_row_ids_for
@@ -56,10 +57,12 @@ def infer_atlas_modality(
     sql: str | None = None,
     deleted_ids: list[int] | None = None,
 ) -> AtlasModality:
-    """Infer whether Atlas should treat the selected column as image or text."""
+    """Infer whether Atlas should treat the selected column as image, audio, or text."""
     values = _sample_column_values(path, column, sql, deleted_ids or [])
     if any(is_image_like_value(value) for value in values):
         return "image"
+    if any(is_audio_like_value(value) for value in values):
+        return "audio"
     return "image" if any(hint in column.lower() for hint in IMAGE_COLUMN_HINTS) else "text"
 
 
@@ -142,7 +145,8 @@ def _run_reserved_atlas_visualization(
     context.update(progress=0.02, message="Inspecting selected column")
     modality = infer_atlas_modality(path, selected_column, guarded_sql, deleted_ids)
     selected_backend = _resolve_backend(backend, modality, capabilities, base_options)
-    normalized_prompt = prompt if prompt and prompt.strip() else None
+    # Prompts are text prefixes; audio inputs are embedded without one.
+    normalized_prompt = prompt if prompt and prompt.strip() and modality != "audio" else None
     if normalized_prompt and selected_backend != "sentence-transformers":
         raise HTTPException(status_code=400, detail="prompt is supported only by the sentence-transformers backend")
     options = replace(
