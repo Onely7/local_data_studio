@@ -162,12 +162,31 @@ Checkpoints created while building an index are stored in transactions that grou
 CSV and TSV schema inference, preview, search, and Raw display use a shared parser that supports long fields.
 A parser reads text from a file and converts it into values the application can use.
 
+Full scans, such as row counting, index building, and search, read the file in 16 MiB blocks through `dataset_readers/line_cursor.py`.
+NumPy locates newlines and blank lines in each block, so no Python code runs once per line.
+Because NumPy releases the GIL, up to four blocks are analyzed ahead on worker threads while the next block is read.
+Blank lines are skipped and never receive row IDs.
+
+Search compares the query with each block after folding ASCII case, then decodes and parses only the candidate lines.
+Queries containing non-ASCII letters that have case compare every decoded line instead.
+Search responses include a `next_page_token` that resumes after the last match.
+
+A jump to an offset scans from the nearest checkpoint and records every checkpoint it passes.
+One jump may skip at most `MAX_OFFSET_SCAN_ROWS` rows unless less than `MAX_OFFSET_SCAN_BYTES` remains to be read.
+A preview page stops reading after `PREVIEW_PAGE_MAX_BYTES` of source data.
+
 ### Parquet
 
 Parquet schemas are read from metadata stored in the footer at the end of the file without scanning the entire file contents.
 
-Preview and Raw display use record batches, which group a limited number of rows, to control how much data is loaded at once.
-Offset-compatibility handling also uses row-group metadata instead of scanning one row at a time from the beginning of the file.
+Preview and Raw display address rows by physical row number.
+DuckDB's `file_row_number` filter selects the requested range, skips row groups outside it, and decodes vector-sized slices.
+Memory therefore stays bounded even for row groups of several gigabytes.
+Files with a `file_row_number` column, or with types that DuckDB cannot read, fall back to Arrow record batches sized from the footer's average row width.
+Footer facts, including the row count and the widest average row, are cached by file size and modification time.
+
+Preview pages convert image bytes into WebP thumbnails no larger than 256 pixels on a shared thread pool, and mark them with `thumbnail=1` in the data URL media type.
+Raw rows return complete images as data URLs, which the enlarged image view loads on demand.
 
 ## Column Statistics
 
@@ -192,9 +211,15 @@ This module is responsible mainly for the following operations:
 * Validating that SQL is read-only
 * Applying DuckDB resource limits such as timeouts and memory limits
 * Supporting cooperative cancellation for background jobs
+* Materializing full-scan queries on large datasets
 
 Cooperative cancellation means that a process is not forcibly terminated externally at an arbitrary point.
 Instead, the process checks for a cancellation request at safe boundaries and exits cleanly.
+
+On datasets larger than `SYNC_OPERATION_MAX_BYTES`, queries that aggregate, sort, deduplicate, join, or use window functions run only in background jobs.
+The first request writes up to `QUERY_RESULT_MAX_ROWS` + 1 result rows to a Parquet file under `./cache/query`.
+Later pages, raw rows, query EDA, and query Atlas read that file instead of scanning the dataset again, and identical concurrent requests share one scan.
+DuckDB spills to `./cache/duckdb-spill` beyond the memory limit, reports progress through `query_progress()`, and stops after `SQL_JOB_TIMEOUT_SECONDS`.
 
 ## LLM Text Generation
 
@@ -317,6 +342,9 @@ A relation is a DuckDB object that represents tabular data processing.
 Generated reports are stored under `./cache/eda`.
 When the cache exceeds its size limit, shared capacity-management logic removes the oldest files first.
 
+setuptools 81 removed `pkg_resources`, which ydata-profiling 4.18 still imports.
+Before importing ydata-profiling, `eda.py` installs a minimal module that answers its `get_distribution(name).version` call through `importlib.metadata`.
+
 ## Embedding Atlas
 
 `src/local_data_studio/server/atlas.py` remains as a compatibility entry point for existing code.
@@ -345,8 +373,10 @@ It also creates identifying values from configuration information related to mod
 ### Sampling and Memory Usage
 
 When `ATLAS_SAMPLE` is positive, SQL filtering and deterministic row limiting are performed in DuckDB before creating a pandas DataFrame.
+When it is unset or `0` and the dataset exceeds `SYNC_OPERATION_MAX_BYTES`, `ATLAS_LARGE_DATASET_SAMPLE` rows are sampled instead of loading every row.
 
 An encoder is created only once per Atlas job and is reused across multiple batches.
+Batches are passed to the local encoder directly, without the Embedding Atlas helper that retries remote API failures with backoff.
 
 Text prompts are expanded only for the batch currently being processed.
 Images are stored in a temporary disk area that is removed automatically after processing, and only the data required for the current batch is loaded into memory.
