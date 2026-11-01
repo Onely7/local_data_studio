@@ -1,5 +1,5 @@
 version = 1
-revision = 3
+revision = 5
 requires-python = ">=3.11, <3.14"
 resolution-markers = [
     "python_full_version >= '3.13'",
@@ -1722,7 +1722,7 @@ dev = [
 [package.metadata]
 requires-dist = [
     { name = "duckdb", specifier = ">=1.4.0,<2.0.0" },
-    { name = "embedding-atlas", specifier = ">=0.20.0,<0.22.0" },
+    { name = "embedding-atlas", specifier = ">=0.20.0,<0.21.0" },
     { name = "fastapi", specifier = ">=0.139,<1" },
     { name = "httpx", specifier = ">=0.28,<1" },
     { name = "litellm", specifier = ">=1.100.4,<2" },

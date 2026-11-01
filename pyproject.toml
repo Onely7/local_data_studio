@@ -7,7 +7,7 @@ name = "local-data-studio"
 version = "1.1.1"
 description = "Local data studio for JSONL/JSON/CSV/TSV/Parquet with scalable previews, image inspection, DuckDB SQL, EDA, and Embedding Atlas"
 readme = "README.md"
-requires-python = ">=3.11,<3.14"
+requires-python = ">=3.11,<3.14" # ydata-profiling 4.18 supports Python <3.14
 license = "MIT"
 license-files = ["LICENSE"]
 authors = [
@@ -30,15 +30,15 @@ dependencies = [
   "uvicorn>=0.50.0",
   "pydantic>=2.10,<3",
   "pydantic-settings>=2.6,<3",
-  "duckdb>=1.4.0,<2.0.0",
+  "duckdb>=1.4.0,<2.0.0", # embedding-atlas 0.20 calls .arrow() on execute() results, which 2.0 removed
   "pandas>=2.2.0,<2.3.0",
   "python-dotenv",
   "python-multipart",
-  "scipy>=1.12.0,<1.17.0",
+  "scipy>=1.12.0,<1.17.0", # ydata-profiling 4.18 requires <1.17
   "scikit-learn>=1.7.0,<2",
   "pyarrow>=24.0.0",
-  "matplotlib>=3.8.0,<3.11.0",
-  "embedding-atlas>=0.20.0,<0.22.0",
+  "matplotlib>=3.8.0,<3.11.0", # ydata-profiling 4.18 requires <=3.10
+  "embedding-atlas>=0.20.0,<0.21.0", # 0.21+ requires pandas>=3, which ydata-profiling 4.18 excludes
   "pillow>=13.0.0",
   "qwen-vl-utils>=0.0.14",
   "sentence-transformers>=6.2.0", # EmbeddingGemma 2 requires >=6.1
@@ -80,7 +80,7 @@ constraint-dependencies = [
   "anyio>=4.14.2",
   "certifi>=2026.10.18",
   "cryptography>=50.0.0",
-  "filelock>=4.2.1",
+  "filelock>=4.2.1", # keeps litellm below 1.104, which requires filelock<4
   "multidict>=6.9.1",
   "setuptools>=84.1.0",
   "urllib3>=2.8.0",
