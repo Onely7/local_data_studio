@@ -38,6 +38,7 @@ from local_data_studio.app import (
 from local_data_studio.server import sql as sql_module
 from local_data_studio.server.atlas import AtlasPreparedDataset
 from local_data_studio.server.atlas_components.process import LaunchedAtlasProcess
+from local_data_studio.server.config import ATLAS_LARGE_DATASET_SAMPLE
 from local_data_studio.server.sql import load_query_dataframe_guarded
 
 
@@ -318,6 +319,36 @@ class ApiJobTests(TestCase):
         self.assertEqual("umap", payload["result"]["projection_method"])
         self.assertEqual(3, payload["result"]["row_count"])
         self.assertEqual("full", payload["result"]["umap_projection_mode"])
+
+    def test_atlas_job_samples_large_datasets_unless_a_sample_is_requested(self) -> None:
+        """Embed a bounded sample of large datasets instead of loading every row."""
+        model_path = (Path.cwd() / "models" / "embedder" / "test-text-model").resolve()
+        prepared = AtlasPreparedDataset(path=Path("prepared.parquet"), x="x", y="y", neighbors=None, cache_hit=True, row_count=3)
+        samples: list[int | None] = []
+
+        def fake_prepare(**kwargs):  # noqa: ANN003, ANN202
+            samples.append(kwargs["options"].sample)
+            return prepared
+
+        def fake_launch(command, context, runtime):  # noqa: ANN001, ARG001
+            return LaunchedAtlasProcess("http://127.0.0.1:5055/", "127.0.0.1", 5055, _FakeAtlasProcess(12346))
+
+        for large, requested, expected in ((True, None, ATLAS_LARGE_DATASET_SAMPLE), (True, 500, 500), (False, None, None)):
+            with (
+                self.subTest(large=large, requested=requested),
+                patch("local_data_studio.server.atlas_components.service.resolve_embedder_model", return_value=model_path),
+                patch("local_data_studio.server.atlas_components.service._resolve_backend", return_value="sentence-transformers"),
+                patch("local_data_studio.server.atlas_components.service.analyze_model_capabilities"),
+                patch("local_data_studio.server.atlas_components.service.is_large_dataset", return_value=large),
+                patch("local_data_studio.server.atlas_components.service.prepare_atlas_dataset", side_effect=fake_prepare),
+                patch("local_data_studio.server.atlas_components.service.start_embedding_atlas", side_effect=fake_launch),
+            ):
+                started = start_atlas_job(AtlasRequest(file="example.jsonl", column="short_description", model="test-text-model", sample=requested))
+                payload = self._wait_for_job(started["id"])
+
+                self.assertEqual("succeeded", payload["status"], payload.get("error"))
+                self.assertEqual(expected, samples[-1])
+                self.assertEqual(expected, payload["result"]["sample"])
 
     def test_atlas_query_job_passes_guarded_sql(self) -> None:
         """Verify that atlas query job passes guarded sql."""

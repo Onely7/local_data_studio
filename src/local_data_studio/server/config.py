@@ -279,3 +279,6 @@ ATLAS_EMBEDDING_DTYPE: str = SETTINGS.atlas_embedding_dtype
 ATLAS_UMAP_PROJECTION_MODE: str = SETTINGS.atlas_umap_projection_mode
 ATLAS_UMAP_ANCHOR_SAMPLE: int = SETTINGS.atlas_umap_anchor_sample
 ATLAS_TRUST_REMOTE_CODE: bool = SETTINGS.atlas_trust_remote_code
+# Unsampled Atlas jobs load every row into memory, so datasets above
+# SYNC_OPERATION_MAX_BYTES use this deterministic sample unless one is set.
+ATLAS_LARGE_DATASET_SAMPLE: int = 100_000
