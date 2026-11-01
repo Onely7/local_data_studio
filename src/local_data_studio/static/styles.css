@@ -992,12 +992,14 @@ tr:hover {
 
 .audio-player-list {
   display: grid;
+  grid-template-columns: minmax(0, 1fr);
   gap: 10px;
   min-width: 0;
 }
 
 .audio-player {
   display: grid;
+  grid-template-columns: minmax(0, 1fr);
   gap: 4px;
   min-width: 0;
 }
@@ -1038,6 +1040,7 @@ tr:hover {
 .audio-player-status {
   font-size: 11px;
   color: var(--muted);
+  overflow-wrap: anywhere;
 }
 
 .audio-player-status:empty {
