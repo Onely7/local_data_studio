@@ -72,7 +72,7 @@ def start_index_job(payload: IndexJobRequest, request: Request = REQUEST_DEFAULT
     path = resolve_data_file(payload.file)
 
     def _work(context: JobContext) -> dict[str, Any]:
-        return {"file": payload.file, **build_line_index_with_progress(path, context)}
+        return {"file": payload.file, **build_line_index_with_progress(path, context, until_row=payload.until_row)}
 
     return _job_store(request).submit("index", _work).to_response()
 

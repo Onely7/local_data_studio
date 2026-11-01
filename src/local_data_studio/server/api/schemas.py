@@ -83,7 +83,18 @@ class CountJobRequest(BaseModel):
 
 
 class IndexJobRequest(BaseModel):
-    """Input for incremental sparse-index construction."""
+    """Input for incremental sparse-index construction.
+
+    ``until_row`` stops once that one-based row is indexed; without it the
+    index reaches the end of the file.
+    """
+
+    file: str = Field(min_length=1)
+    until_row: int | None = Field(default=None, ge=1)
+
+
+class DatasetFileRequest(BaseModel):
+    """Input naming one allowlisted dataset."""
 
     file: str = Field(min_length=1)
 

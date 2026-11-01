@@ -2,6 +2,7 @@
 
 import json
 import os
+import time
 from io import BytesIO
 from pathlib import Path
 from tempfile import TemporaryDirectory
@@ -19,7 +20,8 @@ from local_data_studio.server.dataset_readers import line_cursor, line_indexing
 from local_data_studio.server.dataset_readers import parquet as parquet_reader
 from local_data_studio.server.dataset_readers.common import RECENT_ROWS, encode_page_token
 from local_data_studio.server.delete_ops import delete_row_from_file
-from local_data_studio.server.readers import count_rows_with_progress, fetch_preview_page, fetch_raw_row, load_dataset_metadata, search_dataset
+from local_data_studio.server.line_index import LineOffsetIndex
+from local_data_studio.server.readers import count_rows_with_progress, dataset_status, fetch_preview_page, fetch_raw_row, load_dataset_metadata, search_dataset
 
 
 class _NoCancelControl:
@@ -113,39 +115,24 @@ class ReaderPreviewTests(TestCase):
             self.assertEqual(first["row_count"], second["row_count"])
             self.assertTrue(second["index"]["complete"])
 
-    def test_line_index_checkpoints_are_saved_as_a_batch(self) -> None:
-        """Verify that line index checkpoints are saved as a batch."""
-
-        class FakeIndex:
-            """Test fake index behavior."""
-
-            stride = 2
-
-            def __init__(self) -> None:
-                self.batches: list[list[tuple[int, int]]] = []
-
-            def status(self) -> dict[str, int | bool | None]:
-                """Exercise status behavior."""
-                return {"complete": False, "row_count": None, "byte_count": None, "max_indexed_line": None, "max_indexed_byte": None}
-
-            def record_checkpoints(self, checkpoints: list[tuple[int, int]]) -> None:
-                """Exercise record checkpoints behavior."""
-                self.batches.append(list(checkpoints))
-
-            def mark_complete(self, *, row_count: int, byte_count: int) -> None:
-                """Exercise mark complete behavior."""
-                return None
-
+    def test_row_index_scan_resumes_where_it_stopped(self) -> None:
+        """Index up to a row, then continue from the saved position to the end."""
         with TemporaryDirectory() as tmpdir:
             path = Path(tmpdir) / "data.jsonl"
-            path.write_text("".join(f'{{"id": {index}}}\n' for index in range(10)), encoding="utf-8")
-            fake_index = FakeIndex()
-            with patch.object(line_indexing, "LineOffsetIndex", return_value=fake_index):
-                result = line_reader.build_line_index_with_progress(path, _NoCancelControl())
+            path.write_text("".join(f'{{"id": {index}}}\n' for index in range(1, 1_001)), encoding="utf-8")
+            with patch.object(line_cursor, "LINE_SCAN_BLOCK_BYTES", 512):
+                partial = line_reader.build_line_index_with_progress(path, _NoCancelControl(), until_row=300)
+                saved = LineOffsetIndex(path).progress()
+                with patch.object(line_indexing, "iter_line_blocks", wraps=line_cursor.iter_line_blocks) as scan:
+                    full = line_reader.build_line_index_with_progress(path, _NoCancelControl())
 
-            self.assertEqual(10, result["row_count"])
-            self.assertEqual(1, len(fake_index.batches))
-            self.assertEqual([2, 4, 6, 8, 10], [line_number for line_number, _ in fake_index.batches[0]])
+            self.assertFalse(partial["complete"])
+            self.assertGreaterEqual(partial["indexed_rows"], 300)
+            self.assertLess(partial["indexed_rows"], 1_000)
+            self.assertIsNotNone(saved)
+            self.assertEqual((saved.next_byte, saved.next_row), (scan.call_args.kwargs["start_offset"], scan.call_args.kwargs["first_row"]))
+            self.assertEqual(1_000, full["row_count"])
+            self.assertTrue(full["complete"])
 
     def test_parquet_rows_are_addressed_by_physical_row_number(self) -> None:
         """Read any Parquet page directly, across row groups and beyond the offset fallback."""
@@ -370,11 +357,12 @@ class ReaderPreviewTests(TestCase):
             with patch.object(line_cursor, "MAX_OFFSET_SCAN_ROWS", 5_000), patch.object(line_cursor, "MAX_OFFSET_SCAN_BYTES", 1_000):
                 with self.assertRaises(HTTPException) as raised:
                     fetch_preview_page("data.jsonl", path, limit=1, offset=24_000)
-                line_reader.build_line_index_with_progress(path, _NoCancelControl())
+                line_reader.build_line_index_with_progress(path, _NoCancelControl(), until_row=24_001)
                 far = fetch_preview_page("data.jsonl", path, limit=1, offset=24_000)
                 columns, raw = fetch_raw_row(path, 24_500)
 
-            self.assertEqual(400, raised.exception.status_code)
+            self.assertEqual(409, raised.exception.status_code)
+            self.assertEqual({"code": "row_index_required", "row": 24_001}, {key: raised.exception.detail[key] for key in ("code", "row")})
             self.assertEqual([[24_001]], far["rows"])
             self.assertEqual([24_001], far["row_ids"])
             self.assertEqual((["value"], [24_500]), (columns, raw))
@@ -600,3 +588,92 @@ class ReaderPreviewTests(TestCase):
 
         self.assertEqual([["1", "first\nline"], ["3", "third\nline"]], page["rows"])
         self.assertEqual(400, raised.exception.status_code)
+
+
+class BackgroundIndexTests(TestCase):
+    """Test background row indexing and dataset status."""
+
+    def setUp(self) -> None:
+        """Stop background scans after each test."""
+        self.addCleanup(line_indexing.shutdown_index_builders)
+
+    def _wait_until_idle(self, path: Path) -> None:
+        builder = line_indexing.index_builder(path)
+        deadline = time.monotonic() + 10
+        while builder.snapshot().running and time.monotonic() < deadline:
+            time.sleep(0.01)
+
+    def test_background_index_stops_at_its_byte_budget(self) -> None:
+        """Index only the configured prefix and estimate the remaining rows."""
+        with TemporaryDirectory() as tmpdir:
+            path = Path(tmpdir) / "data.jsonl"
+            path.write_text("".join(json.dumps({"id": index}) + "\n" for index in range(1, 5_001)), encoding="utf-8")
+            with (
+                patch.object(line_cursor, "LINE_SCAN_BLOCK_BYTES", 4_096),
+                patch.object(line_indexing, "BACKGROUND_INDEX", True),
+                patch.object(line_indexing, "BACKGROUND_INDEX_MAX_BYTES", 20_000),
+            ):
+                started = line_indexing.start_background_index(path)
+                self._wait_until_idle(path)
+                status = dataset_status("data.jsonl", path)
+
+            self.assertTrue(started)
+            self.assertFalse(status["indexing"])
+            self.assertTrue(status["background"])
+            self.assertFalse(status["complete"])
+            self.assertIsNone(status["row_count"])
+            self.assertGreaterEqual(status["indexed_bytes"], 20_000)
+            self.assertLess(status["indexed_bytes"], path.stat().st_size)
+            self.assertAlmostEqual(5_000, status["estimated_row_count"], delta=500)
+
+    def test_background_index_counts_files_within_its_budget(self) -> None:
+        """Report an exact row count once the background scan reaches the end."""
+        with TemporaryDirectory() as tmpdir:
+            path = Path(tmpdir) / "data.csv"
+            path.write_text("id\n" + "".join(f"{index}\n" for index in range(1, 101)), encoding="utf-8")
+            with patch.object(line_indexing, "BACKGROUND_INDEX", True), patch.object(line_indexing, "BACKGROUND_INDEX_MAX_BYTES", 0):
+                line_indexing.start_background_index(path)
+                self._wait_until_idle(path)
+                status = dataset_status("data.csv", path, deleted_ids=[3])
+
+            self.assertTrue(status["complete"])
+            self.assertEqual(99, status["row_count"])
+
+    def test_background_index_can_be_turned_off(self) -> None:
+        """Leave datasets unindexed when the setting is off."""
+        with TemporaryDirectory() as tmpdir:
+            path = Path(tmpdir) / "data.jsonl"
+            path.write_text('{"id": 1}\n', encoding="utf-8")
+            with patch.object(line_indexing, "BACKGROUND_INDEX", False):
+                started = line_indexing.start_background_index(path)
+                status = dataset_status("data.jsonl", path)
+
+            self.assertFalse(started)
+            self.assertFalse(status["background"])
+            self.assertEqual(0, status["indexed_rows"])
+
+    def test_opening_another_dataset_releases_the_previous_background_scan(self) -> None:
+        """Keep at most one background scan, for the dataset opened last."""
+        with TemporaryDirectory() as tmpdir:
+            first = Path(tmpdir) / "first.jsonl"
+            second = Path(tmpdir) / "second.jsonl"
+            for path in (first, second):
+                path.write_text('{"id": 1}\n', encoding="utf-8")
+            with patch.object(line_indexing, "BACKGROUND_INDEX", True):
+                line_indexing.start_background_index(first)
+                line_indexing.start_background_index(second)
+
+            self.assertFalse(line_indexing.index_builder(first).snapshot().background)
+            self.assertTrue(line_indexing.index_builder(second).snapshot().background)
+
+    def test_dataset_status_reads_parquet_rows_from_the_footer(self) -> None:
+        """Report Parquet row counts immediately, minus deleted rows."""
+        with TemporaryDirectory() as tmpdir:
+            path = Path(tmpdir) / "data.parquet"
+            pq.write_table(pa.Table.from_pylist([{"id": index} for index in range(10)]), path)
+
+            status = dataset_status("data.parquet", path, deleted_ids=[1, 2])
+
+        self.assertEqual(8, status["row_count"])
+        self.assertTrue(status["complete"])
+        self.assertFalse(status["indexing"])

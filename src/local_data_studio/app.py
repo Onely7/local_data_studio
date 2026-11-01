@@ -1,10 +1,10 @@
 """FastAPI application assembly for Local Data Studio."""
 
 import asyncio
-from collections.abc import AsyncGenerator
+from collections.abc import AsyncGenerator, Awaitable, Callable
 from contextlib import asynccontextmanager
 
-from fastapi import FastAPI
+from fastapi import FastAPI, Request, Response
 
 from .server.api.analysis import column_stats, count_rows, llm_models, nl_query, run_eda, run_query, search, translation_languages
 from .server.api.analysis import router as analysis_router
@@ -62,7 +62,24 @@ from .server.api.schemas import (
 from .server.api.static import NoCacheStaticFiles, mount_static_files
 from .server.atlas_components.runtime import AtlasRuntime
 from .server.config import ATLAS_MAX_INSTANCES
-from .server.jobs import JobStore
+from .server.dataset_readers.line_indexing import shutdown_index_builders
+from .server.jobs import FOREGROUND_ACTIVITY, JobStore
+
+# Background index scans pause while these interactive reads run.
+FOREGROUND_PATHS = frozenset(
+    {
+        "/api/schema",
+        "/api/preview",
+        "/api/raw",
+        "/api/raw_row",
+        "/api/raw_media",
+        "/api/column_sample",
+        "/api/column_stats",
+        "/api/count",
+        "/api/search",
+        "/api/query",
+    }
+)
 
 
 def create_app(*, job_store: JobStore | None = None, atlas_runtime: AtlasRuntime | None = None) -> FastAPI:
@@ -82,12 +99,21 @@ def create_app(*, job_store: JobStore | None = None, atlas_runtime: AtlasRuntime
         finally:
             owned_atlas_runtime.begin_shutdown()
             owned_job_store.begin_shutdown()
+            await asyncio.to_thread(shutdown_index_builders, 5.0)
             await asyncio.to_thread(owned_job_store.wait_for_idle, 10.0)
             await asyncio.to_thread(owned_atlas_runtime.terminate_all)
             await owned_atlas_runtime.close_proxy_client()
             owned_job_store.shutdown(wait_timeout=0.0)
 
     application = FastAPI(title="Data Viewer", lifespan=lifespan)
+
+    @application.middleware("http")
+    async def track_foreground_reads(request: Request, call_next: Callable[[Request], Awaitable[Response]]) -> Response:
+        if request.url.path not in FOREGROUND_PATHS:
+            return await call_next(request)
+        with FOREGROUND_ACTIVITY:
+            return await call_next(request)
+
     application.state.job_store = owned_job_store
     application.state.atlas_runtime = owned_atlas_runtime
     application.include_router(datasets_router)

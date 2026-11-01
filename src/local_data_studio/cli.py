@@ -95,6 +95,8 @@ def configure_runtime_environment(args: argparse.Namespace) -> tuple[str, int, b
     _set_path_env("DATA_FILE", args.data_file)
     _set_path_env("CACHE_DIR", args.cache_dir)
     _set_path_env("EMBEDDER_MODELS_DIR", args.models_dir)
+    if args.background_index is not None:
+        os.environ["BACKGROUND_INDEX"] = "true" if args.background_index else "false"
     if args.file_serve_roots:
         os.environ["FILE_SERVE_ROOTS"] = ",".join(str(Path(item).expanduser()) for item in args.file_serve_roots)
 
@@ -130,6 +132,12 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--models-dir", help="Directory containing HuggingFace encoder model directories.")
     parser.add_argument("--file-serve-roots", nargs="+", help="Directories from which local image files may be served.")
     parser.add_argument("--reload", action=argparse.BooleanOptionalAction, default=None, help="Enable uvicorn reload for local development.")
+    parser.add_argument(
+        "--background-index",
+        action=argparse.BooleanOptionalAction,
+        default=None,
+        help="Index rows of the opened dataset in the background (default: on, or BACKGROUND_INDEX).",
+    )
 
     data_source = parser.add_mutually_exclusive_group()
     data_source.add_argument("--data-dir", help="Directory to search for datasets.")

@@ -33,6 +33,7 @@ from .common import (
     visible_row_count,
 )
 from .contracts import DatasetMetadata, ScanControl, SearchPage
+from .line_indexing import index_builder, is_row_indexed, row_scan
 
 
 def _create_duckdb_metadata(path: Path) -> DatasetMetadata:
@@ -147,9 +148,52 @@ def fetch_preview_page(
     return _duckdb_preview(file_name, path, limit_value, offset_value, page_token, deleted_ids or [])
 
 
-def build_line_index_with_progress(path: Path, control: ScanControl) -> dict[str, Any]:
-    """Build a sparse byte-offset index for JSONL, CSV, or TSV datasets."""
-    return line.build_line_index_with_progress(path, control)
+def build_line_index_with_progress(path: Path, control: ScanControl, *, until_row: int | None = None) -> dict[str, Any]:
+    """Extend the sparse row index to ``until_row``, or to the end of the file."""
+    return line.build_line_index_with_progress(path, control, until_row=until_row)
+
+
+def dataset_status(file_name: str, path: Path, *, deleted_ids: list[int] | None = None) -> dict[str, Any]:
+    """Return what is known about a dataset's rows without reading its rows.
+
+    ``row_count`` is exact and counts visible rows; it is ``None`` until a row
+    index reaches the end of the file. Until then ``estimated_row_count``
+    extrapolates from the indexed part. ``indexing`` reports a running scan
+    and ``background`` a registered background scan.
+    """
+    size = path.stat().st_size
+    status: dict[str, Any] = {
+        "file": file_name,
+        "format": format_name(path),
+        "size": size,
+        "row_count": None,
+        "estimated_row_count": None,
+        "indexed_rows": 0,
+        "indexed_bytes": 0,
+        "complete": False,
+        "indexing": False,
+        "background": False,
+        "error": None,
+    }
+    suffix = path.suffix.lower()
+    if suffix == ".parquet":
+        rows = parquet.count_rows(path)
+        status.update(row_count=visible_row_count(rows, deleted_ids), indexed_rows=rows, indexed_bytes=size, complete=True)
+        return status
+    if not is_row_indexed(path):
+        return status
+    snapshot = index_builder(path).snapshot()
+    progress = snapshot.progress
+    scan = row_scan(path)
+    first_offset = scan.first_offset if scan is not None else 0
+    indexed_rows = progress.next_row - 1 if progress else 0
+    indexed_bytes = max(0, progress.next_byte - first_offset) if progress else 0
+    status.update(indexing=snapshot.running, background=snapshot.background, error=snapshot.error, indexed_rows=indexed_rows, indexed_bytes=indexed_bytes)
+    if progress is not None and progress.complete and progress.row_count is not None:
+        status.update(row_count=visible_row_count(progress.row_count, deleted_ids), complete=True, indexed_bytes=max(0, size - first_offset))
+    elif indexed_bytes > 0 and indexed_rows > 0:
+        status["estimated_row_count"] = round(indexed_rows * max(1, size - first_offset) / indexed_bytes)
+    return status
 
 
 def count_rows_with_progress(path: Path, control: ScanControl, *, deleted_ids: list[int] | None = None) -> int:
@@ -158,7 +202,7 @@ def count_rows_with_progress(path: Path, control: ScanControl, *, deleted_ids: l
     if suffix == ".parquet":
         control.check_cancelled()
         return visible_row_count(parquet.count_rows(path), deleted_ids)
-    if suffix in line.LINE_DATASET_EXTENSIONS:
+    if is_row_indexed(path):
         result = line.build_line_index_with_progress(path, control)
         return visible_row_count(int(result["row_count"]), deleted_ids)
     hidden = deleted_ids or []

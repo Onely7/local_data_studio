@@ -16,6 +16,8 @@ CONFIG_FILE_ENV = "LOCAL_DATA_STUDIO_CONFIG_FILE"
 SETTINGS_ENV_KEYS: dict[str, str] = {
     "eda_row_limit": "EDA_ROW_LIMIT",
     "allow_delete_data": "ALLOW_DELETE_DATA",
+    "background_index": "BACKGROUND_INDEX",
+    "background_index_max_bytes": "BACKGROUND_INDEX_MAX_BYTES",
     "eda_cell_max_chars": "EDA_CELL_MAX_CHARS",
     "eda_nested_policy": "EDA_NESTED_POLICY",
     "eda_cache_max_bytes": "EDA_CACHE_MAX_BYTES",

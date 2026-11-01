@@ -26,6 +26,8 @@ class Settings(BaseSettings):
     embedder_models_dir: str = Field(default=str(BASE_DIR / "models" / "embedder"), validation_alias="EMBEDDER_MODELS_DIR")
     default_eda_sample: int = Field(default=5000, validation_alias="EDA_ROW_LIMIT")
     allow_delete_data: bool = Field(default=True, validation_alias="ALLOW_DELETE_DATA")
+    background_index: bool = Field(default=True, validation_alias="BACKGROUND_INDEX")
+    background_index_max_bytes: int = Field(default=16 * 1024**3, validation_alias="BACKGROUND_INDEX_MAX_BYTES")
     eda_cell_max_chars: int = Field(default=5000, validation_alias="EDA_CELL_MAX_CHARS")
     eda_nested_policy: str = Field(default="stringify", validation_alias="EDA_NESTED_POLICY")
     eda_cache_max_bytes: int = Field(default=1024 * 1024 * 1024, validation_alias="EDA_CACHE_MAX_BYTES")
@@ -81,6 +83,14 @@ class Settings(BaseSettings):
     def normalize_nested_policy(cls, value: str | None) -> str:
         """Normalize the nested-value policy to a lowercase non-empty value."""
         return (value or "stringify").strip().lower()
+
+    @field_validator("background_index_max_bytes")
+    @classmethod
+    def validate_background_index_max_bytes(cls, value: int) -> int:
+        """Accept zero for whole files or a positive background scan budget."""
+        if value >= 0:
+            return value
+        raise ValueError("BACKGROUND_INDEX_MAX_BYTES must be greater than or equal to 0")
 
     @field_validator("atlas_embedding_dtype", mode="before")
     @classmethod
@@ -267,6 +277,11 @@ COLUMN_LIMIT_WARNING: str = f"Only the first {MAX_COLUMNS} columns are returned 
 
 DEFAULT_EDA_SAMPLE: int = SETTINGS.default_eda_sample
 ALLOW_DELETE_DATA: bool = SETTINGS.allow_delete_data
+# Opening a row-oriented dataset indexes its rows in the background up to this
+# many bytes (0 for the whole file), so jumps, paging, and counts in that range
+# need no full scan later. The scan pauses while preview requests run.
+BACKGROUND_INDEX: bool = SETTINGS.background_index
+BACKGROUND_INDEX_MAX_BYTES: int = SETTINGS.background_index_max_bytes
 
 EDA_CELL_MAX_CHARS: int = SETTINGS.eda_cell_max_chars
 EDA_NESTED_POLICY: str = SETTINGS.eda_nested_policy

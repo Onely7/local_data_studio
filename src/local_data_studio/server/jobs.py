@@ -20,6 +20,34 @@ class JobCancelledError(RuntimeError):
     """Raised when a running job is cancelled by the user."""
 
 
+class ForegroundActivity:
+    """Count interactive requests in flight so background scans can yield to them."""
+
+    def __init__(self) -> None:
+        """Start with no active requests."""
+        self._lock = threading.Lock()
+        self._active = 0
+
+    def __enter__(self) -> ForegroundActivity:
+        """Mark one request as active."""
+        with self._lock:
+            self._active += 1
+        return self
+
+    def __exit__(self, *_: object) -> None:
+        """Mark the request as finished."""
+        with self._lock:
+            self._active -= 1
+
+    def busy(self) -> bool:
+        """Return whether any interactive request is running."""
+        with self._lock:
+            return self._active > 0
+
+
+FOREGROUND_ACTIVITY = ForegroundActivity()
+
+
 def _utc_now_iso() -> str:
     return datetime.now(UTC).isoformat()
 
