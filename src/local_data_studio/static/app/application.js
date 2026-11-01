@@ -457,7 +457,9 @@ function renderPagination() {
   }
   if (elements.nextPage) {
     elements.nextPage.disabled =
-      state.view === "query" ? false : !state.nextPageToken;
+      state.view === "query"
+        ? state.queryTotalRows !== null && state.offset + state.limit >= state.queryTotalRows
+        : !state.nextPageToken;
   }
   if (elements.jumpRow) {
     elements.jumpRow.disabled = !state.file || state.view === "search";
@@ -481,10 +483,15 @@ function renderMeta() {
   elements.viewLabel.textContent = state.datasetWarning ? `${mode} | Warning` : mode;
   const firstRow = state.rows.length ? previewRowNumber(0) : null;
   const lastRow = state.rows.length ? previewRowNumber(state.rows.length - 1) : null;
+  const total =
+    state.view === "query" && state.queryTotalRows !== null
+      ? ` of ${state.queryTotalRows.toLocaleString()}`
+      : "";
   const rowRange =
-    firstRow === null ? "No rows" : `Rows ${firstRow.toLocaleString()}-${lastRow.toLocaleString()}`;
+    firstRow === null ? "No rows" : `Rows ${firstRow.toLocaleString()}-${lastRow.toLocaleString()}${total}`;
+  const scanNote = state.view === "query" && state.cachedScan ? " | Cached full scan" : "";
   elements.datasetMeta.textContent = state.file
-    ? state.datasetWarning || `${columnCount} Columns | ${rowRange}`
+    ? state.datasetWarning || `${columnCount} Columns | ${rowRange}${scanNote}`
     : "";
 }
 
@@ -704,6 +711,8 @@ function applyTableData(data) {
   state.rows = data.rows || [];
   state.rowIds = data.row_ids || [];
   state.datasetWarning = data.warning || "";
+  state.queryTotalRows = Number.isFinite(data.total_rows) ? data.total_rows : null;
+  state.cachedScan = Boolean(data.cached_scan);
   state.nextPageToken = data.next_page_token || null;
   state.hasNextPage = Boolean(data.has_next);
   if (Number.isFinite(data.offset)) {
@@ -1329,6 +1338,7 @@ async function loadQuery(sql) {
   state.queryJobId = job.id;
   const isCurrent = () => state.file === fileAtStart && state.queryJobId === job.id;
   elements.viewLabel.textContent = "Running query";
+  elements.runQuery.textContent = "Cancel Query";
   try {
     const data = await waitForJob(job.id, {
       isCurrent,
@@ -1345,6 +1355,9 @@ async function loadQuery(sql) {
   } finally {
     if (state.queryJobId === job.id) {
       state.queryJobId = null;
+    }
+    if (!state.queryJobId) {
+      elements.runQuery.textContent = "Run Query";
     }
   }
 }
@@ -1421,6 +1434,12 @@ async function clearSearch() {
 }
 
 async function runQuery() {
+  if (state.queryJobId) {
+    cancelTrackedJob("queryJobId");
+    elements.runQuery.textContent = "Run Query";
+    renderMeta();
+    return;
+  }
   const sql = elements.sqlInput.value.trim();
   if (!sql) return;
   state.view = "query";

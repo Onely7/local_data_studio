@@ -14,7 +14,7 @@ from ..db import open_connection, quote_ident
 from ..deleted_rows import deleted_row_ids_for
 from ..embedder_capabilities import BackendName, ModelCapabilities, analyze_model_capabilities
 from ..jobs import JobContext
-from ..sql import configure_duckdb_limits, create_data_view, guard_select_sql_for_dataset
+from ..sql import configure_duckdb_limits, create_data_view, materialize_query_result, normalize_select_sql, requires_full_scan
 from .contracts import AtlasModality, AtlasOptions, AtlasProjectionMethod
 from .dataset import model_label, prepare_atlas_dataset
 from .images import IMAGE_COLUMN_HINTS, is_image_like_value
@@ -131,8 +131,14 @@ def _run_reserved_atlas_visualization(
         model_path,
         allow_remote_code=base_options.trust_remote_code,
     )
-    guarded_sql = guard_select_sql_for_dataset(path, sql) if sql else None
+    source = "query" if sql else "dataset"
+    guarded_sql = normalize_select_sql(sql) if sql else None
     deleted_ids = deleted_row_ids_for(path)
+    if guarded_sql and requires_full_scan(path, guarded_sql):
+        # Embed the cached full-scan result, as the SQL Console pages it, instead
+        # of scanning the large dataset again inside Atlas.
+        path = materialize_query_result(path=path, sql=guarded_sql, deleted_ids=deleted_ids, context=context)
+        guarded_sql, deleted_ids = None, []
     context.update(progress=0.02, message="Inspecting selected column")
     modality = infer_atlas_modality(path, selected_column, guarded_sql, deleted_ids)
     selected_backend = _resolve_backend(backend, modality, capabilities, base_options)
@@ -165,7 +171,6 @@ def _run_reserved_atlas_visualization(
         options=options,
         projection_columns=(prepared.x, prepared.y, prepared.neighbors),
     )
-    source = "query" if guarded_sql else "dataset"
     context.update(progress=0.96, message=f"Starting Embedding Atlas on port {options.port}")
     launched = start_embedding_atlas(command, context, runtime)
     runtime.check_open()

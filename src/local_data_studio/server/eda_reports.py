@@ -14,7 +14,7 @@ from .config import CACHE_DIR, DEFAULT_EDA_SAMPLE, EDA_CACHE_DIR, EDA_CACHE_MAX_
 from .deleted_rows import deleted_row_ids_for
 from .eda import build_eda_report, eda_cache_path, load_eda_dataframe, sanitize_eda_dataframe
 from .jobs import JobContext
-from .sql import guard_select_sql_for_dataset, load_query_dataframe_guarded
+from .sql import load_query_dataframe_guarded, normalize_select_sql
 
 QUERY_EDA_CACHE_VERSION = "query-v4"
 QUERY_EDA_HELPER_COLUMNS = frozenset({"__rowid", "rn"})
@@ -154,7 +154,7 @@ def generate_query_eda_report(
 ) -> dict[str, Any]:
     """Generate or reuse an EDA report for bounded SQL Console query results."""
     options = EdaReportOptions.from_request(sample=sample, mode=mode, force=force)
-    guarded_sql = guard_select_sql_for_dataset(path, sql)
+    guarded_sql = normalize_select_sql(sql)
     cache_path = _query_eda_cache_path(path, guarded_sql, options)
 
     if cache_path.exists() and not options.force:

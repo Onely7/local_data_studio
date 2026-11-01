@@ -39,6 +39,8 @@ export const state = {
   datasetWarning: "",
   hiddenTableColumns: new Set(),
   rowIds: [],
+  queryTotalRows: null,
+  cachedScan: false,
   hiddenColumns: new Set(),
   countJobId: null,
   statsJobId: null,

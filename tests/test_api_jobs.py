@@ -7,6 +7,8 @@ from time import sleep
 from unittest import TestCase
 from unittest.mock import patch
 
+from fastapi import HTTPException
+
 from local_data_studio.app import (
     AtlasQueryRequest,
     AtlasRequest,
@@ -33,9 +35,24 @@ from local_data_studio.app import (
     start_stats_job,
     start_translation_job,
 )
+from local_data_studio.server import sql as sql_module
 from local_data_studio.server.atlas import AtlasPreparedDataset
 from local_data_studio.server.atlas_components.process import LaunchedAtlasProcess
 from local_data_studio.server.sql import load_query_dataframe_guarded
+
+
+class _RecordingContext:
+    """Job context stand-in that records progress updates."""
+
+    def __init__(self) -> None:
+        self.updates: list[tuple[float | None, str | None]] = []
+
+    def check_cancelled(self) -> None:
+        """Never cancel."""
+
+    def update(self, *, progress: float | None = None, message: str | None = None) -> None:
+        """Record one progress update."""
+        self.updates.append((progress, message))
 
 
 class _FakeAtlasProcess:
@@ -119,6 +136,39 @@ class ApiJobTests(TestCase):
         self.assertEqual("succeeded", payload["status"])
         self.assertEqual(3, len(payload["result"]["rows"]))
         self.assertIn("columns", payload["result"])
+
+    def test_full_scan_query_on_large_dataset_is_materialized_once(self) -> None:
+        """Aggregate a large dataset in a job, page from the cached result, and refuse unscheduled scans."""
+        context = _RecordingContext()
+        sql = "SELECT label, count(*) AS n FROM data GROUP BY label ORDER BY label"
+        with TemporaryDirectory() as tmpdir:
+            path = Path(tmpdir) / "data.jsonl"
+            path.write_text("".join(json.dumps({"label": label}) + "\n" for label in "abaca"), encoding="utf-8")
+            with (
+                patch.object(sql_module, "SYNC_OPERATION_MAX_BYTES", 1),
+                patch.object(sql_module, "_materialize_worker", wraps=sql_module._materialize_worker) as worker,
+            ):
+                first = sql_module.execute_query_guarded(file_name="data.jsonl", path=path, sql=sql, limit=2, offset=0, context=context)
+                second = sql_module.execute_query_guarded(file_name="data.jsonl", path=path, sql=sql, limit=2, offset=2, context=context)
+                raw_columns, raw_values = sql_module.fetch_raw_query_row_guarded(path=path, sql=sql, offset=1)
+                frame = sql_module.load_query_dataframe_guarded(path=path, sql=sql, sample=-1, context=context)
+                with self.assertRaises(HTTPException) as raised:
+                    sql_module.execute_query_guarded(file_name="data.jsonl", path=path, sql=sql, limit=2, offset=0)
+                with patch.object(sql_module, "QUERY_RESULT_MAX_ROWS", 2):
+                    path.write_text(path.read_text(encoding="utf-8") + '{"label": "d"}\n', encoding="utf-8")
+                    truncated = sql_module.execute_query_guarded(file_name="data.jsonl", path=path, sql=sql, limit=5, offset=0, context=context)
+
+        self.assertEqual([["a", 3], ["b", 1]], first["rows"])
+        self.assertEqual([["c", 1]], second["rows"])
+        self.assertEqual(3, first["total_rows"])
+        self.assertTrue(first["cached_scan"])
+        self.assertNotIn("warning", first)
+        self.assertEqual(2, worker.call_count)
+        self.assertEqual((["label", "n"], ["b", 1]), (raw_columns, raw_values))
+        self.assertEqual(["a", "b", "c"], frame["label"].tolist())
+        self.assertEqual(400, raised.exception.status_code)
+        self.assertEqual([["a", 3], ["b", 1]], truncated["rows"])
+        self.assertIn("Only the first 2 result rows", truncated["warning"])
 
     def test_stats_job_completes(self) -> None:
         """Verify that stats job completes."""
