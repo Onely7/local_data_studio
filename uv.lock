@@ -2101,7 +2101,7 @@ wheels = [
 
 [[package]]
 name = "local-data-studio"
-version = "1.1.1"
+version = "2.0.0"
 source = { editable = "." }
 dependencies = [
     { name = "av", version = "18.1.0", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version < '3.12'" },

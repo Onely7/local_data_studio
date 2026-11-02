@@ -3,6 +3,68 @@
 Notable changes to Local Data Studio are recorded here. Release Please updates
 this file from Conventional Commits when it prepares a release pull request.
 
+## [2.0.0](https://github.com/Onely7/local_data_studio/compare/v1.1.1...v2.0.0) (2026-11-02)
+
+
+### ⚠ BREAKING CHANGES
+
+* **index:** Jumps past the row index return HTTP 409 with the detail {"code": "row_index_required", "row": ..., "message": ...} instead of HTTP 400, and build_line_index_with_progress reports indexed_rows and complete alongside row_count, which is None until the index is complete.
+* **preview:** resolve_raw_image_file is renamed to resolve_raw_media_file, and preview responses carry audio markers instead of hex strings for audio bytes.
+* **deps:** Sentence Transformers 6.2+, Transformers 5.19+, Pillow 13+, and LiteLLM 1.100.4+ are now required.
+* **sql:** guard_select_sql_for_dataset was removed; synchronous callers of execute_query_guarded still receive HTTP 400 for full scans of large datasets.
+* **preview:** image bytes in preview responses are thumbnails rather than the original bytes, and raw rows return image bytes as data URLs instead of hex strings.
+* **readers:** Parquet and search page tokens use a new format, search responses include next_page_token, and line rows more than 1M rows past a checkpoint require the row index.
+
+### Features
+
+* **atlas:** embed audio columns ([56c17ba](https://github.com/Onely7/local_data_studio/commit/56c17ba96bb07d1fcceaf36ed781673b408af1e4))
+* **atlas:** support EmbeddingGemma 2 and multimodal ST 6 models ([6d1a5ef](https://github.com/Onely7/local_data_studio/commit/6d1a5ef2400f66c98d6b7d2645c95d343857fe0d))
+* **index:** index rows in the background and resume interrupted scans ([858033f](https://github.com/Onely7/local_data_studio/commit/858033f7ba2fd24420f1af472dea8def643f9f59))
+* **json:** stream JSON arrays and read JSON Lines saved as .json ([ca7376a](https://github.com/Onely7/local_data_studio/commit/ca7376a66b0ff19d5827e35ae07822c9a53d4678))
+* **preview:** play audio in dataset cells ([6010bc8](https://github.com/Onely7/local_data_studio/commit/6010bc8d5061354e0a9ed4ed82fff83c39cc0d77))
+* **sql:** run full-scan queries on large datasets in the background ([be78154](https://github.com/Onely7/local_data_studio/commit/be78154f50f953d8de4d232a1e77b0d1e5e476da))
+* **transcription:** transcribe audio cells with a configurable speech model ([0f0b332](https://github.com/Onely7/local_data_studio/commit/0f0b33221dc52e1bcc05ce0641c5bcf0220379fd))
+* **ui:** jump to any row and page through search results ([3dd9ff9](https://github.com/Onely7/local_data_studio/commit/3dd9ff9cdbdec0bcc8b2386767982c3a00a3f739))
+* **ui:** show row totals and index far jumps with progress ([7b5389d](https://github.com/Onely7/local_data_studio/commit/7b5389d1a33a56f4f9dfe6c00a57d15577bd19c7))
+
+
+### Bug Fixes
+
+* **atlas:** sample large datasets instead of loading every row ([6ba0907](https://github.com/Onely7/local_data_studio/commit/6ba0907499ac1967249ea95c89aefd09c53b8e67))
+* **csv:** keep quoted line breaks inside one row ([fbc8f48](https://github.com/Onely7/local_data_studio/commit/fbc8f483a9bfb18b2f64af65e735ffd318767df7))
+* **preview:** key SQL result audio by query and keep player errors inside fields ([1f21ec5](https://github.com/Onely7/local_data_studio/commit/1f21ec5d169dee8e67277f334e32568957205175))
+* **readers:** scan small line files to the end instead of rejecting jumps ([ad346ef](https://github.com/Onely7/local_data_studio/commit/ad346efa6a64d5cf450e7fb310bcf5a967cda07f))
+* **ui:** keep pagination and panel buttons readable on narrow screens ([23f4ca2](https://github.com/Onely7/local_data_studio/commit/23f4ca28fa34acba254478eff6fc7397b99b8285))
+
+
+### Performance Improvements
+
+* **preview:** convert text-only pages without the thread pool ([0a2bb3c](https://github.com/Onely7/local_data_studio/commit/0a2bb3c983b02063ec64754ec1d71eeb063d1ae7))
+* **preview:** send image thumbnails instead of full image bytes ([05eabcd](https://github.com/Onely7/local_data_studio/commit/05eabcdac895c87fd8a7dbaee9f0547183c70ab6))
+* **readers:** read pages, jumps, and visible rows without rereading files ([be8e3ec](https://github.com/Onely7/local_data_studio/commit/be8e3ec7d4e99958218f444fdae46a7cdecb89ed))
+* **readers:** scan, jump, and search large datasets in bounded time ([fef4c6f](https://github.com/Onely7/local_data_studio/commit/fef4c6fcc6c195c3ada2bcfaa23926b3973bcd70))
+
+
+### Dependencies
+
+* **deps:** bump astral-sh/setup-uv in the github-actions group ([#53](https://github.com/Onely7/local_data_studio/issues/53)) ([96d74c5](https://github.com/Onely7/local_data_studio/commit/96d74c55310d95aed8b054027cf4065659b5f146))
+* remove the unused polars dependency ([d163e9e](https://github.com/Onely7/local_data_studio/commit/d163e9ec890197aa8ef7df09fba55f4f13704257))
+* replace ydata-profiling with fg-data-profiling ([ab39eca](https://github.com/Onely7/local_data_studio/commit/ab39eca11bcbb77d3023629037d38e9f0924dd68))
+* upgrade numpy, scipy, matplotlib and numba ([c4c4411](https://github.com/Onely7/local_data_studio/commit/c4c44118a9136208c15608ac6631f2bb9cbdbd83))
+* upgrade pandas to 2.3.3 ([a0d645e](https://github.com/Onely7/local_data_studio/commit/a0d645e05d1622c5764441b61ee9971aab573f87))
+
+
+### Documentation
+
+* describe audio playback, transcription, and audio embeddings ([9bcb80d](https://github.com/Onely7/local_data_studio/commit/9bcb80da8d8ee6339f3a1a0cf7963a199eafe683))
+* describe background indexing and large-file reading ([96d9924](https://github.com/Onely7/local_data_studio/commit/96d9924b68f1e549f65e97761ea840c195a2b266))
+* describe large-dataset navigation, background SQL, and EmbeddingGemma 2 ([1cde4c2](https://github.com/Onely7/local_data_studio/commit/1cde4c26bb83d2f6a262b74c708787767cdca3ac))
+
+
+### Build System
+
+* **deps:** upgrade dependencies and resolve security advisories ([1b40f87](https://github.com/Onely7/local_data_studio/commit/1b40f87cabf8837102e20375c5d134ffb9f59537))
+
 ## [1.1.1](https://github.com/Onely7/local_data_studio/compare/v1.1.0...v1.1.1) (2026-07-23)
 
 
