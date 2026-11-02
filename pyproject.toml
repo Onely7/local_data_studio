@@ -48,6 +48,7 @@ dependencies = [
   "requests>=2.33,<3",
   "httpx>=0.28,<1",
   "litellm>=1.100.4,<2",
+  "filelock>=4.2.1", # fixes the October 2026 advisories; keeps litellm below 1.104, which requires filelock<4
   "starlette>=1.3.1,<2",
 ]
 
@@ -72,14 +73,15 @@ dev = [
 [tool.uv]
 cache-dir = ".uv-cache"
 # Keep transitive dependencies at or above the releases that fix published
-# security advisories without making them direct dependencies.
+# security advisories without making them direct dependencies. These floors
+# apply only to uv.lock: a floor that installs from PyPI would miss, such as
+# filelock's, belongs in [project] dependencies instead.
 constraint-dependencies = [
   "accelerate>=1.15.0",
   "aiohttp>=3.14.4",
   "anyio>=4.14.2",
   "certifi>=2026.10.18",
   "cryptography>=50.0.0",
-  "filelock>=4.2.1", # keeps litellm below 1.104, which requires filelock<4
   "multidict>=6.9.1",
   "setuptools>=84.1.0",
   "urllib3>=2.8.0",
