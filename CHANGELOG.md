@@ -26,13 +26,13 @@ this file from Conventional Commits when it prepares a release pull request.
 * **transcription:** transcribe audio cells with a configurable speech model ([0f0b332](https://github.com/Onely7/local_data_studio/commit/0f0b33221dc52e1bcc05ce0641c5bcf0220379fd))
 * **ui:** jump to any row and page through search results ([3dd9ff9](https://github.com/Onely7/local_data_studio/commit/3dd9ff9cdbdec0bcc8b2386767982c3a00a3f739))
 * **ui:** show row totals and index far jumps with progress ([7b5389d](https://github.com/Onely7/local_data_studio/commit/7b5389d1a33a56f4f9dfe6c00a57d15577bd19c7))
+* support Python 3.14 ([7678336](https://github.com/Onely7/local_data_studio/commit/7678336d2df53ba67b331a7a69e61f585b132ded))
 
 
 ### Bug Fixes
 
 * **atlas:** sample large datasets instead of loading every row ([6ba0907](https://github.com/Onely7/local_data_studio/commit/6ba0907499ac1967249ea95c89aefd09c53b8e67))
 * **csv:** keep quoted line breaks inside one row ([fbc8f48](https://github.com/Onely7/local_data_studio/commit/fbc8f483a9bfb18b2f64af65e735ffd318767df7))
-* **preview:** key SQL result audio by query and keep player errors inside fields ([1f21ec5](https://github.com/Onely7/local_data_studio/commit/1f21ec5d169dee8e67277f334e32568957205175))
 * **readers:** scan small line files to the end instead of rejecting jumps ([ad346ef](https://github.com/Onely7/local_data_studio/commit/ad346efa6a64d5cf450e7fb310bcf5a967cda07f))
 * **ui:** keep pagination and panel buttons readable on narrow screens ([23f4ca2](https://github.com/Onely7/local_data_studio/commit/23f4ca28fa34acba254478eff6fc7397b99b8285))
 
