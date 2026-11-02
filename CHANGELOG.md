@@ -3,6 +3,13 @@
 Notable changes to Local Data Studio are recorded here. Release Please updates
 this file from Conventional Commits when it prepares a release pull request.
 
+## [2.0.1](https://github.com/Onely7/local_data_studio/compare/v2.0.0...v2.0.1) (2026-11-02)
+
+
+### Bug Fixes
+
+* **deps:** require filelock 4.2.1 for installs from PyPI ([#64](https://github.com/Onely7/local_data_studio/issues/64)) ([3fcd992](https://github.com/Onely7/local_data_studio/commit/3fcd9921ac5155d54e403e7f3649be41f95a6e6b))
+
 ## [2.0.0](https://github.com/Onely7/local_data_studio/compare/v1.1.1...v2.0.0) (2026-11-02)
 
 
